@@ -1,0 +1,311 @@
+{
+    "last_recipe": "jj",
+    "plc_ip": "192.168.0.60",
+    "plc_port": "60001",
+    "axis_uses": [
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false
+    ],
+    "valve_config": [
+        {
+            "index": 0,
+            "name": "\ucc99 1",
+            "mode": "toggle",
+            "enabled": true,
+            "order": 0
+        },
+        {
+            "index": 1,
+            "name": "\ucc99 2",
+            "mode": "toggle",
+            "enabled": true,
+            "order": 1
+        },
+        {
+            "index": 2,
+            "name": "\ucc99 3",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 2
+        },
+        {
+            "index": 3,
+            "name": "\ucc99 4 (Chuck 4)",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 3
+        },
+        {
+            "index": 4,
+            "name": "\ud761\ucc29 1",
+            "mode": "toggle",
+            "enabled": true,
+            "order": 4
+        },
+        {
+            "index": 5,
+            "name": "\ud761\ucc29 2",
+            "mode": "toggle",
+            "enabled": true,
+            "order": 5
+        },
+        {
+            "index": 6,
+            "name": "\ud761\ucc29 3 (Vac 3)",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 6
+        },
+        {
+            "index": 7,
+            "name": "\ud761\ucc29 4 (Vac 4)",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 7
+        },
+        {
+            "index": 8,
+            "name": "\ud3ec\uc2a4\uccd0 \ubc18\uc804",
+            "mode": "momentary",
+            "enabled": true,
+            "order": 8
+        },
+        {
+            "index": 9,
+            "name": "\ud3ec\uc2a4\uccd0 \ubcf5\uadc0",
+            "mode": "momentary",
+            "enabled": true,
+            "order": 9
+        },
+        {
+            "index": 10,
+            "name": "\uc2a4\uc704\ube14 \ud68c\uc804",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 10
+        },
+        {
+            "index": 11,
+            "name": "\uc2a4\uc704\ube14 \ubcf5\uadc0",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 11
+        },
+        {
+            "index": 12,
+            "name": "\ub2c8\ud37c \ucef7\ud305 1",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 12
+        },
+        {
+            "index": 13,
+            "name": "\ub2c8\ud37c \ucef7\ud305 2",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 13
+        },
+        {
+            "index": 14,
+            "name": "\ucee8\ubca0\uc774\uc5b4 \ucd9c\ub825",
+            "mode": "momentary",
+            "enabled": true,
+            "order": 14
+        },
+        {
+            "index": 15,
+            "name": "\uacf5\uae09\uae30 \ucd9c\ub825",
+            "mode": "momentary",
+            "enabled": true,
+            "order": 15
+        },
+        {
+            "index": 16,
+            "name": "\ubc38\ube0c 17",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 16
+        },
+        {
+            "index": 17,
+            "name": "\ubc38\ube0c 18",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 17
+        },
+        {
+            "index": 18,
+            "name": "\ubc38\ube0c 19",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 18
+        },
+        {
+            "index": 19,
+            "name": "\ubc38\ube0c 20",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 19
+        },
+        {
+            "index": 20,
+            "name": "\ubc38\ube0c 21",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 20
+        },
+        {
+            "index": 21,
+            "name": "\ubc38\ube0c 22",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 21
+        },
+        {
+            "index": 22,
+            "name": "\ubc38\ube0c 23",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 22
+        },
+        {
+            "index": 23,
+            "name": "\ubc38\ube0c 24",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 23
+        },
+        {
+            "index": 24,
+            "name": "\ubc38\ube0c 25",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 24
+        },
+        {
+            "index": 25,
+            "name": "\ubc38\ube0c 26",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 25
+        },
+        {
+            "index": 26,
+            "name": "\ubc38\ube0c 27",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 26
+        },
+        {
+            "index": 27,
+            "name": "\ubc38\ube0c 28",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 27
+        },
+        {
+            "index": 28,
+            "name": "\ubc38\ube0c 29",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 28
+        },
+        {
+            "index": 29,
+            "name": "\ubc38\ube0c 30",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 29
+        },
+        {
+            "index": 30,
+            "name": "\ubc38\ube0c 31",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 30
+        },
+        {
+            "index": 31,
+            "name": "\ubc38\ube0c 32",
+            "mode": "toggle",
+            "enabled": false,
+            "order": 31
+        }
+    ],
+    "io_names": {
+        "inputs": [
+            "X00 \ube44\uc0c1\uc815\uc9c0",
+            "X01",
+            "X02",
+            "X03",
+            "X04",
+            "X05",
+            "X06",
+            "X07",
+            "X08",
+            "X09",
+            "X0A",
+            "X0B",
+            "X0C",
+            "X0D",
+            "X0E",
+            "X0F",
+            "X10",
+            "X11",
+            "X12",
+            "X13",
+            "X14",
+            "X15",
+            "X16",
+            "X17",
+            "X18",
+            "X19",
+            "X1A",
+            "X1B",
+            "X1C",
+            "X1D",
+            "X1E",
+            "X1F"
+        ],
+        "outputs": [
+            "Y00",
+            "Y01",
+            "Y02",
+            "Y03",
+            "Y04",
+            "Y05",
+            "Y06",
+            "Y07",
+            "Y08",
+            "Y09",
+            "Y0A",
+            "Y0B",
+            "Y0C",
+            "Y0D \uc11c\ubcf4\uc628",
+            "Y0E",
+            "Y0F Z\ucd95 Bk",
+            "Y10",
+            "Y11",
+            "Y12",
+            "Y13",
+            "Y14",
+            "Y15",
+            "Y16",
+            "Y17",
+            "Y18",
+            "Y19",
+            "Y1A",
+            "Y1B",
+            "Y1C",
+            "Y1D",
+            "Y1E",
+            "Y1F"
+        ]
+    }
+}

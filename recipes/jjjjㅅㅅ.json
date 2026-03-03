@@ -1,0 +1,286 @@
+{
+    "version": 1.4,
+    "saved_at": "2026-02-24 16:07:58.309794",
+    "sequence": {
+        "Main": [
+            {
+                "type": "POS",
+                "name": "하강",
+                "point_name": "하강위치",
+                "axes": [
+                    true,
+                    true,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "name": "취출전진대기",
+                "time": 0.5,
+                "type": "TMR"
+            },
+            {
+                "axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "name": "취출위치 전진",
+                "point_name": "취출위치",
+                "type": "POS",
+                "active_axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "TMR",
+                "name": "척폐대기",
+                "time": 1.0
+            },
+            {
+                "name": "출력 제어",
+                "on": true,
+                "port": 0,
+                "type": "OUT"
+            },
+            {
+                "name": "후퇴대기",
+                "time": 1.0,
+                "type": "TMR"
+            },
+            {
+                "axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "name": "취출후퇴",
+                "point_name": "인발위치",
+                "type": "POS"
+            },
+            {
+                "name": "타이머",
+                "time": 1.0,
+                "type": "TMR"
+            },
+            {
+                "axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "name": "상승",
+                "point_name": "대기위치",
+                "type": "POS"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_10",
+                "port": 30,
+                "on": true
+            },
+            {
+                "type": "JMP",
+                "name": "점프_11",
+                "target_idx": 0,
+                "condition": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_12",
+                "port": 0,
+                "on": true
+            }
+        ],
+        "ㅗㅗ": [],
+        "e": [],
+        "f": [],
+        "g": [],
+        "h": [],
+        "i": [],
+        "j": [],
+        "k": [],
+        "l": []
+    },
+    "position_points": {
+        "하강위치": {
+            "coords": [
+                350.0,
+                100.0,
+                25.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ]
+        },
+        "취출위치": {
+            "coords": [
+                463.715,
+                221.801,
+                47.887,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ]
+        },
+        "대기위치": {
+            "coords": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ]
+        },
+        "인발위치": {
+            "coords": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ]
+        }
+    },
+    "mode": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+    ],
+    "view_order": [
+        "취출위치",
+        "하강위치",
+        "인발위치",
+        "대기위치"
+    ],
+    "user_modes": {
+        "34": "hhhhuh"
+    }
+}
