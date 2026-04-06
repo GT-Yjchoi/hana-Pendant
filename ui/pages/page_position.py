@@ -12,6 +12,7 @@ from widgets.glass_card import GlassCard
 from ui.widgets.valve_tile import ValvePanel
 from ui.dialogs.sequence_editor_dialog import SequenceEditorDialog
 from ui.widgets.custom_inputs import TouchComboBox
+from utils.languages import LanguageManager
 
 # =========================================================================
 # [기존 유지] 오버레이 방식 숫자 키패드
@@ -219,18 +220,20 @@ class StepHighlightDelegate(QStyledItemDelegate):
 class PagePosition(GlassCard):
     sig_sequence_changed = Signal()
 
-    def __init__(self, sequence_data=None, position_points=None, view_order_data=None, plc_client=None):
+    def __init__(self, sequence_data=None, position_points=None, view_order_data=None, mode_data=None, timer_library=None, plc_client=None):
         super().__init__("")
         if hasattr(self, 'title_label'): self.title_label.hide()
         if self.layout(): self.layout().setContentsMargins(10, 5, 10, 10)
-        
+
         self.plc_client = plc_client
         if self.plc_client:
             self.plc_client.sig_monitor_data.connect(self._update_realtime_values)
-        
+
         self.raw_sequence_ref = sequence_data if sequence_data is not None else []
         self.position_points = position_points if position_points is not None else {}
         self.view_order_data = view_order_data if view_order_data is not None else []
+        self.mode_data = mode_data if mode_data is not None else []
+        self.timer_library = timer_library if timer_library is not None else {}
         
         self.sequences = {}
         if isinstance(self.raw_sequence_ref, list): self.sequences["Main"] = self.raw_sequence_ref
@@ -244,7 +247,7 @@ class PagePosition(GlassCard):
         self.lbl_saved_vals = []
         self.lbl_speed_vals = []
         self.lbl_curr_vals = []
-        
+
         # [NEW] 축 행(Row) 숨김 제어를 위한 리스트
         self.axis_rows = []
 
@@ -333,6 +336,7 @@ class PagePosition(GlassCard):
         left_layout.addWidget(data_frame, 1)
         self.btn_teach = QPushButton("현재 위치 기억 (TEACH)"); self.btn_teach.setProperty("class", "AutoControlBtn"); self.btn_teach.setProperty("variant", "start"); self.btn_teach.setMinimumHeight(55); self.btn_teach.setCursor(Qt.PointingHandCursor); self.btn_teach.clicked.connect(self._on_teach_clicked)
         left_layout.addWidget(self.btn_teach)
+
         left_widget = QWidget(); left_widget.setLayout(left_layout)
         
         # [MIDDLE Panel]
@@ -364,14 +368,14 @@ class PagePosition(GlassCard):
         if self.point_combo.isEnabled() and self.point_combo.count() > 0:
             self.point_combo.setCurrentIndex(0)
         super().showEvent(event)
-        # 화면 보일 때마다 사용 축 확인
+        # 화면 보일 때마다 사용 축 / 런너암 버튼 확인
         QTimer.singleShot(0, self._check_axis_visibility)
 
     def _check_axis_visibility(self):
-        """PLC에서 축 사용 설정(DT50000)을 읽어 미사용 축 숨김"""
+        """PLC에서 축 사용 설정을 읽어 미사용 축 숨김"""
         if not self.plc_client or not self.plc_client.is_connected: return
         try:
-            data = self.plc_client.read_words(0x09, 50000, 1)
+            data = self.plc_client.read_words(0x09, self.plc_client.AXIS_PARAM_ADDR, 1)
             if data:
                 use_mask = data[0]
                 for i, widgets in enumerate(self.axis_rows):
@@ -405,9 +409,10 @@ class PagePosition(GlassCard):
 
     def _open_sequence_editor(self):
         dlg = SequenceEditorDialog(
-            sequence_data=self.sequences, 
+            sequence_data=self.sequences,
             position_points=self.position_points,
-            plc_client=self.plc_client, 
+            timer_library=self.timer_library,
+            plc_client=self.plc_client,
             parent=self
         )
         if dlg.exec() == QDialog.Accepted:
@@ -443,8 +448,8 @@ class PagePosition(GlassCard):
         op_status = data.get('op_status', 0) if isinstance(data, dict) else 0
         current_step = data.get('current_step', -1) if isinstance(data, dict) else -1
 
-        # op_status: 2=자동, 3=확인운전 → 시퀀스 실행 중
-        if op_status in (2, 3):
+        # op_status: 1=자동, 2=확인운전 → 시퀀스 실행 중
+        if op_status in (1, 2):
             self._highlight_step(current_step)
         else:
             self._highlight_step(-1)
@@ -490,20 +495,53 @@ class PagePosition(GlassCard):
             self._on_combo_changed(0)
             self.sig_sequence_changed.emit()
 
+    def _get_mode_name(self, idx):
+        default_names = [
+            "제품측 취출", "런너측 취출", "주행 대기", "하강 대기",
+            "주행도중개방", "복귀도중개방", "안전도어 회피", "안전도어 회피2",
+            "낙하측 반전", "주행도중 반전", "취출대기 반전", "고정측 취출",
+            "제품 형내개방", "런너 형내개방", "에젝터 연동", "언더컷 취출모드",
+            "척1 사용", "척1 감지", "척2 사용", "척2 감지",
+            "척3 사용", "척3 감지", "척4 사용", "척4 감지",
+            "흡착1 사용", "흡착1 감지", "흡착2 사용", "흡착2 감지",
+            "흡착3 사용", "흡착3 감지", "흡착4 사용", "흡착4 감지",
+            "2포인트 개방", "공정감시 모드",
+        ]
+        try:
+            from utils.mode_manager import ModeManager
+            mgr = ModeManager.instance()
+            if mgr:
+                return mgr.get_name(idx)
+        except Exception:
+            pass
+        return default_names[idx] if idx < len(default_names) else f"User Mode {idx - 33}"
+
+    def _is_point_visible(self, name):
+        """포인트의 visible_mode 조건에 따라 현재 표시 여부 반환"""
+        vm = self.position_points.get(name, {}).get("visible_mode", -1)
+        if vm < 0:
+            return True  # 항상 표시
+        if self.mode_data and vm < len(self.mode_data):
+            return bool(self.mode_data[vm])
+        return False
+
     def _sync_points_combobox(self):
         current_text = self.point_combo.currentText()
         self.point_combo.blockSignals(True)
         self.point_combo.clear()
         all_points = sorted(list(self.position_points.keys()))
-        if not all_points:
-            self.point_combo.addItem("위치 없음"); self.point_combo.setEnabled(False); self.view_order_data.clear()
+        # view_order 동기화 (실제 표시 목록 업데이트)
+        valid_custom = [n for n in self.view_order_data if n in all_points]
+        new_names = [n for n in all_points if n not in valid_custom]
+        self.view_order_data.clear(); self.view_order_data.extend(valid_custom + new_names)
+        # 모드 조건 필터링
+        visible_points = [n for n in self.view_order_data if self._is_point_visible(n)]
+        if not visible_points:
+            self.point_combo.addItem("위치 없음"); self.point_combo.setEnabled(False)
             self.point_name_btn.setText("위치 없음"); self.point_name_btn.setEnabled(False)
         else:
             self.point_name_btn.setEnabled(True)
-            valid_custom = [n for n in self.view_order_data if n in all_points]
-            new_names = [n for n in all_points if n not in valid_custom]
-            self.view_order_data.clear(); self.view_order_data.extend(valid_custom + new_names)
-            self.point_combo.setEnabled(True); self.point_combo.addItems(self.view_order_data)
+            self.point_combo.setEnabled(True); self.point_combo.addItems(visible_points)
             idx = self.point_combo.findText(current_text)
             self.point_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.point_combo.blockSignals(False)
@@ -586,10 +624,10 @@ class PagePosition(GlassCard):
             try:
                 sorted_names = sorted(list(self.position_points.keys()))
                 point_idx = sorted_names.index(selected_point)
-                base_addr = 30000 + (point_idx * 32)
+                base_addr = self.plc_client.POINT_BASE_ADDR + (point_idx * self.plc_client.POINT_SIZE)
                 if col_type == "coords":
                     target_addr = base_addr + 2 + (row_idx * 2)
-                    send_val = int(new_val * 1000) 
+                    send_val = int(new_val * 1000)
                     self.plc_client.write_dint(0x09, target_addr, send_val)
                 elif col_type == "speed":
                     target_addr = base_addr + 18 + row_idx
@@ -627,10 +665,10 @@ class PagePosition(GlassCard):
             try:
                 sorted_names = sorted(list(self.position_points.keys()))
                 point_idx = sorted_names.index(target_point_name)
-                base_addr = 30000 + (point_idx * 32)
+                base_addr = self.plc_client.POINT_BASE_ADDR + (point_idx * self.plc_client.POINT_SIZE)
                 for i, val in enumerate(new_coords):
                     target_addr = base_addr + 2 + (i * 2)
-                    send_val = int(val * 1000) 
+                    send_val = int(val * 1000)
                     self.plc_client.write_dint(0x09, target_addr, send_val)
             except: pass
 
@@ -641,3 +679,4 @@ class PagePosition(GlassCard):
         next_idx = self.point_combo.currentIndex() + 1
         if next_idx < self.point_combo.count():
             self.point_combo.setCurrentIndex(next_idx)
+

@@ -188,88 +188,82 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
         
         return btn
     
+    def _valve_dt_addr(self, bit_index):
+        """bit_index → (DT주소, 비트위치) 반환
+        Y00~Y0F (index 0~15)  → DT203, bit 0~15
+        Y20~Y2F (index 16~31) → DT204, bit 0~15
+        """
+        if bit_index < 16:
+            return 203, bit_index
+        else:
+            return 204, bit_index - 16
+
     def _on_valve_toggle(self, bit_index, checked):
         """토글 모드 밸브 클릭 (ON/OFF 전환)"""
         if self.plc_client and self.plc_client.is_connected:
             try:
-                # DT203~204 (32비트) 읽기
-                data = self.plc_client.read_words(0x09, 203, 2)
-                if data and len(data) == 2:
-                    # 32비트 값 조합
-                    current_value = data[0] | (data[1] << 16)
-                    
-                    # 비트 토글
+                dt_addr, bit_pos = self._valve_dt_addr(bit_index)
+                data = self.plc_client.read_words(0x09, dt_addr, 1)
+                if data and len(data) >= 1:
+                    current_value = data[0]
                     if checked:
-                        new_value = current_value | (1 << bit_index)  # 비트 ON
+                        new_value = current_value | (1 << bit_pos)
                     else:
-                        new_value = current_value & ~(1 << bit_index)  # 비트 OFF
-                    
-                    # 다시 2개 Word로 분리
-                    word1 = new_value & 0xFFFF
-                    word2 = (new_value >> 16) & 0xFFFF
-                    
-                    # PLC에 전송
-                    self.plc_client.write_words(0x09, 203, [word1, word2])
-                    
-                    print(f"[ValvePanel] 밸브 {bit_index} {'ON' if checked else 'OFF'}")
-                    
+                        new_value = current_value & ~(1 << bit_pos)
+                    self.plc_client.write_words(0x09, dt_addr, [new_value & 0xFFFF])
+                    print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) {'ON' if checked else 'OFF'}")
             except Exception as e:
                 print(f"[ValvePanel] 밸브 제어 실패: {e}")
-    
+
     def _on_valve_pressed(self, bit_index):
         """모멘터리 모드 밸브 누름 (ON)"""
         if self.plc_client and self.plc_client.is_connected:
             try:
-                # DT203~204 읽기
-                data = self.plc_client.read_words(0x09, 203, 2)
-                if data and len(data) == 2:
-                    current_value = data[0] | (data[1] << 16)
-                    new_value = current_value | (1 << bit_index)  # 비트 ON
-                    
-                    word1 = new_value & 0xFFFF
-                    word2 = (new_value >> 16) & 0xFFFF
-                    
-                    self.plc_client.write_words(0x09, 203, [word1, word2])
-                    print(f"[ValvePanel] 밸브 {bit_index} 누름 (ON)")
-                    
+                dt_addr, bit_pos = self._valve_dt_addr(bit_index)
+                data = self.plc_client.read_words(0x09, dt_addr, 1)
+                if data and len(data) >= 1:
+                    new_value = data[0] | (1 << bit_pos)
+                    self.plc_client.write_words(0x09, dt_addr, [new_value & 0xFFFF])
+                    print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) 누름 (ON)")
             except Exception as e:
                 print(f"[ValvePanel] 밸브 제어 실패: {e}")
-    
+
     def _on_valve_released(self, bit_index):
         """모멘터리 모드 밸브 뗌 (OFF)"""
         if self.plc_client and self.plc_client.is_connected:
             try:
-                # DT203~204 읽기
-                data = self.plc_client.read_words(0x09, 203, 2)
-                if data and len(data) == 2:
-                    current_value = data[0] | (data[1] << 16)
-                    new_value = current_value & ~(1 << bit_index)  # 비트 OFF
-                    
-                    word1 = new_value & 0xFFFF
-                    word2 = (new_value >> 16) & 0xFFFF
-                    
-                    self.plc_client.write_words(0x09, 203, [word1, word2])
-                    print(f"[ValvePanel] 밸브 {bit_index} 뗌 (OFF)")
-                    
+                dt_addr, bit_pos = self._valve_dt_addr(bit_index)
+                data = self.plc_client.read_words(0x09, dt_addr, 1)
+                if data and len(data) >= 1:
+                    new_value = data[0] & ~(1 << bit_pos)
+                    self.plc_client.write_words(0x09, dt_addr, [new_value & 0xFFFF])
+                    print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) 뗌 (OFF)")
             except Exception as e:
                 print(f"[ValvePanel] 밸브 제어 실패: {e}")
     
     def _get_default_valve_config(self):
         """기본 밸브 설정 반환"""
-        default_names = [
+        named_y0x = [
+            "형개허가", "형폐허가", "에젝터 허가", "싸이클스타트",
+            "컨베어출력1", "컨베어출력2", "예비1", "예비2",
+            "예비 Y08", "예비 Y09", "예비 Y0A", "예비 Y0B",
+            "예비 Y0C", "예비 Y0D", "예비 Y0E", "예비 Y0F",
+        ]
+        named_y2x = [
             "척 1 (Chuck 1)", "척 2 (Chuck 2)", "척 3 (Chuck 3)", "척 4 (Chuck 4)",
             "흡착 1 (Vac 1)", "흡착 2 (Vac 2)", "흡착 3 (Vac 3)", "흡착 4 (Vac 4)",
             "포스쳐 반전", "포스쳐 복귀", "스위블 회전", "스위블 복귀",
             "니퍼 컷팅 1", "니퍼 컷팅 2", "컨베이어 출력", "공급기 출력"
         ]
-        
+
         config = []
         for i in range(32):
+            name = named_y2x[i - 16] if i >= 16 else named_y0x[i]
             config.append({
                 "index": i,
-                "name": default_names[i] if i < len(default_names) else f"밸브 {i+1}",
+                "name": name,
                 "mode": "toggle",
-                "enabled": i < 16,  # V1~V16만 기본 사용
+                "enabled": i >= 16,  # 기본: Y20~Y2F 활성
                 "order": i
             })
         return config

@@ -119,7 +119,8 @@ class MainWindow(QWidget):
 
         # ===== 2. Shared Data =====
         self.master_sequence_data = {"Main": []}
-        self.master_position_points = {} 
+        self.master_position_points = {}
+        self.master_timer_library = {}
         self.master_mode_data = [False] * 40
         self.master_view_order = []
 
@@ -163,8 +164,10 @@ class MainWindow(QWidget):
                                     pp = data.get("position_points", {})
                                     mod = data.get("mode", [])
                                     vo = data.get("view_order", [])
-                                    
+                                    tl = data.get("timer_library", {})
+
                                     self.master_position_points.update(pp)
+                                    self.master_timer_library.update(tl)
                                     self.master_mode_data[:len(mod)] = mod
                                     self.master_view_order.extend(vo)
 
@@ -203,17 +206,21 @@ class MainWindow(QWidget):
             sequence_data=self.master_sequence_data,
             view_order_data=self.master_view_order,
             position_points=self.master_position_points,
+            mode_data=self.master_mode_data,
+            timer_library=self.master_timer_library,
             plc_client=self.plc_client
         )
-        
+
         self.pages["timer"] = PageTimer(
             sequence_data=self.master_sequence_data,
-            plc_client=self.plc_client 
+            timer_library=self.master_timer_library,
+            plc_client=self.plc_client
         )
-        
+
         self.pages["data"] = PageData(
             sequence_data=self.master_sequence_data,
-            position_points=self.master_position_points, 
+            position_points=self.master_position_points,
+            timer_library=self.master_timer_library,
             mode_data=self.master_mode_data,
             view_order_data=self.master_view_order
         )
@@ -271,12 +278,17 @@ class MainWindow(QWidget):
         # =========================================================
         self.current_error_code = None
         self._alarm_resetting = False
+        self._seq_alarm_showing = False
+        self._jog_dialog = None
+        self._prev_op_status = 0
+        self._seq_alarm_no = 0
         self.alarm_overlay = AlarmOverlay(self) # MainWindow(self)가 부모
         self.alarm_overlay.resize(self.size()) # 초기 크기 맞춤
 
         # 리셋 버튼 신호 연결 (모멘터리: 누를때 1, 뗄때 0)
         self.alarm_overlay.sig_reset_pressed.connect(self._on_alarm_reset_pressed)
         self.alarm_overlay.sig_reset_released.connect(self._on_alarm_reset_released)
+        self.alarm_overlay.sig_dismissed.connect(self._on_alarm_dismissed)
         
         # PLC 데이터 감시 연결 (알람 체크용)
         if self.plc_client:
@@ -318,32 +330,52 @@ class MainWindow(QWidget):
         self.plc_client.connect_to_plc(target_ip, target_port)
 
     def _on_plc_connected(self, connected: bool):
-        """PLC 연결 시 DT206~208에서 모드 설정 읽어 동기화"""
+        """PLC 연결 시 현재 모드 설정을 PLC로 전송"""
         if not connected:
             return
-        QTimer.singleShot(200, self._sync_mode_from_plc)
+        QTimer.singleShot(200, self._send_mode_to_plc)
 
-    def _sync_mode_from_plc(self):
-        """DT206~208 읽어 master_mode_data 및 모드 페이지 갱신"""
+    def _send_mode_to_plc(self):
+        """master_mode_data → DT206~208 전송 (재부팅 후 PLC 동기화)"""
         if not self.plc_client or not self.plc_client.is_connected:
             return
-        data = self.plc_client.read_mode_settings()
-        if data and len(data) >= 44:
-            self.master_mode_data[:44] = data[:44]
-            page = self.pages.get("mode")
-            if page:
-                page.refresh_ui()
-            print(f"[Mode] DT206~208 동기화 완료")
+        self.plc_client.send_mode_settings(self.master_mode_data)
+        print(f"[Mode] PLC 연결 후 모드 설정 전송 완료")
 
     # 조그 오버레이 실행 함수
     def _open_jog_overlay(self):
-        dlg = JogControlDialog(plc_client=self.plc_client, parent=self)
-        dlg.exec()
+        if self.top_bar.op_status in (1, 2):
+            return  # 자동운전 / 확인운전 중에는 JOG 차단
+        page_manual = self.pages.get("manual")
+        self._jog_dialog = JogControlDialog(plc_client=self.plc_client, page_manual=page_manual, parent=self)
+        self._jog_dialog.exec()
+        self._jog_dialog = None
 
     def goto_page(self, key: str, index: int):
+        if key == "settings":
+            if self.stack.currentIndex() == index:
+                return
+            self._request_settings_password(index)
+            return
         self.stack.setCurrentIndex(index)
         for k, btn in self.nav_buttons.items():
             btn.set_active(k == key)
+
+    def _request_settings_password(self, index: int):
+        try:
+            from ui.dialogs.sequence_utils import NumericKeypad, DarkMessageDialog
+            dlg = NumericKeypad("설정 비밀번호를 입력하세요", decimals=0, parent=self, password_mode=True)
+            if dlg.exec() == 1:
+                val = int(dlg.get_value())
+                if val == 2026:
+                    self.stack.setCurrentIndex(index)
+                    for k, btn in self.nav_buttons.items():
+                        btn.set_active(k == "settings")
+                else:
+                    err_dlg = DarkMessageDialog("비밀번호 오류", "비밀번호가 올바르지 않습니다.", is_error=True, parent=self)
+                    err_dlg.exec()
+        except Exception as e:
+            print(f"[Settings] Password dialog error: {e}")
 
     def update_language(self, lang_code):
         if not LanguageManager: return
@@ -420,17 +452,37 @@ class MainWindow(QWidget):
 
     def _on_alarm_reset_pressed(self):
         self._alarm_resetting = True
-        self.plc_client.write_words(0x09, 212, [1])
+        self.plc_client.write_words(0x09, self.plc_client.ADDR_ALARM_RESET, [1])
 
     def _on_alarm_reset_released(self):
-        self.plc_client.write_words(0x09, 212, [0])
+        self.plc_client.write_words(0x09, self.plc_client.ADDR_ALARM_RESET, [0])
+        # 시퀀스 알람(DT159) 클리어 및 즉시 숨김
+        if getattr(self, '_seq_alarm_showing', False):
+            self.plc_client.write_words(0x09, self.plc_client.ADDR_SEQ_POPUP, [0])
+            self._seq_alarm_showing = False
+            self._seq_alarm_no = 0
+            self.alarm_overlay.hide()
         QTimer.singleShot(500, self._clear_alarm_reset_flag)
 
     def _clear_alarm_reset_flag(self):
         self._alarm_resetting = False
 
+    def _on_alarm_dismissed(self):
+        """X버튼으로 알람 닫을 때 플래그 리셋 → 다음 알람 수신 가능"""
+        self._seq_alarm_showing = False
+        self._seq_alarm_no = 0
+
     # ★ [추가] 알람 상태 감시 함수
     def _check_alarm_status(self, data):
+        op_status = data.get('op_status', 0)
+
+        # 자동/확인운전 시작 시 JOG 팝업 강제 종료
+        if op_status in (1, 2):
+            if getattr(self, '_jog_dialog', None) is not None:
+                self._jog_dialog.close_overlay()
+
+        self._prev_op_status = op_status
+
         # DT141: 축 알람 상태 워드 (비트별 축 알람)
         axis_alarms = data.get('axis_alarms', [])
         axis_error_codes = data.get('axis_error_codes', [0] * 8)
@@ -440,32 +492,20 @@ class MainWindow(QWidget):
                 self.current_error_code = key
                 self.alarm_overlay.show_error(axis_alarms, axis_error_codes)
         else:
-            if not self.alarm_overlay.isHidden() and not self._alarm_resetting:
+            if not self.alarm_overlay.isHidden() and not self._alarm_resetting and not self._seq_alarm_showing:
                 self.alarm_overlay.hide()
                 self.current_error_code = None
 
-        # DT159: 시퀀스 팝업 요청
+        # DT159: 시퀀스 알람 요청 (alarm_no, bit15=알람+진행 플래그)
         seq_popup = data.get('seq_popup', 0)
-        if seq_popup > 0 and not getattr(self, '_seq_popup_showing', False):
-            print(f"[Main] 시퀀스 팝업 요청 감지 (코드={seq_popup})")
-            self._seq_popup_showing = True
-            self._pending_seq_popup = seq_popup
-            QTimer.singleShot(0, self._show_seq_popup)
-
-    def _show_seq_popup(self):
-        try:
-            from ui.pages.page_auto import AutoConfirmOverlay
-            code = getattr(self, '_pending_seq_popup', 1)
-            title, message = SEQ_POPUP_MESSAGES.get(code, SEQ_POPUP_DEFAULT)
-            dlg = AutoConfirmOverlay(title, message, self)
-            result = dlg.exec()
-            response = 1 if result else 2  # 1=계속, 2=정지
-            print(f"[Main] 팝업 응답: {'계속' if response == 1 else '정지'} (코드={code}, DT160={response})")
-            if self.plc_client:
-                self.plc_client.write_words(0x09, 160, [response])
-        except Exception as e:
-            print(f"[Main] 시퀀스 팝업 오류: {e}")
-        finally:
-            self._seq_popup_showing = False
-            self._pending_seq_popup = 0
+        if seq_popup > 0 and not self._seq_alarm_showing:
+            alarm_go = seq_popup >= 1000               # 1000 이상 → 알람+진행
+            alarm_no = seq_popup - 1000 if alarm_go else seq_popup  # 실제 알람 번호
+            print(f"[Main] 시퀀스 알람 요청 (alarm_no={alarm_no}, alarm_go={alarm_go})")
+            self._seq_alarm_showing = True
+            self._seq_alarm_no = alarm_no
+            # 즉시 DT159 클리어 (핸드셰이크) → 재트리거 방지
+            self.plc_client.write_words(0x09, self.plc_client.ADDR_SEQ_POPUP, [0])
+            # DT200/DT202는 PLC FB(VAR_IN_OUT)가 직접 처리 → HMI는 팝업 표시만
+            self.alarm_overlay.show_sequence_alarm(alarm_no)
 

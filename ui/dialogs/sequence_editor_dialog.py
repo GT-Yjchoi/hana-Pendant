@@ -19,8 +19,9 @@ except ImportError as e:
 
 try:
     from ui.dialogs.sequence_utils import (
-        DarkConfirmDialog, RenameDialog, NumericKeypad, NewPointDialog, 
-        DarkMessageDialog, SequenceListDialog, PopupListSelector, PointListDialog
+        DarkConfirmDialog, RenameDialog, NumericKeypad, NewPointDialog,
+        DarkMessageDialog, SequenceListDialog, PopupListSelector, PointListDialog,
+        CardListDialog
     )
 except ImportError:
     print("!!! [CRITICAL] sequence_utils Import Failed")
@@ -32,11 +33,20 @@ except ImportError:
     SequenceListDialog = None
     PopupListSelector = None
     PointListDialog = None
+    CardListDialog = None
 
 try:
     from utils.io_manager import IOManager
 except ImportError:
     IOManager = None
+
+try:
+    from ui.widgets.touch_keyboard import TouchKeyboard
+except ImportError:
+    TouchKeyboard = None
+
+# 슬롯 39 고정 예약 - 자동운전 중 상태감시/알람용
+MONITOR_SEQ_KEY = "Monitor"
 
 class TouchScrollListWidget(QListWidget):
     """드래그로 스크롤되는 리스트 위젯 (터치스크린 대응)"""
@@ -77,16 +87,13 @@ class TouchScrollListWidget(QListWidget):
 
 
 class SequenceEditorDialog(QDialog):
-    def __init__(self, sequence_data=None, position_points=None, plc_client=None, parent=None):
+    def __init__(self, sequence_data=None, position_points=None, timer_library=None, plc_client=None, parent=None):
         super().__init__(parent)
         self.setObjectName("SequenceEditor") 
         self.setWindowTitle("시퀀스 편집")
         self.setModal(True)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint)
-        self.setFixedSize(1024, 680)  # 전체화면 → 1024x680으로 변경 (높이 증가)
-        
-        # ★ 화면 중앙 정렬
-        self._center_on_screen()
+        self.setWindowState(Qt.WindowFullScreen)
         
         self.plc_client = plc_client
         self._is_loading = False
@@ -95,6 +102,8 @@ class SequenceEditorDialog(QDialog):
         self.enabled_axes = self._load_enabled_axes()
         print(f"[시퀀스 편집기] 연결된 축: {self.enabled_axes}")
         
+        self.timer_library = timer_library if timer_library is not None else {}
+
         self.points_library = {}
         if position_points:
             for k, v in position_points.items():
@@ -178,24 +187,23 @@ class SequenceEditorDialog(QDialog):
         
         self.lbl_curr_seq = QLabel("Main")
         self.lbl_curr_seq.setFixedHeight(45)
+        self.lbl_curr_seq.setCursor(Qt.PointingHandCursor)
         self.lbl_curr_seq.setStyleSheet("""
-            QLabel { 
-                background: rgba(70, 140, 255, 0.1); 
-                border: 2px solid #468CFF; 
-                border-radius: 6px; 
-                color: #468CFF; 
-                font-size: 18px; 
-                font-weight: bold; 
-                padding-left: 15px; 
+            QLabel {
+                background: rgba(70, 140, 255, 0.1);
+                border: 2px solid #468CFF;
+                border-radius: 6px;
+                color: #468CFF;
+                font-size: 18px;
+                font-weight: bold;
+                padding-left: 15px;
+            }
+            QLabel:hover {
+                background: rgba(70, 140, 255, 0.25);
             }
         """)
+        self.lbl_curr_seq.mousePressEvent = lambda e: self._open_sequence_list() if len(self.sequences) > 1 else None
         nav_box.addWidget(self.lbl_curr_seq, 1)
-        
-        self.btn_seq_list = QPushButton(" 목록")
-        self.btn_seq_list.setFixedSize(90, 45)
-        self.btn_seq_list.setStyleSheet("border: 1px solid #FFFFFF; color: white;")
-        self.btn_seq_list.clicked.connect(self._open_sequence_list)
-        nav_box.addWidget(self.btn_seq_list)
         
         btn_add_seq = QPushButton("+")
         btn_add_seq.setFixedSize(45, 45)
@@ -269,7 +277,7 @@ class SequenceEditorDialog(QDialog):
         left_box.addWidget(self.step_list)
         
         add_box = QHBoxLayout()
-        for cmd, col in [("POS","#468CFF"), ("OUT","#FFA500"), ("IN","#FF69B4"), ("TMR","#FFFF00"), ("JMP","#00E5FF"), ("CALL","#FF00FF")]:
+        for cmd, col in [("POS","#468CFF"), ("OUT","#FFA500"), ("IN","#FF69B4"), ("TMR","#FFFF00"), ("JMP","#00E5FF"), ("CALL","#FF00FF"), ("END","#FF4646")]:
             btn = QPushButton(cmd)
             btn.setMinimumHeight(45)
             btn.setStyleSheet(f"border: 2px solid {col}; color: {col}; font-weight: bold;")
@@ -305,7 +313,7 @@ class SequenceEditorDialog(QDialog):
                     if chk is None:  # ★ None 체크 추가
                         continue
                     try: chk.toggled.disconnect()
-                    except: pass
+                    except RuntimeError: pass
                     chk.toggled.connect(lambda checked, idx=i: self._on_axis_checkbox_changed(idx, checked))
 
             self.stack.addWidget(StepUIGenerator.create_io_editor(self))
@@ -371,14 +379,12 @@ class SequenceEditorDialog(QDialog):
                 if hasattr(self, 'axis_checkboxes') and i < len(self.axis_checkboxes):
                     if self.axis_checkboxes[i] is not None:  # ★ None 체크
                         self.axis_checkboxes[i].setChecked(is_checked)
-                    if self.pos_labels[i] is not None:  # ★ None 체크
-                        self.pos_labels[i].setEnabled(is_checked)
                     if self.speed_spinboxes[i] is not None:  # ★ None 체크
-                        self.speed_spinboxes[i].setEnabled(is_checked)
+                        self.speed_spinboxes[i].setEnabled(True)
                         
                 if hasattr(self, 'pos_labels') and i < len(self.pos_labels):
                     if self.pos_labels[i] is not None:  # ★ None 체크
-                        self.pos_labels[i].setText(f"{coords[i]:.2f}")
+                        self.pos_labels[i].setText(f"{coords[i]:.3f}")
                         
                 if hasattr(self, 'speed_spinboxes') and i < len(self.speed_spinboxes):
                     if self.speed_spinboxes[i] is not None:  # ★ None 체크
@@ -386,24 +392,76 @@ class SequenceEditorDialog(QDialog):
 
         elif type_code in ["OUT", "IN"]:
             self._update_io_combo(type_code == "OUT")
-            self.lbl_io_target.setText("제어할 밸브" if type_code=="OUT" else "감시할 센서")
+            self.lbl_io_target.setText("제어할 출력" if type_code=="OUT" else "감시할 센서")
             bit_index = data.get("port", 0)
             self.io_combo.setCurrentIndex(bit_index)
-            
+
+            # ★ OUT 스텝 전용: 출력 구분 라디오 설정
+            if hasattr(self, 'out_type_frame'):
+                self.out_type_frame.setVisible(type_code == "OUT")
+            if hasattr(self, 'in_type_frame'):
+                self.in_type_frame.setVisible(type_code == "IN")
+            if type_code == "OUT":
+                out_type = data.get("out_type", 0)
+                if hasattr(self, 'out_type_grp'):
+                    btn = self.out_type_grp.button(out_type)
+                    if btn: btn.setChecked(True)
+                if hasattr(self, 'out_type_grp'):
+                    for b in self.out_type_grp.buttons():
+                        try: b.toggled.disconnect(self._on_out_type_changed)
+                        except: pass
+                        b.toggled.connect(self._on_out_type_changed)
+            elif type_code == "IN":
+                # in_type 기존 데이터 없으면 port값으로 추론
+                if "in_type" not in data:
+                    p = data.get("port", 0)
+                    if p >= 200:
+                        data["in_type"] = 3
+                    elif p >= 100:
+                        data["in_type"] = 2
+                    elif p >= 32:
+                        data["in_type"] = 1
+                    else:
+                        data["in_type"] = 0
+                in_type = data.get("in_type", 0)
+                if hasattr(self, 'in_type_grp'):
+                    btn = self.in_type_grp.button(in_type)
+                    if btn: btn.setChecked(True)
+                if hasattr(self, 'in_type_grp'):
+                    for b in self.in_type_grp.buttons():
+                        try: b.toggled.disconnect(self._on_in_type_changed)
+                        except: pass
+                        b.toggled.connect(self._on_in_type_changed)
+
             # ★ 버튼 텍스트에 이름 표시
             if hasattr(self, 'io_combo_btn'):
                 if type_code == "OUT":
-                    # OUT: 밸브 이름
-                    valve_name = self._get_valve_name_by_index(bit_index)
-                    self.io_combo_btn.setText(valve_name)
+                    self.io_combo_btn.setText(self._get_out_name(data.get("out_type", 0), bit_index))
                 else:
-                    # IN: 입력 이름
                     input_name = self._get_input_name_by_index(bit_index)
                     self.io_combo_btn.setText(input_name)
-            
+
             if data.get("on", True): self.rb_on.setChecked(True)
             else: self.rb_off.setChecked(True)
-            
+
+            # ★ OUT 스텝 전용: 타이머 기동후출력 설정
+            if hasattr(self, 'out_delay_frame'):
+                self.out_delay_frame.setVisible(type_code == "OUT")
+                if type_code == "OUT":
+                    delay_enable = data.get("delay_enable", False)
+                    delay_timer_ref = data.get("delay_timer_ref", "")
+                    delay_time = data.get("delay_time", 1.0)
+                    if hasattr(self, 'chk_out_delay'):
+                        self.chk_out_delay.blockSignals(True)
+                        self.chk_out_delay.setChecked(delay_enable)
+                        self.chk_out_delay.blockSignals(False)
+                    if hasattr(self, 'out_delay_timer_btn'):
+                        self.out_delay_timer_btn.setEnabled(delay_enable)
+                        if delay_timer_ref:
+                            self.out_delay_timer_btn.setText(f"{delay_timer_ref}  ({delay_time:.1f}s)")
+                        else:
+                            self.out_delay_timer_btn.setText("타이머 선택하세요")
+
             # ★ IN 스텝 전용: 타임아웃 설정
             if hasattr(self, 'in_timeout_frame'):
                 if type_code == "IN":
@@ -421,30 +479,60 @@ class SequenceEditorDialog(QDialog):
                         self.timeout_btn.setText(f"{timeout:.1f} sec")
 
                     # 타임아웃 동작
-                    action = data.get("timeout_action", "ask")
-                    if action == "continue":
-                        self.rb_timeout_continue.setChecked(True)
-                    elif action == "stop":
-                        self.rb_timeout_stop.setChecked(True)
-                    elif action == "jump":
-                        self.rb_timeout_jump.setChecked(True)
-
-                        # 점프 타겟 표시
-                        if hasattr(self, 'timeout_jump_btn'):
-                            jump_idx = data.get("timeout_jump", 0)
-                            steps = self.sequences.get(self.current_seq_key, [])
-                            if jump_idx < len(steps):
-                                step_name = steps[jump_idx].get("name", "Unnamed")
-                                self.timeout_jump_btn.setText(f"[{jump_idx:02d}] {step_name}")
-                            else:
-                                self.timeout_jump_btn.setText("선택하세요")
-                    else:  # "ask"
+                    action = data.get("timeout_action", "continue")
+                    if action == "alarm_go":
+                        self.rb_timeout_alarm_go.setChecked(True)
+                    elif action == "ask":
                         self.rb_timeout_ask.setChecked(True)
+                    else:  # "continue"
+                        self.rb_timeout_continue.setChecked(True)
+
+                    # 알람 번호 표시 (알람 관련 동작일 때)
+                    if action in ("ask", "alarm_go") and hasattr(self, 'timeout_alarm_btn'):
+                        alarm_no = data.get("timeout_alarm_no", 1)
+                        try:
+                            from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+                            alarm_msg = SEQUENCE_ALARMS.get(alarm_no, f"알람 #{alarm_no}")
+                        except ImportError:
+                            alarm_msg = f"알람 #{alarm_no}"
+                        self.timeout_alarm_btn.setText(f"A-{alarm_no:03d}: {alarm_msg}")
+                        if hasattr(self, 'timeout_alarm_frame'):
+                            self.timeout_alarm_frame.setVisible(True)
                 else:
                     self.in_timeout_frame.setVisible(False)
 
         elif type_code == "TMR":
-            if hasattr(self, 'tmr_btn'): self.tmr_btn.setText(f"{data.get('time', 1.0):.1f} sec")
+            t = data.get("time", 1.0)
+            timer_ref = data.get("timer_ref", "")
+            if hasattr(self, 'tmr_btn'):
+                self.tmr_btn.setText(timer_ref if timer_ref else "선택하세요")
+            if hasattr(self, 'tmr_hold_time_btn'):
+                self.tmr_hold_time_btn.setText(f"{t:.1f} sec")
+            # 단순 대기 모드: 타이머 선택된 경우 시간 표시
+            if hasattr(self, 'tmr_simple_time_frame'):
+                has_ref = bool(timer_ref)
+                self.tmr_simple_time_frame.setVisible(has_ref)
+                if has_ref and hasattr(self, 'tmr_simple_time_btn'):
+                    self.tmr_simple_time_btn.setText(f"{t:.1f} sec")
+
+            tmr_mode = data.get("tmr_mode", "simple")
+            if hasattr(self, 'rb_tmr_hold'):
+                self.rb_tmr_hold.setChecked(tmr_mode == "hold")
+                self.rb_tmr_simple.setChecked(tmr_mode != "hold")
+            if hasattr(self, 'tmr_mode_stack'):
+                self.tmr_mode_stack.setCurrentIndex(1 if tmr_mode == "hold" else 0)
+
+            if tmr_mode == "hold":
+                in_type = data.get("in_type", 0)
+                if hasattr(self, 'tmr_hold_type_grp'):
+                    btn = self.tmr_hold_type_grp.button(in_type)
+                    if btn: btn.setChecked(True)
+                if hasattr(self, 'tmr_hold_io_btn'):
+                    self.tmr_hold_io_btn.setText(self._get_input_name_by_index(data.get("port", 0)))
+                if data.get("on", True):
+                    if hasattr(self, 'tmr_hold_rb_on'): self.tmr_hold_rb_on.setChecked(True)
+                else:
+                    if hasattr(self, 'tmr_hold_rb_off'): self.tmr_hold_rb_off.setChecked(True)
         
         elif type_code == "JMP":
             self.jmp_target_combo.blockSignals(True)
@@ -461,28 +549,51 @@ class SequenceEditorDialog(QDialog):
             self.rb_jmp_cond.setChecked(cond)
             self.rb_jmp_always.setChecked(not cond)
             self.jmp_cond_frame.setVisible(cond)
-            
-            ct = data.get("cond_type", "PORT")
+
+            ct = data.get("cond_type", "INPUT")
+            # 하위 호환: 구 "PORT" 타입 자동 분류
+            if ct == "PORT":
+                v = data.get("cond_value", 0)
+                if v >= 100:
+                    ct = "BIT"
+                elif v >= 32:
+                    ct = "VALVE"
+                else:
+                    ct = "INPUT"
             cond_value = data.get("cond_value", 0)
-            
-            if ct == "MODE":
+
+            if ct == "STATE":
+                self.rb_src_state.setChecked(True)
+                self.stack_cond_source.setCurrentIndex(4)
+                rb = getattr(self, 'jmp_run_state_rbs', {}).get(cond_value)
+                if rb:
+                    rb.setChecked(True)
+            elif ct == "MODE":
                 self.rb_src_mode.setChecked(True)
-                self.stack_cond_source.setCurrentIndex(1)
+                self.stack_cond_source.setCurrentIndex(3)
                 self.jmp_mode_combo.setCurrentIndex(cond_value)
-                
-                # 버튼 텍스트 업데이트
                 if hasattr(self, 'jmp_mode_btn'):
-                    mode_name = self._get_mode_name_by_index(cond_value)
-                    self.jmp_mode_btn.setText(mode_name)
-            else:  # PORT (입력/내부비트 통합, BIT 제거)
-                self.rb_src_port.setChecked(True)
+                    self.jmp_mode_btn.setText(self._get_mode_name_by_index(cond_value))
+            elif ct == "VALVE":
+                self.rb_src_valve.setChecked(True)
+                self.stack_cond_source.setCurrentIndex(1)
+                valve_idx = max(0, cond_value - 32)  # X20~X2F → combo index 0~15
+                self.jmp_valve_combo.setCurrentIndex(valve_idx)
+                if hasattr(self, 'jmp_valve_btn'):
+                    self.jmp_valve_btn.setText(self._get_input_name_by_index(cond_value))
+            elif ct == "BIT":
+                self.rb_src_bit.setChecked(True)
+                self.stack_cond_source.setCurrentIndex(2)
+                bit_idx = max(0, cond_value - 100)
+                self.jmp_bit_combo.setCurrentIndex(bit_idx)
+                if hasattr(self, 'jmp_bit_btn'):
+                    self.jmp_bit_btn.setText(f"M{bit_idx:02d} (내부비트)")
+            else:  # INPUT (X00~X0F)
+                self.rb_src_input.setChecked(True)
                 self.stack_cond_source.setCurrentIndex(0)
-                self.jmp_port_combo.setCurrentIndex(cond_value)
-                
-                # 버튼 텍스트 업데이트
-                if hasattr(self, 'jmp_port_btn'):
-                    port_name = self._get_input_name_by_index(cond_value)
-                    self.jmp_port_btn.setText(port_name)
+                self.jmp_input_combo.setCurrentIndex(cond_value)
+                if hasattr(self, 'jmp_input_btn'):
+                    self.jmp_input_btn.setText(self._get_input_name_by_index(cond_value))
             
             if data.get("cond_on", True): self.rb_jmp_on.setChecked(True)
             else: self.rb_jmp_off.setChecked(True)
@@ -521,10 +632,8 @@ class SequenceEditorDialog(QDialog):
         self.active_step_data["active_axes"][idx] = checked
         
         # ★ None 체크 추가
-        if self.pos_labels[idx] is not None:
-            self.pos_labels[idx].setEnabled(checked)
         if self.speed_spinboxes[idx] is not None:
-            self.speed_spinboxes[idx].setEnabled(checked)
+            self.speed_spinboxes[idx].setEnabled(True)
 
     def _on_step_name_changed(self, text):
         if self._is_loading: return
@@ -549,32 +658,156 @@ class SequenceEditorDialog(QDialog):
         # io_combo.currentIndex()는 신뢰할 수 없으므로 여기서 업데이트하지 않음
         # self.active_step_data["port"] = self.io_combo.currentIndex()  # 제거!
         self.active_step_data["on"] = self.rb_on.isChecked()
-        
-        # ★ IN 스텝: 타임아웃 설정 저장
+
+        # ★ OUT 스텝: 출력 구분 + 딜레이 저장
+        if self.active_step_data.get("type") == "OUT":
+            if hasattr(self, 'out_type_grp'):
+                self.active_step_data["out_type"] = self.out_type_grp.checkedId()
+            if hasattr(self, 'chk_out_delay'):
+                self.active_step_data["delay_enable"] = self.chk_out_delay.isChecked()
+
+        # ★ IN 스텝: 입력 구분 + 타임아웃 설정 저장
         if self.active_step_data.get("type") == "IN":
+            if hasattr(self, 'in_type_grp'):
+                self.active_step_data["in_type"] = self.in_type_grp.checkedId()
             # 타임아웃 사용 여부
             if hasattr(self, 'rb_timeout_enabled'):
                 self.active_step_data["timeout_enabled"] = self.rb_timeout_enabled.isChecked()
             # 타임아웃 동작
             if hasattr(self, 'rb_timeout_ask'):
-                if self.rb_timeout_continue.isChecked():
-                    self.active_step_data["timeout_action"] = "continue"
-                elif self.rb_timeout_stop.isChecked():
-                    self.active_step_data["timeout_action"] = "stop"
-                elif self.rb_timeout_jump.isChecked():
-                    self.active_step_data["timeout_action"] = "jump"
-                else:
+                if self.rb_timeout_ask.isChecked():
                     self.active_step_data["timeout_action"] = "ask"
+                elif hasattr(self, 'rb_timeout_alarm_go') and self.rb_timeout_alarm_go.isChecked():
+                    self.active_step_data["timeout_action"] = "alarm_go"
+                else:
+                    self.active_step_data["timeout_action"] = "continue"
 
-    def _on_tmr_edit_clicked(self):
+    def _open_timer_selector(self):
+        """단순 대기 모드 - 타이머 라이브러리에서 선택 (없으면 추가 가능)"""
+        if self.active_step_data is None:
+            return
+
+        ADD_KEY = "+ 새 타이머 추가"
+        timer_names = [ADD_KEY] + list(self.timer_library.keys())
+        current_ref = self.active_step_data.get("timer_ref", None) if self.active_step_data else None
+        if CardListDialog:
+            def _delete_timer(name):
+                if name in self.timer_library:
+                    del self.timer_library[name]
+
+            dlg = CardListDialog(timer_names, current=current_ref, title="[T] 타이머를 선택하세요", columns=4,
+                                 on_delete=_delete_timer, parent=self)
+            result = dlg.exec()
+            selected = dlg.get_selected() if result == QDialog.Accepted else None
+        else:
+            selected = None
+
+        if selected == ADD_KEY:
+            self._add_timer_to_library()
+            return
+
+        if selected:
+            time_sec = float(self.timer_library[selected])
+            self.active_step_data["timer_ref"] = selected
+            self.active_step_data["time"] = time_sec
+            self.active_step_data["name"] = selected
+            if hasattr(self, 'tmr_btn'):
+                self.tmr_btn.setText(selected)
+            if hasattr(self, 'tmr_simple_time_btn'):
+                self.tmr_simple_time_btn.setText(f"{time_sec:.1f} sec")
+            if hasattr(self, 'tmr_simple_time_frame'):
+                self.tmr_simple_time_frame.setVisible(True)
+            # 스텝 리스트 레이블 갱신
+            item = self.step_list.currentItem()
+            if item:
+                row = self.step_list.row(item)
+                item.setText(f"[{row+1:02d}] {selected}")
+
+    def _add_timer_to_library(self):
+        """타이머 라이브러리에 새 타이머를 추가하고 현재 스텝에 적용"""
+        from PySide6.QtWidgets import QInputDialog
+        # 이름 입력
+        if TouchKeyboard:
+            kb = TouchKeyboard("타이머 이름 입력", parent=self)
+            if hasattr(kb, 'set_language'):
+                kb.set_language("KO")
+            if kb.exec() != QDialog.Accepted:
+                return
+            timer_name = kb.get_text().strip()
+        else:
+            timer_name, ok = QInputDialog.getText(self, "타이머 추가", "타이머 이름:")
+            if not ok:
+                return
+            timer_name = timer_name.strip()
+
+        if not timer_name:
+            return
+        if timer_name in self.timer_library:
+            if DarkMessageDialog:
+                DarkMessageDialog("중복", f"'{timer_name}' 이(가) 이미 존재합니다.", parent=self).exec()
+            return
+
+        # 시간 입력
+        if NumericKeypad:
+            dlg = NumericKeypad(f"'{timer_name}' 시간 설정 (초)", 1.0, 1, parent=self)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            try:
+                timer_sec = float(dlg.get_value())
+            except (ValueError, TypeError):
+                return
+        else:
+            timer_sec, ok = QInputDialog.getDouble(self, "시간 입력", "시간(초):", 1.0, 0, 999, 1)
+            if not ok:
+                return
+
+        self.timer_library[timer_name] = timer_sec
+        print(f"[Timer Library] Added '{timer_name}': {timer_sec} sec")
+
+        # 현재 스텝에 자동 적용
+        if self.active_step_data is not None:
+            self.active_step_data["timer_ref"] = timer_name
+            self.active_step_data["time"] = timer_sec
+            self.active_step_data["name"] = timer_name
+            if hasattr(self, 'tmr_btn'):
+                self.tmr_btn.setText(timer_name)
+            item = self.step_list.currentItem()
+            if item:
+                row = self.step_list.row(item)
+                item.setText(f"[{row+1:02d}] {timer_name}")
+
+    def _on_tmr_simple_time_clicked(self):
+        """단순 대기 모드 - 타이머 시간 편집"""
         if self.active_step_data is None: return
         if NumericKeypad:
             cur_val = self.active_step_data.get("time", 1.0)
-            dlg = NumericKeypad("시간 설정 (초)", cur_val, 1, self)
+            dlg = NumericKeypad("타이머 시간 설정 (초)", cur_val, 1, self)
+            if dlg.exec() == QDialog.Accepted:
+                val = float(dlg.get_value())
+                self.active_step_data["time"] = val
+                # timer_library에도 반영
+                timer_ref = self.active_step_data.get("timer_ref", "")
+                if timer_ref and timer_ref in self.timer_library:
+                    self.timer_library[timer_ref] = val
+                    # 같은 타이머를 참조하는 다른 스텝도 동기화
+                    for seq_steps in self.sequences.values():
+                        if not isinstance(seq_steps, list): continue
+                        for step in seq_steps:
+                            if step.get("type") == "TMR" and step.get("timer_ref") == timer_ref:
+                                step["time"] = val
+                if hasattr(self, 'tmr_simple_time_btn'):
+                    self.tmr_simple_time_btn.setText(f"{val:.1f} sec")
+
+    def _on_tmr_edit_clicked(self):
+        """신호 유지 모드 - 유지 시간 직접 편집"""
+        if self.active_step_data is None: return
+        if NumericKeypad:
+            cur_val = self.active_step_data.get("time", 1.0)
+            dlg = NumericKeypad("유지 시간 설정 (초)", cur_val, 1, self)
             if dlg.exec() == QDialog.Accepted:
                 val = dlg.get_value()
                 self.active_step_data["time"] = val
-                self.tmr_btn.setText(f"{val:.1f} sec")
+                if hasattr(self, 'tmr_hold_time_btn'): self.tmr_hold_time_btn.setText(f"{val:.1f} sec")
     
     def _on_timeout_edit_clicked(self):
         """IN 스텝 타임아웃 편집"""
@@ -594,21 +827,33 @@ class SequenceEditorDialog(QDialog):
         d["target_idx"] = self.jmp_target_combo.currentIndex()
         d["condition"] = self.rb_jmp_cond.isChecked()
         self.jmp_cond_frame.setVisible(d["condition"])
-        
-        # ★ PORT/MODE만 처리 (BIT 제거)
-        if self.rb_src_mode.isChecked():
+
+        if hasattr(self, 'rb_src_state') and self.rb_src_state.isChecked():
+            d["cond_type"] = "STATE"
+            checked_id = self.jmp_run_state_grp.checkedId() if hasattr(self, 'jmp_run_state_grp') else 2
+            d["cond_value"] = checked_id if checked_id >= 0 else 2
+            self.stack_cond_source.setCurrentIndex(4)
+        elif self.rb_src_mode.isChecked():
             d["cond_type"] = "MODE"
-            # ★ 기존 값이 있으면 유지, 없으면 0
-            if "cond_value" not in d or d["cond_value"] < 0:
+            if d.get("cond_value", -1) < 0 or d.get("cond_value", 0) > 43:
                 d["cond_value"] = 0
-            self.stack_cond_source.setCurrentIndex(1)  # ★ 모드 위젯 표시
-        else:  # PORT (입력/내부비트 통합)
-            d["cond_type"] = "PORT"
-            # ★ 기존 값이 있으면 유지, 없으면 0
-            if "cond_value" not in d or d["cond_value"] < 0:
+            self.stack_cond_source.setCurrentIndex(3)
+        elif self.rb_src_valve.isChecked():
+            d["cond_type"] = "VALVE"
+            if d.get("cond_value", 0) < 32 or d.get("cond_value", 0) > 47:
+                d["cond_value"] = 32  # X20
+            self.stack_cond_source.setCurrentIndex(1)
+        elif self.rb_src_bit.isChecked():
+            d["cond_type"] = "BIT"
+            if d.get("cond_value", 0) < 100 or d.get("cond_value", 0) > 131:
+                d["cond_value"] = 100  # M00
+            self.stack_cond_source.setCurrentIndex(2)
+        else:  # INPUT (X00~X0F)
+            d["cond_type"] = "INPUT"
+            if d.get("cond_value", -1) < 0 or d.get("cond_value", 0) > 15:
                 d["cond_value"] = 0
-            self.stack_cond_source.setCurrentIndex(0)  # ★ 포트 위젯 표시
-        
+            self.stack_cond_source.setCurrentIndex(0)
+
         d["cond_on"] = self.rb_jmp_on.isChecked()
 
     def _on_call_value_changed(self):
@@ -639,15 +884,15 @@ class SequenceEditorDialog(QDialog):
 
     def _on_pos_edit_clicked(self, idx):
         if self.active_step_data is None: return
-        p_name = self.point_combo.currentText()
+        p_name = self.active_step_data.get("point_name", "")
         if p_name in self.points_library:
             coords = self.points_library[p_name]["coords"]
             if NumericKeypad:
-                dlg = NumericKeypad(f"{idx+1}축 위치 입력", coords[idx], 2, self)
+                dlg = NumericKeypad(f"{idx+1}축 위치 입력", coords[idx], 3, self)
                 if dlg.exec() == QDialog.Accepted:
                     coords[idx] = dlg.get_value()
                     if self.pos_labels[idx] is not None:  # ★ None 체크
-                        self.pos_labels[idx].setText(f"{coords[idx]:.2f}")
+                        self.pos_labels[idx].setText(f"{coords[idx]:.3f}")
 
     def _refresh_point_combo(self):
         self.point_combo.blockSignals(True)
@@ -685,6 +930,10 @@ class SequenceEditorDialog(QDialog):
                 p_name = step.get("point_name", "")
                 if p_name:
                     label = f"{label}  ({p_name})"
+            elif step.get("type") == "CALL":
+                t_seq = step.get("target_seq", "")
+                if t_seq:
+                    label = f"{label}  ({t_seq})"
             self.step_list.addItem(f"[{i+1:02d}] {label}")
         if self.step_list.count() > 0:
             self.step_list.setCurrentRow(0)
@@ -692,7 +941,7 @@ class SequenceEditorDialog(QDialog):
 
     def _next_step_name(self, type_code):
         """해당 타입에서 비어 있는 가장 낮은 번호로 이름 생성"""
-        base_name = {"POS":"위치 이동","OUT":"출력 제어","IN":"입력 대기","TMR":"타이머","JMP":"점프","CALL":"호출"}.get(type_code, "Step")
+        base_name = {"POS":"위치 이동","OUT":"출력 제어","IN":"입력 대기","TMR":"타이머","JMP":"점프","CALL":"호출","END":"END"}.get(type_code, "Step")
         used = set()
         for seq in self.sequences.values():
             for step in seq:
@@ -717,20 +966,21 @@ class SequenceEditorDialog(QDialog):
             if not p_names: self.points_library[final_name] = {"coords": [0.0]*8, "speeds": [100.0]*8}
             # ★ active_axes로 통일 (기본값: 모든 축 체크 해제)
             data["active_axes"] = [False] * 8
-        elif type_code in ["OUT", "IN"]: data["port"]=0; data["on"]=True
+        elif type_code == "OUT": data["port"]=0; data["on"]=True; data["out_type"]=0; data["delay_enable"]=False
+        elif type_code == "IN": data["port"]=0; data["on"]=True; data["in_type"]=0
         elif type_code == "TMR": data["time"] = 1.0
         elif type_code == "JMP": data.update({"target_idx":0, "condition":False})
         elif type_code == "CALL": data["target_seq"] = ""
+        elif type_code == "END": data["name"] = "END"
         
         # ★ 선택된 스텝 바로 아래에 삽입
         current_row = self.step_list.currentRow()
         if current_row >= 0:
-            # 선택된 스텝이 있으면 그 바로 아래에 삽입
             insert_pos = current_row + 1
+            self._fix_jmp_targets("insert", insert_pos)
             self.sequences[self.current_seq_key].insert(insert_pos, data)
             new_row = insert_pos
         else:
-            # 선택된 스텝이 없으면 맨 아래 추가
             self.sequences[self.current_seq_key].append(data)
             new_row = self.step_list.count()
         
@@ -738,10 +988,27 @@ class SequenceEditorDialog(QDialog):
         self.step_list.setCurrentRow(new_row)
         self._on_item_clicked(self.step_list.item(new_row))
 
+    def _fix_jmp_targets(self, op, pos, pos2=None):
+        """JMP target_idx를 스텝 조작 후 자동 보정
+        op: 'insert'(pos에 삽입), 'delete'(pos 삭제), 'swap'(pos↔pos2 교환)
+        """
+        for step in self.sequences[self.current_seq_key]:
+            if step.get("type") != "JMP": continue
+            t = step.get("target_idx", 0)
+            if op == "insert":
+                if t >= pos: step["target_idx"] = t + 1
+            elif op == "delete":
+                if t == pos:   step["target_idx"] = 0
+                elif t > pos:  step["target_idx"] = t - 1
+            elif op == "swap" and pos2 is not None:
+                if t == pos:   step["target_idx"] = pos2
+                elif t == pos2: step["target_idx"] = pos
+
     def _delete_step(self):
         row = self.step_list.currentRow()
         if row >= 0 and DarkConfirmDialog:
             if DarkConfirmDialog("삭제", "정말 삭제하시겠습니까?", self).exec() == QDialog.Accepted:
+                self._fix_jmp_targets("delete", row)
                 del self.sequences[self.current_seq_key][row]
                 self._load_step_list_from_memory()
                 new_count = self.step_list.count()
@@ -754,6 +1021,7 @@ class SequenceEditorDialog(QDialog):
         r = self.step_list.currentRow()
         if r > 0:
             lst = self.sequences[self.current_seq_key]
+            self._fix_jmp_targets("swap", r - 1, r)
             lst[r], lst[r-1] = lst[r-1], lst[r]
             self._load_step_list_from_memory()
             self.step_list.setCurrentRow(r-1)
@@ -763,6 +1031,7 @@ class SequenceEditorDialog(QDialog):
         r = self.step_list.currentRow()
         lst = self.sequences[self.current_seq_key]
         if r < len(lst)-1:
+            self._fix_jmp_targets("swap", r, r + 1)
             lst[r], lst[r+1] = lst[r+1], lst[r]
             self._load_step_list_from_memory()
             self.step_list.setCurrentRow(r+1)
@@ -805,8 +1074,9 @@ class SequenceEditorDialog(QDialog):
         
         sorted_p_names = sorted(list(self.points_library.keys()))
         point_map = {name: i for i, name in enumerate(sorted_p_names)}
-        seq_map = {"Main": 0}
-        sub = sorted([k for k in self.sequences.keys() if k != "Main"])
+        seq_map = {"Main": 0, MONITOR_SEQ_KEY: 39}
+        reserved = set(seq_map.keys())
+        sub = sorted([k for k in self.sequences.keys() if k not in reserved])
         for i, k in enumerate(sub): seq_map[k] = i + 1
         success = True
         for seq_name, slot_id in seq_map.items():
@@ -852,29 +1122,38 @@ class SequenceEditorDialog(QDialog):
             if dlg.exec() == QDialog.Accepted:
                 name = dlg.get_name()
                 if name:
-                    self.points_library[name] = {"coords": [0.0]*8, "speeds": [100.0]*8}
+                    self.points_library[name] = {
+                        "coords": [0.0]*8,
+                        "speeds": [100.0]*8,
+                        "visible_mode": dlg.get_visible_mode(),
+                    }
+                    if self.active_step_data is not None:
+                        self.active_step_data["point_name"] = name
                     self._refresh_point_selector()
-                    idx = self.point_combo.findText(name)
-                    if idx >= 0: self.point_combo.setCurrentIndex(idx)
 
     def _on_rename_point_clicked(self):
         if not hasattr(self, 'btn_point_select'): return
         old = self.btn_point_select.text()
-        
+
         if RenameDialog:
-            dlg = RenameDialog(old, list(self.points_library.keys()), self)
+            cur_vm = self.points_library.get(old, {}).get("visible_mode", -1)
+            dlg = RenameDialog(old, list(self.points_library.keys()), self, visible_mode=cur_vm)
             if dlg.exec() == QDialog.Accepted:
                 new = dlg.get_new_name()
-                if new:
+                new_vm = dlg.get_visible_mode()
+                if new and new != old:
                     self.points_library[new] = self.points_library.pop(old)
                     for seq in self.sequences.values():
                         for s in seq:
                             if s.get("point_name") == old: s["point_name"] = new
-                    
                     if self.active_step_data.get("point_name") == old:
                         self.active_step_data["point_name"] = new
-                    self._refresh_point_selector()
-                    self._load_step_list_from_memory()
+                    old = new
+                # visible_mode 항상 업데이트
+                if old in self.points_library:
+                    self.points_library[old]["visible_mode"] = new_vm
+                self._refresh_point_selector()
+                self._load_step_list_from_memory()
 
     def _on_delete_point_clicked(self):
         if not hasattr(self, 'btn_point_select'): return
@@ -898,13 +1177,18 @@ class SequenceEditorDialog(QDialog):
         self.lbl_curr_seq.setText(f" {self.current_seq_key}")
         seq_count = len(self.sequences)
         if seq_count > 1:
-            self.btn_seq_list.setEnabled(True)
-            self.btn_seq_list.setStyleSheet("border: 1px solid #FFFFFF; color: white;")
-            self.btn_seq_list.setText(f" 목록 ({seq_count})")
+            self.lbl_curr_seq.setStyleSheet("""
+                QLabel { background: rgba(70,140,255,0.1); border: 2px solid #468CFF;
+                         border-radius: 6px; color: #468CFF; font-size: 18px;
+                         font-weight: bold; padding-left: 15px; }
+                QLabel:hover { background: rgba(70,140,255,0.25); }
+            """)
         else:
-            self.btn_seq_list.setEnabled(False)
-            self.btn_seq_list.setStyleSheet("border: 1px solid #555; color: #777;")
-            self.btn_seq_list.setText(" 목록")
+            self.lbl_curr_seq.setStyleSheet("""
+                QLabel { background: rgba(70,140,255,0.05); border: 2px solid #335a99;
+                         border-radius: 6px; color: #5578aa; font-size: 18px;
+                         font-weight: bold; padding-left: 15px; }
+            """)
         self.btn_del_seq.setEnabled(self.current_seq_key != "Main")
 
     def _on_add_sequence(self):
@@ -921,13 +1205,34 @@ class SequenceEditorDialog(QDialog):
 
     def _open_sequence_list(self):
         if SequenceListDialog:
-            dlg = SequenceListDialog(self.sequences.keys(), self.current_seq_key, self)
+            seq_map = {MONITOR_SEQ_KEY: 39, "Main": 0}
+            reserved = set(seq_map.keys())
+            for i, k in enumerate(sorted(k for k in self.sequences if k not in reserved)):
+                seq_map[k] = i + 1
+            dlg = SequenceListDialog(self.sequences.keys(), self.current_seq_key, self, seq_map=seq_map)
             if dlg.exec() == QDialog.Accepted:
-                selected = dlg.get_selected()
-                if selected:
-                    self.current_seq_key = selected
-                    self._update_sequence_info()
-                    self._load_step_list_from_memory()
+                if dlg.rename_requested:
+                    self._rename_sequence(dlg.rename_requested)
+                else:
+                    selected = dlg.get_selected()
+                    if selected:
+                        self.current_seq_key = selected
+                        self._update_sequence_info()
+                        self._load_step_list_from_memory()
+
+    def _rename_sequence(self, old_name):
+        if not RenameDialog: return
+        if old_name in ("Main", MONITOR_SEQ_KEY): return
+        dlg = RenameDialog(old_name, list(self.sequences.keys()), self, confirm_text="변경")
+        if dlg.exec() == QDialog.Accepted:
+            new_name = dlg.get_new_name()
+            if new_name and new_name != old_name:
+                self.sequences = {(new_name if k == old_name else k): v
+                                  for k, v in self.sequences.items()}
+                if self.current_seq_key == old_name:
+                    self.current_seq_key = new_name
+                self._update_sequence_info()
+                self._load_step_list_from_memory()
 
     def _on_delete_sequence(self):
         if self.current_seq_key == "Main": return
@@ -962,7 +1267,7 @@ class SequenceEditorDialog(QDialog):
                     coords = self.points_library.get(selected, {}).get("coords", [0.0]*8)
                     for i in range(8):
                         if self.pos_labels[i] is not None:
-                            self.pos_labels[i].setText(f"{coords[i]:.2f}")
+                            self.pos_labels[i].setText(f"{coords[i]:.3f}")
 
     # ★ [수정] 버튼 텍스트 갱신 함수
     def _refresh_point_selector(self):
@@ -983,211 +1288,204 @@ class SequenceEditorDialog(QDialog):
         step_type = self.active_step_data.get("type", "OUT") if self.active_step_data else "OUT"
         
         if step_type == "OUT":
-            # ========== OUT 스텝: 밸브 설정 + 내부 제어 비트 ==========
-            import os
-            import json
-            
-            items = []
-            valve_indices = []  # 실제 비트 인덱스 저장
-            
+            # ========== OUT 스텝: 출력 구분별 비트 선택 ==========
+            out_type = self.active_step_data.get("out_type", 0) if self.active_step_data else 0
+            current_port = self.active_step_data.get("port", 0) if self.active_step_data else 0
+
             try:
-                path = "settings.json"
-                if os.path.exists(path):
-                    with open(path, 'r', encoding='utf-8') as f:
-                        settings = json.load(f)
-                        valve_config = settings.get("valve_config", [])
-                        
-                        if valve_config:
-                            # order 순서대로 정렬
-                            valve_config.sort(key=lambda x: x.get("order", 0))
-                            
-                            # 사용 가능한 밸브만 필터링
-                            for cfg in valve_config:
-                                if cfg.get("enabled", True):
-                                    items.append(cfg.get("name", f"밸브 {cfg.get('index', 0)+1}"))
-                                    valve_indices.append(cfg.get("index", 0))
-            except Exception as e:
-                print(f"[시퀀스 편집기] 밸브 설정 로드 실패: {e}")
-            
-            # 설정 로드 실패 시 기본값
-            if not items:
-                try:
-                    from ui.dialogs.sequence_step_ui import VALVE_LIST
-                    items = VALVE_LIST
-                    valve_indices = list(range(len(items)))
-                except:
-                    items = [f"밸브 {i+1}" for i in range(16)]
-                    valve_indices = list(range(16))
-            
-            # ★ 내부 제어 비트 32개 추가 (비트 100~131)
-            for i in range(32):
-                items.append(f" M{i:02d} (내부비트)")
-                valve_indices.append(100 + i)  # 100~131
-            
+                from utils.io_manager import IOManager
+                _mgr = IOManager.instance()
+            except Exception:
+                _mgr = None
+
+            if out_type == 0:   # 시스템 출력 Y00~Y0F (DT203, 16비트)
+                if _mgr:
+                    items = [f"Y{i:02X}: {_mgr.get_output_name(i)}" for i in range(16)]
+                else:
+                    items = [f"Y{i:02X}" for i in range(16)]
+                title = "시스템 출력 선택 (Y00~Y0F)"
+            elif out_type == 1: # 밸브 출력 Y20~Y2F (DT204, 16비트)
+                if _mgr:
+                    items = [f"Y{0x20+i:02X}: {_mgr.get_output_name(16+i)}" for i in range(16)]
+                else:
+                    items = [f"Y{0x20+i:02X}" for i in range(16)]
+                title = "밸브 출력 선택 (Y20~Y2F)"
+            else:               # 내부 비트 (M00~M31)
+                items = [f"M{i:02d} (내부비트)" for i in range(32)]
+                title = "내부 비트 선택 (M00~M31)"
+
+            current = items[current_port] if 0 <= current_port < len(items) else None
+
             from ui.dialogs.sequence_utils import CardListDialog
-            
-            # 현재 선택된 비트 인덱스로 이름 찾기
-            current_bit_index = self.io_combo.currentIndex() if self.io_combo.currentIndex() >= 0 else -1
-            current = None
-            if current_bit_index >= 0 and current_bit_index < len(items):
-                current = items[current_bit_index]
-            
-            dlg = CardListDialog(items, current, "[Y] 출력 포트를 선택하세요", columns=4, parent=self)
+            dlg = CardListDialog(items, current, title, columns=4, parent=self)
             if dlg.exec() == QDialog.Accepted:
                 selected = dlg.get_selected()
                 if selected and selected in items:
-                    # 선택한 밸브의 실제 비트 인덱스 찾기
-                    list_idx = items.index(selected)
-                    bit_idx = valve_indices[list_idx]
-                    
-                    # ★ active_step_data에 직접 저장
+                    bit_idx = items.index(selected)
                     if self.active_step_data:
                         self.active_step_data["port"] = bit_idx
-                    
-                    # io_combo에도 저장 (호환성)
                     self.io_combo.setCurrentIndex(bit_idx)
-                    
-                    # 버튼 텍스트도 업데이트
                     if hasattr(self, 'io_combo_btn'):
-                        self.io_combo_btn.setText(selected)
-                    
-                    print(f"[시퀀스 편집기] OUT 포트 선택: {selected} (bit_idx={bit_idx})")
+                        self.io_combo_btn.setText(self._get_out_name(out_type, bit_idx))
+                    print(f"[시퀀스 편집기] OUT 포트 선택: {selected} (out_type={out_type}, bit_idx={bit_idx})")
         
         else:  # step_type == "IN"
-            # ========== IN 스텝: 입력 + 내부 제어 비트 ==========
+            # ========== IN 스텝: 입력 구분별 필터링 ==========
+            in_type = self.active_step_data.get("in_type", 0) if self.active_step_data else 0
+            current_port = self.active_step_data.get("port", 0) if self.active_step_data else 0
+
             try:
                 from utils.io_manager import IOManager
                 mgr = IOManager.instance() if IOManager else None
-                
-                items = []
-                port_indices = []  # 포트 인덱스 저장
-                
-                # X0~X3F (64개 입력)
-                for i in range(64):
-                    if mgr:
-                        name = mgr.get_input_name(i)
-                        if name:
-                            items.append(f"X{i:02X}: {name}")
-                        else:
-                            items.append(f"X{i:02X}")
-                    else:
-                        items.append(f"X{i:02X}")
+            except Exception:
+                mgr = None
+
+            items = []
+            port_indices = []
+
+            if in_type == 0:  # 시스템 입력 X00~X0F
+                for i in range(16):
+                    name = mgr.get_input_name(i) if mgr else f"X{i:02X}"
+                    items.append(f"X{i:02X}: {name}")
                     port_indices.append(i)
-                
-                # ★ 내부 제어 비트 32개 추가 (100~131)
-                for i in range(32):
-                    items.append(f" M{i:02d} (내부비트)")
-                    port_indices.append(100 + i)  # 100~131
-                
-            except Exception as e:
-                print(f"[시퀀스 편집기] 입력 이름 로드 실패: {e}")
-                items = [f"X{i:02X}" for i in range(64)]
-                port_indices = list(range(64))
-                # 내부 비트 추가
-                for i in range(32):
-                    items.append(f" M{i:02d} (내부비트)")
-                    port_indices.append(100 + i)
-            
-            from ui.dialogs.sequence_utils import CardListDialog
-            
-            # 현재 선택된 포트 번호
-            current_port = self.io_combo.currentIndex() if self.io_combo.currentIndex() >= 0 else 0
+                title = "시스템 입력 선택 (X00~X0F)"
+            elif in_type == 1:  # 밸브 입력 X20~X2F
+                for i in range(16):
+                    x_addr = 0x20 + i
+                    io_idx = 16 + i
+                    name = mgr.get_input_name(io_idx) if mgr else f"X{x_addr:02X}"
+                    items.append(f"X{x_addr:02X}: {name}")
+                    port_indices.append(x_addr)  # 32~47
+                title = "밸브 입력 선택 (X20~X2F)"
+            elif in_type == 2:  # 내부 비트 M00~M31
+                items = [f"M{i:02d} (내부비트)" for i in range(32)]
+                port_indices = [100 + i for i in range(32)]
+                title = "내부 비트 선택 (M00~M31)"
+            else:  # R입력 R00~R0F (DT126 비트)
+                items = [f"R{i:02X}" for i in range(16)]
+                port_indices = [200 + i for i in range(16)]
+                title = "R입력 선택 (R00~R0F, DT126)"
+
             current = None
-            if current_port < len(items):
-                # port_indices에서 current_port와 일치하는 항목 찾기
-                try:
-                    idx = port_indices.index(current_port)
-                    current = items[idx]
-                except ValueError:
-                    current = None
-            
-            dlg = CardListDialog(items, current, " 입력/내부비트를 선택하세요", columns=4, parent=self)
+            try:
+                idx = port_indices.index(current_port)
+                current = items[idx]
+            except ValueError:
+                current = None
+
+            from ui.dialogs.sequence_utils import CardListDialog
+            dlg = CardListDialog(items, current, title, columns=4, parent=self)
             if dlg.exec() == QDialog.Accepted:
                 selected = dlg.get_selected()
                 if selected and selected in items:
                     list_idx = items.index(selected)
-                    port_idx = port_indices[list_idx]  # ★ port_indices에서 실제 인덱스 가져오기
-                    
-                    # ★ active_step_data에 직접 저장
+                    port_idx = port_indices[list_idx]
                     if self.active_step_data:
                         self.active_step_data["port"] = port_idx
-                    
-                    # io_combo에도 저장 (호환성)
-                    self.io_combo.setCurrentIndex(port_idx)
-                    
-                    # 버튼 텍스트도 업데이트
+                    self.io_combo.setCurrentIndex(port_idx if port_idx < 100 else 0)
                     if hasattr(self, 'io_combo_btn'):
                         self.io_combo_btn.setText(selected)
-                    
                     print(f"[시퀀스 편집기] IN 포트 선택: {selected} (port_idx={port_idx})")
     
-    def _open_jmp_port_selector(self):
-        """JMP 조건 - 입력/내부비트 선택 팝업"""
-        if not hasattr(self, 'jmp_port_combo'): return
-        
-        # 입력 (X0~X3F) + 내부비트 (M00~M31)
+    def _open_jmp_input_selector(self):
+        """JMP 조건 - 시스템입력 (X00~X0F) 선택 팝업"""
+        if not hasattr(self, 'jmp_input_combo'): return
+
         try:
             from utils.io_manager import IOManager
             mgr = IOManager.instance() if IOManager else None
-            
             items = []
             port_indices = []
-            
-            # X0~X3F (64개 입력)
-            for i in range(64):
-                if mgr:
-                    name = mgr.get_input_name(i)
-                    if name:
-                        items.append(f"X{i:02X}: {name}")
-                    else:
-                        items.append(f"X{i:02X}")
-                else:
-                    items.append(f"X{i:02X}")
+            for i in range(16):  # X00~X0F
+                name = mgr.get_input_name(i) if mgr else None
+                items.append(f"X{i:02X}: {name}" if name else f"X{i:02X}")
                 port_indices.append(i)
-            
-            # M00~M31 (32개 내부비트)
-            for i in range(32):
-                items.append(f" M{i:02d} (내부비트)")
-                port_indices.append(100 + i)
-            
-        except Exception as e:
-            print(f"[시퀀스 편집기] JMP 입력 로드 실패: {e}")
-            items = [f"X{i:02X}" for i in range(64)]
-            port_indices = list(range(64))
-            for i in range(32):
-                items.append(f" M{i:02d} (내부비트)")
-                port_indices.append(100 + i)
-        
-        from ui.dialogs.sequence_utils import CardListDialog
-        
-        # ★ 현재 선택 (active_step_data에서 가져오기)
-        current_port = self.active_step_data.get("cond_value", 0) if self.active_step_data else 0
+        except Exception:
+            items = [f"X{i:02X}" for i in range(16)]
+            port_indices = list(range(16))
+
+        current_val = self.active_step_data.get("cond_value", 0) if self.active_step_data else 0
         current = None
         try:
-            idx = port_indices.index(current_port)
-            current = items[idx]
-        except (ValueError, IndexError):
-            current = None
-        
-        print(f"[DEBUG] JMP 포트 선택 팝업 - current_port={current_port}, current={current}")
-        
-        dlg = CardListDialog(items, current, " 입력/내부비트를 선택하세요", columns=4, parent=self)
+            current = items[port_indices.index(current_val)]
+        except ValueError:
+            pass
+
+        from ui.dialogs.sequence_utils import CardListDialog
+        dlg = CardListDialog(items, current, " 시스템입력을 선택하세요", columns=4, parent=self)
         if dlg.exec() == QDialog.Accepted:
             selected = dlg.get_selected()
             if selected and selected in items:
-                list_idx = items.index(selected)
-                port_idx = port_indices[list_idx]
-                
-                # active_step_data에 직접 저장
+                port_idx = port_indices[items.index(selected)]
                 if self.active_step_data:
                     self.active_step_data["cond_value"] = port_idx
-                
-                self.jmp_port_combo.setCurrentIndex(port_idx)
-                
-                if hasattr(self, 'jmp_port_btn'):
-                    self.jmp_port_btn.setText(selected)
-                
-                print(f"[시퀀스 편집기] JMP 포트 선택: {selected} (port_idx={port_idx})")
+                self.jmp_input_combo.setCurrentIndex(port_idx)
+                if hasattr(self, 'jmp_input_btn'):
+                    self.jmp_input_btn.setText(selected)
+
+    def _open_jmp_valve_selector(self):
+        """JMP 조건 - 밸브입력 (X20~X2F) 선택 팝업"""
+        if not hasattr(self, 'jmp_valve_combo'): return
+
+        try:
+            from utils.io_manager import IOManager
+            mgr = IOManager.instance() if IOManager else None
+            items = []
+            port_indices = []
+            for i in range(16):  # X20~X2F (port_idx 32~47)
+                port_idx = 32 + i
+                io_idx = 16 + i  # IOManager 내 인덱스 (X20 = io_idx 16)
+                name = mgr.get_input_name(io_idx) if mgr else None
+                items.append(f"X{port_idx:02X}: {name}" if name else f"X{port_idx:02X}")
+                port_indices.append(port_idx)
+        except Exception:
+            items = [f"X{32+i:02X}" for i in range(16)]
+            port_indices = list(range(32, 48))
+
+        current_val = self.active_step_data.get("cond_value", 32) if self.active_step_data else 32
+        current = None
+        try:
+            current = items[port_indices.index(current_val)]
+        except ValueError:
+            pass
+
+        from ui.dialogs.sequence_utils import CardListDialog
+        dlg = CardListDialog(items, current, " 밸브입력을 선택하세요", columns=4, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            selected = dlg.get_selected()
+            if selected and selected in items:
+                port_idx = port_indices[items.index(selected)]
+                if self.active_step_data:
+                    self.active_step_data["cond_value"] = port_idx
+                self.jmp_valve_combo.setCurrentIndex(port_idx - 32)
+                if hasattr(self, 'jmp_valve_btn'):
+                    self.jmp_valve_btn.setText(selected)
+
+    def _open_jmp_bit_selector(self):
+        """JMP 조건 - 내부비트 (M) 선택 팝업"""
+        if not hasattr(self, 'jmp_bit_combo'): return
+
+        items = [f"M{i:02d} (내부비트)" for i in range(32)]
+        port_indices = [100 + i for i in range(32)]
+
+        current_val = self.active_step_data.get("cond_value", 100) if self.active_step_data else 100
+        current = None
+        try:
+            current = items[port_indices.index(current_val)]
+        except ValueError:
+            pass
+
+        from ui.dialogs.sequence_utils import CardListDialog
+        dlg = CardListDialog(items, current, " 내부비트를 선택하세요", columns=4, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            selected = dlg.get_selected()
+            if selected and selected in items:
+                port_idx = port_indices[items.index(selected)]
+                if self.active_step_data:
+                    self.active_step_data["cond_value"] = port_idx
+                self.jmp_bit_combo.setCurrentIndex(port_idx - 100)
+                if hasattr(self, 'jmp_bit_btn'):
+                    self.jmp_bit_btn.setText(selected)
     
     def _open_jmp_mode_selector(self):
         """JMP 조건 - 모드 선택 팝업"""
@@ -1262,7 +1560,7 @@ class SequenceEditorDialog(QDialog):
         
         # 현재 시퀀스의 스텝 리스트
         steps = self.sequences.get(self.current_seq_key, [])
-        items = [f"Step {i}: {s.get('name', 'Unnamed')}" for i, s in enumerate(steps)]
+        items = [f"[{i+1:02d}] {s.get('name', 'Unnamed')}" for i, s in enumerate(steps)]
         
         if not items:
             items = ["(스텝 없음)"]
@@ -1280,40 +1578,34 @@ class SequenceEditorDialog(QDialog):
                 if hasattr(self, 'jmp_target_btn'):
                     self.jmp_target_btn.setText(selected)
     
-    def _open_timeout_jump_selector(self):
-        """IN 타임아웃 점프 타겟 선택 팝업"""
-        if not hasattr(self, 'timeout_jump_combo'): return
-        
-        # 현재 시퀀스의 스텝 리스트
-        steps = self.sequences.get(self.current_seq_key, [])
-        items = [f"[{i:02d}] {s.get('name', 'Unnamed')}" for i, s in enumerate(steps)]
-        
-        if not items:
-            items = ["(스텝 없음)"]
-        
+    def _open_timeout_alarm_selector(self):
+        """IN 타임아웃 알람 번호 선택 팝업"""
+        if self.active_step_data is None: return
+
+        try:
+            from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        except ImportError:
+            return
+
         from ui.dialogs.sequence_utils import CardListDialog
-        
-        # 현재 선택
-        current_idx = self.active_step_data.get("timeout_jump", 0) if self.active_step_data else 0
-        current = items[current_idx] if current_idx < len(items) else None
-        
-        dlg = CardListDialog(items, current, " 타임아웃 시 점프할 스텝", columns=3, parent=self)
+
+        items = [f"A-{no:03d}: {msg}" for no, msg in sorted(SEQUENCE_ALARMS.items())]
+        if not items:
+            return
+
+        current_no = self.active_step_data.get("timeout_alarm_no", 1)
+        current = f"A-{current_no:03d}: {SEQUENCE_ALARMS.get(current_no, '')}"
+
+        dlg = CardListDialog(items, current, " 알람 번호 선택", columns=2, parent=self)
         if dlg.exec() == QDialog.Accepted:
             selected = dlg.get_selected()
-            if selected and selected != "(스텝 없음)":
-                idx = items.index(selected)
-                
-                # active_step_data에 직접 저장
-                if self.active_step_data:
-                    self.active_step_data["timeout_jump"] = idx
-                
-                self.timeout_jump_combo.setCurrentIndex(idx)
-                
-                # 버튼 텍스트도 업데이트
-                if hasattr(self, 'timeout_jump_btn'):
-                    self.timeout_jump_btn.setText(selected)
-                
-                print(f"[시퀀스 편집기] 타임아웃 점프 타겟: {selected} (idx={idx})")
+            if selected:
+                # "A-001: 메시지" 형식에서 번호 파싱
+                alarm_no = int(selected[2:5])
+                self.active_step_data["timeout_alarm_no"] = alarm_no
+                if hasattr(self, 'timeout_alarm_btn'):
+                    self.timeout_alarm_btn.setText(selected)
+                print(f"[시퀀스 편집기] 타임아웃 알람 선택: {selected}")
     
     def _open_call_selector(self):
         """CALL 시퀀스 선택 팝업"""
@@ -1351,6 +1643,162 @@ class SequenceEditorDialog(QDialog):
     # ★ [신규] 밸브 설정 헬퍼 함수
     # =========================================================
     
+    def _get_out_name(self, out_type, bit_index):
+        """출력 구분 + 비트 인덱스 → 표시 이름 (IOManager 실제 이름 사용)"""
+        try:
+            from utils.io_manager import IOManager
+            mgr = IOManager.instance()
+            if out_type == 0:  # 시스템 출력 Y00~Y0F
+                name = mgr.get_output_name(bit_index)
+                return f"Y{bit_index:02X}: {name}"
+            elif out_type == 1:  # 밸브 출력 Y20~Y2F
+                io_idx = 16 + bit_index
+                y_addr = 0x20 + bit_index
+                name = mgr.get_output_name(io_idx)
+                return f"Y{y_addr:02X}: {name}"
+        except Exception:
+            pass
+        if out_type == 0:
+            return f"Y{bit_index:02X}"
+        elif out_type == 1:
+            return f"Y{0x20 + bit_index:02X}"
+        else:
+            return f"M{bit_index:02d} (내부비트)"
+
+    def _open_out_delay_timer_selector(self):
+        """OUT 스텝 - 타이머 기동후출력 타이머 선택"""
+        if self.active_step_data is None:
+            return
+        ADD_KEY = "+ 새 타이머 추가"
+        timer_names = [ADD_KEY] + list(self.timer_library.keys())
+        current_ref = self.active_step_data.get("delay_timer_ref", None)
+        if CardListDialog:
+            def _delete_timer(name):
+                if name in self.timer_library:
+                    del self.timer_library[name]
+            dlg = CardListDialog(timer_names, current=current_ref, title="[딜레이] 타이머를 선택하세요", columns=4,
+                                 on_delete=_delete_timer, parent=self)
+            result = dlg.exec()
+            selected = dlg.get_selected() if result == QDialog.Accepted else None
+        else:
+            selected = None
+
+        if selected == ADD_KEY:
+            self._add_timer_to_library()
+            return
+
+        if selected and selected in self.timer_library:
+            time_sec = float(self.timer_library[selected])
+            self.active_step_data["delay_timer_ref"] = selected
+            self.active_step_data["delay_time"] = time_sec
+            if hasattr(self, 'out_delay_timer_btn'):
+                self.out_delay_timer_btn.setText(f"{selected}  ({time_sec:.1f}s)")
+
+    def _on_out_type_changed(self, checked):
+        """OUT 타입 변경 시 포트 리셋"""
+        if not checked: return
+        if self._is_loading: return
+        if self.active_step_data is None: return
+        if self.active_step_data.get("type") != "OUT": return
+        out_type = self.out_type_grp.checkedId()
+        self.active_step_data["out_type"] = out_type
+        self.active_step_data["port"] = 0
+        if hasattr(self, 'io_combo_btn'):
+            self.io_combo_btn.setText(self._get_out_name(out_type, 0))
+
+    def _on_in_type_changed(self, checked):
+        """IN 타입 변경 시 포트 리셋"""
+        if not checked: return
+        if self._is_loading: return
+        if self.active_step_data is None: return
+        if self.active_step_data.get("type") != "IN": return
+        in_type = self.in_type_grp.checkedId()
+        self.active_step_data["in_type"] = in_type
+        default_port = 200 if in_type == 3 else (100 if in_type == 2 else 0)
+        self.active_step_data["port"] = default_port
+        if hasattr(self, 'io_combo_btn'):
+            self.io_combo_btn.setText(self._get_input_name_by_index(default_port))
+
+    def _on_tmr_mode_changed(self, checked=False):
+        """TMR 모드 전환 (단순 대기 ↔ 신호 유지)"""
+        if self._is_loading: return
+        if self.active_step_data is None: return
+        if self.active_step_data.get("type") != "TMR": return
+        is_hold = hasattr(self, 'rb_tmr_hold') and self.rb_tmr_hold.isChecked()
+        self.active_step_data["tmr_mode"] = "hold" if is_hold else "simple"
+        if hasattr(self, 'tmr_mode_stack'):
+            self.tmr_mode_stack.setCurrentIndex(1 if is_hold else 0)
+
+    def _on_tmr_hold_type_changed(self, checked=False):
+        """TMR 신호유지 - 입력 구분 변경 시 포트 리셋"""
+        if not checked: return
+        if self._is_loading: return
+        if self.active_step_data is None: return
+        in_type = self.tmr_hold_type_grp.checkedId()
+        self.active_step_data["in_type"] = in_type
+        self.active_step_data["port"] = 0
+        if hasattr(self, 'tmr_hold_io_btn'):
+            self.tmr_hold_io_btn.setText(self._get_input_name_by_index(0))
+
+    def _on_tmr_hold_value_changed(self):
+        """TMR 신호유지 - 상태(ON/OFF) 변경 저장"""
+        if self._is_loading: return
+        if self.active_step_data is None: return
+        if hasattr(self, 'tmr_hold_rb_on'):
+            self.active_step_data["on"] = self.tmr_hold_rb_on.isChecked()
+
+    def _open_tmr_hold_io_selector(self):
+        """TMR 신호유지 - 감시 신호 선택 팝업"""
+        if self.active_step_data is None: return
+        in_type = self.active_step_data.get("in_type", 0)
+        current_port = self.active_step_data.get("port", 0)
+
+        try:
+            from utils.io_manager import IOManager
+            mgr = IOManager.instance() if IOManager else None
+        except Exception:
+            mgr = None
+
+        items = []
+        port_indices = []
+        if in_type == 0:
+            for i in range(16):
+                name = mgr.get_input_name(i) if mgr else f"X{i:02X}"
+                items.append(f"X{i:02X}: {name}")
+                port_indices.append(i)
+            title = "시스템 입력 선택 (X00~X0F)"
+        elif in_type == 1:
+            for i in range(16):
+                x_addr = 0x20 + i
+                name = mgr.get_input_name(16 + i) if mgr else f"X{x_addr:02X}"
+                items.append(f"X{x_addr:02X}: {name}")
+                port_indices.append(x_addr)
+            title = "밸브 입력 선택 (X20~X2F)"
+        elif in_type == 2:
+            items = [f"M{i:02d} (내부비트)" for i in range(32)]
+            port_indices = [100 + i for i in range(32)]
+            title = "내부 비트 선택 (M00~M31)"
+        else:  # R입력 R00~R0F (DT126 비트)
+            items = [f"R{i:02X}" for i in range(16)]
+            port_indices = [200 + i for i in range(16)]
+            title = "R입력 선택 (R00~R0F, DT126)"
+
+        current = None
+        try:
+            current = items[port_indices.index(current_port)]
+        except ValueError:
+            pass
+
+        from ui.dialogs.sequence_utils import CardListDialog
+        dlg = CardListDialog(items, current, title, columns=4, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            selected = dlg.get_selected()
+            if selected and selected in items:
+                port_idx = port_indices[items.index(selected)]
+                self.active_step_data["port"] = port_idx
+                if hasattr(self, 'tmr_hold_io_btn'):
+                    self.tmr_hold_io_btn.setText(selected)
+
     def _get_valve_name_by_index(self, bit_index):
         """비트 인덱스로 밸브 이름 가져오기"""
         # ★ 내부 제어 비트 (100~131)
@@ -1379,23 +1827,29 @@ class SequenceEditorDialog(QDialog):
     
     def _get_input_name_by_index(self, port_index):
         """포트 번호로 입력 이름 가져오기 (IOManager 사용)"""
-        # ★ 내부 제어 비트 (100~131)
+        if 200 <= port_index <= 215:
+            return f"R{port_index-200:02X} (DT126.{port_index-200})"
         if 100 <= port_index <= 131:
-            return f" M{port_index-100:02d} (내부비트)"
-        
+            return f"M{port_index-100:02d} (내부비트)"
+
         try:
             from utils.io_manager import IOManager
             mgr = IOManager.instance() if IOManager else None
-            
             if mgr:
-                name = mgr.get_input_name(port_index)
-                if name:
-                    return f"X{port_index:02X}: {name}"  # ★ 16진수 표기
-        except:
+                # port 0~15 → IOManager.inputs[0~15] (X00~X0F)
+                # port 32~47 → IOManager.inputs[16~31] (X20~X2F)
+                if 0 <= port_index < 16:
+                    io_idx = port_index
+                elif 32 <= port_index < 48:
+                    io_idx = port_index - 16
+                else:
+                    io_idx = port_index
+                name = mgr.get_input_name(io_idx)
+                return f"X{port_index:02X}: {name}"
+        except Exception:
             pass
-        
-        # 기본값
-        return f"X{port_index:02X}"  # ★ 16진수 표기
+
+        return f"X{port_index:02X}"
     
     def _get_mode_name_by_index(self, mode_index):
         """모드 번호로 모드 이름 가져오기 (ModeManager 사용)"""

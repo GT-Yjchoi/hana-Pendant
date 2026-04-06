@@ -8,11 +8,12 @@ class JogControlDialog(QWidget):
     sig_jog_event = Signal(str, bool)
     _last_speed = 1  # 마지막 선택 속도 기억 (클래스 변수)
 
-    def __init__(self, plc_client=None, parent=None):
+    def __init__(self, plc_client=None, page_manual=None, parent=None):
         super().__init__(parent)
         self.plc_client = plc_client
+        self.page_manual = page_manual
 
-        _W, _H = 280, 630  # 패널 크기
+        _W, _H = 280, 760  # 패널 크기
 
         if parent:
             main_window = parent.window()
@@ -73,9 +74,9 @@ class JogControlDialog(QWidget):
         cross_frame = QFrame()
         cross_frame.setStyleSheet("background: rgba(255,255,255,0.03); border-radius: 12px; border: none;")
         cross_layout = QGridLayout(cross_frame)
-        cross_layout.setSpacing(6); cross_layout.setContentsMargins(6, 6, 6, 6)
+        cross_layout.setSpacing(8); cross_layout.setContentsMargins(8, 8, 8, 8)
         
-        btn_size = (60, 60) 
+        btn_size = (70, 75)
         self.btn_up = self._create_btn("상 (Z-)", btn_size)
         self.btn_down = self._create_btn("하 (Z+)", btn_size)
         self.btn_front = self._create_btn("전 (Y+)", btn_size)
@@ -120,7 +121,34 @@ class JogControlDialog(QWidget):
             self.speed_btns.append(btn)
 
         layout.addLayout(speed_layout)
-        layout.addSpacing(15) 
+        layout.addSpacing(10)
+
+        # 런너암 전환 버튼
+        self.btn_runner_arm = QPushButton()
+        self.btn_runner_arm.setCheckable(True)
+        self.btn_runner_arm.setMinimumHeight(55)
+        self.btn_runner_arm.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0,180,255,0.15);
+                border: 2px solid #00B4FF;
+                border-radius: 8px;
+                color: #00B4FF; font-weight: bold; font-size: 16px;
+            }
+            QPushButton:checked {
+                background-color: rgba(255,180,0,0.25);
+                border: 2px solid #FFB400;
+                color: #FFB400;
+            }
+            QPushButton:disabled {
+                background-color: rgba(255,255,255,0.03);
+                border: 2px solid rgba(255,255,255,0.08);
+                color: #555;
+            }
+        """)
+        self.btn_runner_arm.toggled.connect(self._on_arm_toggled)
+        self._on_arm_toggled(False)
+        layout.addWidget(self.btn_runner_arm)
+        layout.addSpacing(10)
         # ---------------------------------------------------------
 
         # 4. 하단 보조 버튼
@@ -140,6 +168,27 @@ class JogControlDialog(QWidget):
         main_layout.addWidget(self.container)
 
         self._set_speed(JogControlDialog._last_speed)
+        self._init_runner_arm()
+
+    def _on_arm_toggled(self, checked):
+        self.btn_runner_arm.setText("런너암 조작" if checked else "제품암 조작")
+
+    def _init_runner_arm(self):
+        """PLC 연결 전 settings.json으로 초기 활성화 여부 결정"""
+        import os, json
+        try:
+            if os.path.exists("settings.json"):
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    s = json.load(f)
+                axis_uses = s.get("axis_uses", [True] * 8)
+                use_y2 = axis_uses[3] if len(axis_uses) > 3 else True
+                use_z2 = axis_uses[4] if len(axis_uses) > 4 else True
+                enabled = bool(use_y2 or use_z2)
+                self.btn_runner_arm.setEnabled(enabled)
+                if not enabled:
+                    self.btn_runner_arm.setChecked(False)
+        except Exception as e:
+            print(f"[JOG] Runner arm init error: {e}")
 
     def _create_btn(self, text, size=None, h=55):
         btn = QPushButton(text)
@@ -185,7 +234,7 @@ class JogControlDialog(QWidget):
         
         if self.plc_client and self.plc_client.is_connected:
             try:
-                self.plc_client.write_words(0x09, 211, [val])
+                self.plc_client.write_words(0x09, self.plc_client.ADDR_JOG_SPEED, [val])
             except Exception as e:
                 print(f"[JOG] Speed Error: {e}")
 
@@ -196,23 +245,25 @@ class JogControlDialog(QWidget):
         target_addr = 205
         area_code = 0x09
         
+        # 런너암 모드 여부 확인
+        is_runner = self.btn_runner_arm.isChecked()
+
         bit_pos = -1
-        
+
         if name == "주행 +": bit_pos = 0
         elif name == "주행 -": bit_pos = 1
-        elif name == "상 (Z-)": bit_pos = 2
-        elif name == "하 (Z+)": bit_pos = 3
-        elif name == "전 (Y+)": bit_pos = 4
-        elif name == "후 (Y-)": bit_pos = 5
-        
+        elif name == "전 (Y+)": bit_pos = 6 if is_runner else 2
+        elif name == "후 (Y-)": bit_pos = 7 if is_runner else 3
+        elif name == "하 (Z+)": bit_pos = 8 if is_runner else 4
+        elif name == "상 (Z-)": bit_pos = 9 if is_runner else 5
+
         elif name == "반전": bit_pos = 6
         elif name == "회전": bit_pos = 7
-        
-        # [수정] 변경된 버튼 이름에 맞춰 조건문 수정
+
         elif name == "척 개": bit_pos = 8
         elif name == "척 폐": bit_pos = 9
-        
-        elif name == "반전 복귀": bit_pos = 10 
+
+        elif name == "반전 복귀": bit_pos = 10
         elif name == "회전 복귀": bit_pos = 11
 
         if bit_pos >= 0:

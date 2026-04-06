@@ -1,8 +1,27 @@
 from PySide6.QtCore import QObject, Signal
 
 # 기본값
-DEFAULT_INPUTS = [f"X{i:02X}" for i in range(32)] 
-DEFAULT_OUTPUTS = [f"Y{i:02X}" for i in range(32)] 
+DEFAULT_INPUTS = [
+    "비상정지",       # X00
+    "안전문",         # X01
+    "사출기 전자동",  # X02
+    "형개완료",       # X03
+    "형폐완료",       # X04
+    "에젝터 전진완료",# X05
+    "에젝터 후퇴완료",# X06
+    "예비1",          # X07
+] + [f"X{i:02X}" for i in range(8, 32)]
+
+DEFAULT_OUTPUTS = [
+    "형개허가",       # Y00
+    "형폐허가",       # Y01
+    "에젝터 허가",    # Y02
+    "싸이클스타트",   # Y03
+    "컨베어출력1",    # Y04
+    "컨베어출력2",    # Y05
+    "예비1",          # Y06
+    "예비2",          # Y07
+] + [f"Y{i:02X}" for i in range(8, 32)]
 
 class IOManager(QObject):
     # 이름이 바뀌면 발생하는 신호

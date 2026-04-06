@@ -397,6 +397,16 @@ class PageSettings(GlassCard):
         self._init_valve_tab()
         self.tabs.addTab(self.tab_valve, "밸브 설정")
 
+        # 5. 알람 메시지 탭
+        self.tab_alarm = QWidget()
+        self._init_alarm_tab()
+        self.tabs.addTab(self.tab_alarm, "알람 메시지")
+
+        # 6. 인터록 설정 탭
+        self.tab_interlock = QWidget()
+        self._init_interlock_tab()
+        self.tabs.addTab(self.tab_interlock, "인터록 설정")
+
         self.body.addWidget(self.tabs)
 
         if IOManager:
@@ -475,7 +485,7 @@ class PageSettings(GlassCard):
         vbox.setContentsMargins(10, 10, 10, 20)
         
         # 밸브 설정 그룹박스
-        grp_valve = QGroupBox("밸브 설정 (V1 ~ V32)")
+        grp_valve = QGroupBox("밸브 설정 (Y00~Y0F / Y20~Y2F)")
         grp_valve.setStyleSheet(GROUPBOX_STYLE)
         grid = QGridLayout(grp_valve)
         grid.setContentsMargins(15, 35, 15, 15)
@@ -499,10 +509,10 @@ class PageSettings(GlassCard):
         
         for i in range(32):
             row = i + 1
-            
+
             # 사용 여부 체크박스
             chk = QCheckBox()
-            chk.setChecked(i < 16)  # 기본값: V1~V16만 사용
+            chk.setChecked(i >= 16)  # 기본값: Y20~Y2F 사용
             chk.setStyleSheet("""
                 QCheckBox::indicator {
                     width: 20px;
@@ -519,20 +529,27 @@ class PageSettings(GlassCard):
             self.valve_checks.append(chk)
             grid.addWidget(chk, row, 0, Qt.AlignCenter)
             
-            # 번호
-            lbl_num = QLabel(f"V{i+1}")
+            # 번호 (Y00~Y0F, Y20~Y2F)
+            y_addr = i if i < 16 else i + 16
+            lbl_num = QLabel(f"Y{y_addr:02X}")
             lbl_num.setAlignment(Qt.AlignCenter)
-            lbl_num.setStyleSheet("color: white; font-weight: bold; font-size: 12px;")
+            lbl_num.setStyleSheet("color: #FFD280; font-weight: bold; font-size: 12px; font-family: monospace;")
             grid.addWidget(lbl_num, row, 1)
-            
+
             # 이름 입력창 → 버튼으로 변경 (클릭하면 터치 키보드)
-            default_names = [
+            named_y0x = [
+                "형개허가", "형폐허가", "에젝터 허가", "싸이클스타트",
+                "컨베어출력1", "컨베어출력2", "예비1", "예비2",
+                f"예비 Y08", f"예비 Y09", f"예비 Y0A", f"예비 Y0B",
+                f"예비 Y0C", f"예비 Y0D", f"예비 Y0E", f"예비 Y0F",
+            ]
+            named_y2x = [
                 "척 1 (Chuck 1)", "척 2 (Chuck 2)", "척 3 (Chuck 3)", "척 4 (Chuck 4)",
                 "흡착 1 (Vac 1)", "흡착 2 (Vac 2)", "흡착 3 (Vac 3)", "흡착 4 (Vac 4)",
                 "포스쳐 반전", "포스쳐 복귀", "스위블 회전", "스위블 복귀",
                 "니퍼 컷팅 1", "니퍼 컷팅 2", "컨베이어 출력", "공급기 출력"
             ]
-            default_name = default_names[i] if i < len(default_names) else f"밸브 {i+1}"
+            default_name = named_y2x[i - 16] if i >= 16 else named_y0x[i]
             
             btn_name = QPushButton(default_name)
             btn_name.setFixedHeight(35)
@@ -635,8 +652,9 @@ class PageSettings(GlassCard):
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
         
-        # settings.json에서 밸브 설정 로드
+        # settings.json에서 밸브 설정 및 IO 입력 이름 로드
         self._load_valve_config()
+        self._load_io_input_names()
     
     def _edit_valve_name(self, idx):
         """터치 키보드로 밸브 이름 편집"""
@@ -698,41 +716,61 @@ class PageSettings(GlassCard):
         self.valve_mode_combos[idx1].setChecked(m2)
         self.valve_mode_combos[idx2].setChecked(m1)
     
+    def _build_valve_config(self):
+        """현재 UI 상태로 valve_config 리스트 생성"""
+        valve_config = []
+        for i in range(32):
+            mode = "toggle" if self.valve_mode_combos[i].isChecked() else "momentary"
+            valve_config.append({
+                "index": i,
+                "name": self.valve_name_edits[i].text(),
+                "mode": mode,
+                "enabled": self.valve_checks[i].isChecked(),
+                "order": i
+            })
+        return valve_config
+
+    def _save_valve_config_silent(self):
+        """팝업 없이 밸브 설정을 settings.json에 저장"""
+        try:
+            path = "settings.json"
+            settings = {}
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            settings["valve_config"] = self._build_valve_config()
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4, ensure_ascii=False)
+            self.sig_valve_config_changed.emit()
+            print("[Settings] 밸브 설정 자동 저장 완료")
+        except Exception as e:
+            print(f"[Settings] 밸브 설정 자동 저장 실패: {e}")
+
     def _save_valve_config(self):
         """밸브 설정을 settings.json에 저장"""
         try:
             path = "settings.json"
             settings = {}
-            
+
             # 기존 설정 로드
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
-            
-            # 밸브 설정 저장
-            valve_config = []
-            for i in range(32):
-                # 토글 버튼: isChecked() == True → "toggle", False → "momentary"
-                mode = "toggle" if self.valve_mode_combos[i].isChecked() else "momentary"
-                valve_config.append({
-                    "index": i,
-                    "name": self.valve_name_edits[i].text(),
-                    "mode": mode,
-                    "enabled": self.valve_checks[i].isChecked(),
-                    "order": i
-                })
-            
-            settings["valve_config"] = valve_config
-            
+
+            settings["valve_config"] = self._build_valve_config()
+
             # 파일에 저장
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=4, ensure_ascii=False)
-            
+
             print(f"[Settings] 밸브 설정 저장 완료")
-            
+
             # ★ 밸브 설정 변경 시그널 발생
             self.sig_valve_config_changed.emit()
-            
+
+            # IO 출력 이름 동기화
+            self._sync_valve_names_to_io()
+
             # 저장 완료 알림 (ConfirmOverlay는 이 파일 내에 정의되어 있음)
             dlg = ConfirmOverlay("저장 완료", "밸브 설정이 저장되었습니다.", btn_yes="확인", parent=self.window())
             dlg.btn_cancel.hide()
@@ -749,7 +787,7 @@ class PageSettings(GlassCard):
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
                     valve_config = settings.get("valve_config", None)
-                    
+
                     if valve_config and len(valve_config) == 32:
                         for i, cfg in enumerate(valve_config):
                             self.valve_checks[i].setChecked(cfg.get("enabled", True))
@@ -757,10 +795,27 @@ class PageSettings(GlassCard):
                             mode = cfg.get("mode", "toggle")
                             # 토글 버튼: "toggle" → True (checked), "momentary" → False
                             self.valve_mode_combos[i].setChecked(mode == "toggle")
-                        
+
                         print(f"[Settings] 밸브 설정 로드 완료")
         except Exception as e:
             print(f"[Settings] 밸브 설정 로드 실패: {e}")
+
+        self._sync_valve_names_to_io()
+
+    def _sync_valve_names_to_io(self):
+        """밸브 설정 이름을 IOManager 출력 이름과 IO탭 편집창에 동기화"""
+        if not IOManager:
+            return
+        if not hasattr(self, 'valve_name_edits') or not hasattr(self, 'output_edits'):
+            return
+        mgr = IOManager.instance()
+        for i in range(32):
+            name = self.valve_name_edits[i].text() if i < len(self.valve_name_edits) else f"Y{i:02X}"
+            mgr.outputs[i] = name
+            if i < len(self.output_edits):
+                self.output_edits[i].setText(name)
+        mgr.sig_names_changed.emit()
+        print("[Settings] IO 출력 이름을 밸브 설정과 동기화 완료")
 
     # ----------------------------------------------------------------------
     # [Tab 1] 일반 설정
@@ -963,30 +1018,34 @@ class PageSettings(GlassCard):
         
         for i in range(count):
             row_idx = i + 1
-            lbl_in = QLabel(f"X{i:02X}")
+            # X00~X0F, X20~X2F (X10~X1F 건너뜀)
+            x_addr = i if i < 16 else i + 16
+            lbl_in = QLabel(f"X{x_addr:02X}")
             lbl_in.setStyleSheet("color: #64FFDA; font-weight: 600; font-family: 'Roboto Mono', monospace; font-size: 15px;")
             lbl_in.setAlignment(Qt.AlignCenter)
             curr_in_name = mgr.get_input_name(i) if mgr else ""
-            
+
             edit_in = ClickableLineEdit(curr_in_name)
-            edit_in.setPlaceholderText(f"Input {i:02X}")
+            edit_in.setPlaceholderText(f"X{x_addr:02X}")
             edit_in.setStyleSheet(LINE_EDIT_STYLE)
-            edit_in.clicked.connect(lambda e=edit_in, t=f"X{i:02X}": self._open_keyboard(e, t))
+            edit_in.clicked.connect(lambda e=edit_in, t=f"X{x_addr:02X}": self._open_keyboard(e, t))
             self.input_edits.append(edit_in)
-            
+
             grid.addWidget(lbl_in, row_idx, 0)
             grid.addWidget(edit_in, row_idx, 1)
             grid.setColumnMinimumWidth(2, 40)
 
-            lbl_out = QLabel(f"Y{i:02X}")
+            # Y00~Y0F, Y20~Y2F (Y10~Y1F 건너뜀)
+            y_addr = i if i < 16 else i + 16
+            lbl_out = QLabel(f"Y{y_addr:02X}")
             lbl_out.setStyleSheet("color: #FFD280; font-weight: 600; font-family: 'Roboto Mono', monospace; font-size: 15px;")
             lbl_out.setAlignment(Qt.AlignCenter)
             curr_out_name = mgr.get_output_name(i) if mgr else ""
-            
+
             edit_out = ClickableLineEdit(curr_out_name)
-            edit_out.setPlaceholderText(f"Output {i:02X}")
+            edit_out.setPlaceholderText(f"Y{y_addr:02X}")
             edit_out.setStyleSheet(LINE_EDIT_STYLE)
-            edit_out.clicked.connect(lambda e=edit_out, t=f"Y{i:02X}": self._open_keyboard(e, t))
+            edit_out.clicked.connect(lambda e=edit_out, t=f"Y{y_addr:02X}": self._open_keyboard(e, t))
             self.output_edits.append(edit_out)
             
             grid.addWidget(lbl_out, row_idx, 3)
@@ -1011,6 +1070,202 @@ class PageSettings(GlassCard):
         """)
         self.btn_io_save.clicked.connect(self._apply_io_names)
         layout.addWidget(self.btn_io_save)
+
+    # ----------------------------------------------------------------------
+    # [Tab 5] 알람 메시지
+    # ----------------------------------------------------------------------
+    def _init_alarm_tab(self):
+        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS, save_sequence_alarms
+
+        main_layout = QVBoxLayout(self.tab_alarm)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
+
+        # 상단 툴바
+        toolbar = QHBoxLayout()
+        toolbar.addStretch(1)
+
+        btn_add = QPushButton("＋ 알람 추가")
+        btn_add.setFixedSize(140, 40)
+        btn_add.setStyleSheet("""
+            QPushButton { background: rgba(70,140,255,0.2); border: 1px solid #468CFF;
+                color: #468CFF; border-radius: 6px; font-weight: bold; font-size: 13px; }
+            QPushButton:pressed { background: rgba(70,140,255,0.4); }
+        """)
+        btn_add.clicked.connect(self._add_alarm)
+
+        btn_save = QPushButton("저장")
+        btn_save.setFixedSize(100, 40)
+        btn_save.setStyleSheet("""
+            QPushButton { background: #2A65C7; border: 1px solid #468CFF;
+                color: white; border-radius: 6px; font-weight: bold; font-size: 13px; }
+            QPushButton:pressed { background: #1A4FA0; }
+        """)
+        btn_save.clicked.connect(self._save_alarms)
+
+        toolbar.addWidget(btn_add)
+        toolbar.addWidget(btn_save)
+        main_layout.addLayout(toolbar)
+
+        # 헤더
+        header = QWidget()
+        header.setStyleSheet("background: rgba(255,255,255,0.05); border-radius: 4px;")
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(10, 6, 10, 6)
+        for text, stretch in [("번호", 1), ("알람 메시지", 5), ("", 2)]:
+            lbl = QLabel(text)
+            lbl.setStyleSheet("color: #AAA; font-weight: bold; font-size: 13px;")
+            lbl.setAlignment(Qt.AlignCenter)
+            hl.addWidget(lbl, stretch)
+        main_layout.addWidget(header)
+
+        # 스크롤 목록
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        QScroller.grabGesture(scroll.viewport(), QScroller.LeftMouseButtonGesture)
+
+        self._alarm_list_widget = QWidget()
+        self._alarm_list_widget.setStyleSheet("background: transparent;")
+        self._alarm_list_layout = QVBoxLayout(self._alarm_list_widget)
+        self._alarm_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._alarm_list_layout.setSpacing(4)
+        self._alarm_list_layout.addStretch(1)
+
+        scroll.setWidget(self._alarm_list_widget)
+        main_layout.addWidget(scroll)
+
+        self._refresh_alarm_list()
+
+    def _refresh_alarm_list(self):
+        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+
+        layout = self._alarm_list_layout
+        # 기존 행 제거 (stretch 제외)
+        while layout.count() > 1:
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        row_style = """
+            QWidget#AlarmRow { background: rgba(255,255,255,0.04); border-radius: 6px; }
+            QWidget#AlarmRow:hover { background: rgba(255,255,255,0.08); }
+        """
+        for no in sorted(SEQUENCE_ALARMS.keys()):
+            msg = SEQUENCE_ALARMS[no]
+            row = QWidget()
+            row.setObjectName("AlarmRow")
+            row.setFixedHeight(48)
+            row.setStyleSheet(row_style)
+
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(10, 0, 10, 0)
+            rl.setSpacing(8)
+
+            lbl_no = QLabel(f"A-{no:03d}")
+            lbl_no.setFixedWidth(60)
+            lbl_no.setAlignment(Qt.AlignCenter)
+            lbl_no.setStyleSheet("color: #FF6B6B; font-weight: bold; font-size: 14px;")
+
+            lbl_msg = QLabel(msg)
+            lbl_msg.setStyleSheet("color: white; font-size: 14px;")
+            lbl_msg.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+            btn_edit = QPushButton("수정")
+            btn_edit.setFixedSize(70, 34)
+            btn_edit.setStyleSheet("""
+                QPushButton { background: rgba(255,255,255,0.1); border: 1px solid #888;
+                    color: white; border-radius: 4px; font-size: 13px; font-weight: bold; }
+                QPushButton:pressed { background: rgba(255,255,255,0.2); }
+            """)
+            btn_edit.clicked.connect(lambda _, n=no: self._edit_alarm(n))
+
+            btn_del = QPushButton("삭제")
+            btn_del.setFixedSize(70, 34)
+            btn_del.setStyleSheet("""
+                QPushButton { background: rgba(255,70,70,0.15); border: 1px solid #FF4646;
+                    color: #FF4646; border-radius: 4px; font-size: 13px; font-weight: bold; }
+                QPushButton:pressed { background: rgba(255,70,70,0.3); }
+            """)
+            btn_del.clicked.connect(lambda _, n=no: self._delete_alarm(n))
+
+            rl.addWidget(lbl_no, 1)
+            rl.addWidget(lbl_msg, 5)
+            rl.addWidget(btn_edit)
+            rl.addWidget(btn_del)
+
+            layout.insertWidget(layout.count() - 1, row)
+
+    def _alarm_next_no(self):
+        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        return max(SEQUENCE_ALARMS.keys(), default=0) + 1
+
+    def _add_alarm(self):
+        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        try:
+            from widgets.touch_keyboard import TouchKeyboard
+        except ImportError:
+            TouchKeyboard = None
+
+        no = self._alarm_next_no()
+        msg = ""
+        if TouchKeyboard:
+            kb = TouchKeyboard(f"A-{no:03d} 알람 메시지 입력", "", self)
+            if kb.exec() != QDialog.Accepted:
+                return
+            msg = kb.get_text().strip()
+        else:
+            from ui.dialogs.sequence_utils import RenameDialog
+            dlg = RenameDialog("", [], self, confirm_text="추가")
+            if dlg.exec() != QDialog.Accepted:
+                return
+            msg = dlg.get_new_name()
+
+        if not msg:
+            return
+        SEQUENCE_ALARMS[no] = msg
+        self._refresh_alarm_list()
+
+    def _edit_alarm(self, no):
+        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        try:
+            from widgets.touch_keyboard import TouchKeyboard
+        except ImportError:
+            TouchKeyboard = None
+
+        current = SEQUENCE_ALARMS.get(no, "")
+        if TouchKeyboard:
+            kb = TouchKeyboard(f"A-{no:03d} 알람 메시지 수정", current, self)
+            if kb.exec() != QDialog.Accepted:
+                return
+            msg = kb.get_text().strip()
+        else:
+            from ui.dialogs.sequence_utils import RenameDialog
+            others = [v for k, v in SEQUENCE_ALARMS.items() if k != no]
+            dlg = RenameDialog(current, others, self, confirm_text="수정")
+            if dlg.exec() != QDialog.Accepted:
+                return
+            msg = dlg.get_new_name()
+
+        if not msg:
+            return
+        SEQUENCE_ALARMS[no] = msg
+        self._refresh_alarm_list()
+
+    def _delete_alarm(self, no):
+        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        from ui.dialogs.sequence_utils import DarkConfirmDialog
+        dlg = DarkConfirmDialog("알람 삭제", f"A-{no:03d} 알람을 삭제하시겠습니까?", self)
+        if dlg.exec() == QDialog.Accepted:
+            SEQUENCE_ALARMS.pop(no, None)
+            self._refresh_alarm_list()
+
+    def _save_alarms(self):
+        from ui.overlays.alarm_overlay import save_sequence_alarms
+        from ui.dialogs.sequence_utils import DarkMessageDialog
+        save_sequence_alarms()
+        DarkMessageDialog("저장 완료", "알람 메시지가 저장되었습니다.", parent=self).exec()
 
     # ----------------------------------------------------------------------
     # [Tab 3] 시스템 파라미터
@@ -1053,7 +1308,7 @@ class PageSettings(GlassCard):
         vbox.setContentsMargins(10, 10, 10, 20)
         
         # -- [1] 축 구성 및 모션 파라미터 --
-        grp_axis = QGroupBox("축 구성 및 모션 설정 (DT50000 ~)")
+        grp_axis = QGroupBox("축 구성 및 모션 설정 (DT15000 ~)")
         grp_axis.setStyleSheet(GROUPBOX_STYLE)
         grid_axis = QGridLayout(grp_axis)
         grid_axis.setContentsMargins(15, 35, 15, 15)
@@ -1209,11 +1464,11 @@ class PageSettings(GlassCard):
     def _on_dataset_pressed(self, axis_index):
         if not self.plc_client or not self.plc_client.is_connected: return
         val = (1 << axis_index)
-        self.plc_client.write_words(0x09, 50033, [val])
+        self.plc_client.write_words(0x09, self.plc_client.ADDR_AXIS_DATASET, [val])
 
     def _on_dataset_released(self, axis_index):
         if not self.plc_client or not self.plc_client.is_connected: return
-        self.plc_client.write_words(0x09, 50033, [0])
+        self.plc_client.write_words(0x09, self.plc_client.ADDR_AXIS_DATASET, [0])
 
     def _load_params(self):
         # ★ settings.json에서 축 설정 먼저 로드
@@ -1228,7 +1483,7 @@ class PageSettings(GlassCard):
             return
             
         try:
-            data = self.plc_client.read_words(0x09, 50000, 50) 
+            data = self.plc_client.read_words(0x09, self.plc_client.AXIS_PARAM_ADDR, 50)
             if not data or len(data) < 50: return
             
             use_bits = data[0]
@@ -1291,7 +1546,7 @@ class PageSettings(GlassCard):
                 send_data[25 + i] = val
                 
             # PLC에 전송
-            self.plc_client.write_words(0x09, 50000, send_data)
+            self.plc_client.write_words(0x09, self.plc_client.AXIS_PARAM_ADDR, send_data)
             
             # ★ settings.json에 축 설정 저장
             self._save_axis_settings(axis_uses_list)
@@ -1308,8 +1563,55 @@ class PageSettings(GlassCard):
         new_inputs = [e.text() for e in self.input_edits]
         new_outputs = [e.text() for e in self.output_edits]
         IOManager.instance().update_names(new_inputs, new_outputs)
+
+        # IO 출력 이름 → 밸브 이름 역방향 동기화 후 settings.json 자동 저장
+        for i in range(min(len(new_outputs), len(self.valve_name_edits))):
+            self.valve_name_edits[i].setText(new_outputs[i])
+        self._save_valve_config_silent()
+
+        # 입력 이름을 settings.json에 저장
+        try:
+            path = "settings.json"
+            settings = {}
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            settings["io_input_names"] = new_inputs
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4, ensure_ascii=False)
+            print("[Settings] IO 입력 이름 저장 완료")
+        except Exception as e:
+            print(f"[Settings] IO 입력 이름 저장 실패: {e}")
+
         dlg = ConfirmOverlay("적용 완료", "I/O 이름이 적용되었습니다.", btn_yes="확인", parent=self.window())
         dlg.btn_cancel.hide(); dlg.exec()
+
+    def _load_io_input_names(self):
+        """settings.json에서 입력 이름 로드 후 IOManager 및 편집창에 반영.
+        저장값 없으면 DEFAULT_INPUTS를 그대로 적용."""
+        from utils.io_manager import DEFAULT_INPUTS
+        try:
+            saved = []
+            path = "settings.json"
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                saved = settings.get("io_input_names", [])
+
+            names = list(DEFAULT_INPUTS)  # 기본값으로 시작
+            for i in range(min(len(saved), 32)):
+                names[i] = saved[i]       # 저장된 값으로 덮어쓰기
+
+            if IOManager:
+                mgr = IOManager.instance()
+                for i in range(32):
+                    mgr.inputs[i] = names[i]
+                    if i < len(self.input_edits):
+                        self.input_edits[i].setText(names[i])
+                mgr.sig_names_changed.emit()
+            print("[Settings] IO 입력 이름 로드 완료")
+        except Exception as e:
+            print(f"[Settings] IO 입력 이름 로드 실패: {e}")
 
     def _on_manager_changed(self):
         if not IOManager: return
@@ -1443,3 +1745,94 @@ class PageSettings(GlassCard):
         
         # 기본값: 전축 활성화
         return [True] * 8
+    def _init_interlock_tab(self):
+        from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame
+        layout = QVBoxLayout(self.tab_interlock)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+
+        lbl = QLabel("모드 인터록 설정")
+        lbl.setStyleSheet("color: #00E5FF; font-size: 18px; font-weight: bold;")
+        layout.addWidget(lbl)
+
+        desc = QLabel(
+            "• 배타(⊗): 같은 그룹에서 하나를 켜면 나머지가 자동으로 꺼집니다.\n"
+            "• 필수(★): 같은 그룹에서 마지막 하나는 끌 수 없습니다.\n"
+            "• 두 옵션은 독립적으로 설정할 수 있습니다."
+        )
+        desc.setStyleSheet("color: #9CA3AF; font-size: 14px; line-height: 1.6;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background: #374151;")
+        layout.addWidget(sep)
+
+        btn = QPushButton("인터록 그룹 설정 열기")
+        btn.setFixedHeight(55)
+        btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(0,229,255,0.1); border: 2px solid #00E5FF;
+                border-radius: 10px; color: #00E5FF; font-size: 17px; font-weight: bold;
+            }
+            QPushButton:pressed { background: rgba(0,229,255,0.3); }
+        """)
+        btn.clicked.connect(self._open_interlock_dialog)
+        layout.addWidget(btn)
+        layout.addStretch(1)
+
+    def _open_interlock_dialog(self):
+        try:
+            from ui.pages.page_mode import InterlockDialog, TOTAL_SLOTS
+        except ImportError:
+            return
+
+        _GROUP_COLORS = [
+            None, "#E74C3C", "#3498DB", "#2ECC71", "#F39C12",
+            "#9B59B6", "#1ABC9C", "#E67E22", "#E91E63",
+        ]
+
+        def _load():
+            try:
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                g = d.get("interlock_groups", [0]*TOTAL_SLOTS)
+                m = d.get("interlock_mandatory", [False]*9)
+                e = d.get("interlock_exclusive", [True]*9)
+                if len(g) < TOTAL_SLOTS: g += [0]*(TOTAL_SLOTS-len(g))
+                if len(m) < 9: m += [False]*(9-len(m))
+                if len(e) < 9: e += [True]*(9-len(e))
+                return g[:TOTAL_SLOTS], m[:9], e[:9]
+            except Exception:
+                return [0]*TOTAL_SLOTS, [False]*9, [True]*9
+
+        def _get_mode_name(idx):
+            default = [
+                "제품측 취출","런너측 취출","주행 대기","하강 대기","주행도중개방","복귀도중개방",
+                "안전도어 회피","안전도어 회피2","낙하측 반전","주행도중 반전","취출대기 반전",
+                "고정측 취출","제품 형내개방","런너 형내개방","에젝터 연동","언더컷 취출모드",
+                "척1 사용","척1 감지","척2 사용","척2 감지","척3 사용","척3 감지",
+                "척4 사용","척4 감지","흡착1 사용","흡착1 감지","흡착2 사용","흡착2 감지",
+                "흡착3 사용","흡착3 감지","흡착4 사용","흡착4 감지","2포인트 개방","공정감시 모드",
+            ]
+            try:
+                from utils.mode_manager import ModeManager
+                mgr = ModeManager.instance()
+                if mgr: return mgr.get_name(idx)
+            except Exception:
+                pass
+            return default[idx] if idx < len(default) else f"User Mode {idx-33}"
+
+        groups, mandatory, exclusive = _load()
+        dlg = InterlockDialog(groups, mandatory, exclusive, _get_mode_name, _GROUP_COLORS, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            try:
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+            data["interlock_groups"] = dlg.get_groups()
+            data["interlock_mandatory"] = dlg.get_mandatory()
+            data["interlock_exclusive"] = dlg.get_exclusive()
+            with open("settings.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)

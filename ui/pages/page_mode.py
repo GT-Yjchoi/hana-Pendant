@@ -1,8 +1,10 @@
+import json
+import os
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QGridLayout, QPushButton, QSizePolicy,
     QScrollArea, QWidget, QVBoxLayout, QScroller, QLabel,
-    QDialog, QLineEdit, QHBoxLayout
+    QDialog, QLineEdit, QHBoxLayout, QFrame
 )
 from widgets.glass_card import GlassCard
 
@@ -109,6 +111,9 @@ class PageMode(GlassCard):
         current_len = len(self.mode_data)
         if current_len < TOTAL_SLOTS:
             self.mode_data.extend([False] * (TOTAL_SLOTS - current_len))
+
+        # 인터록 그룹 로드
+        self.interlock_groups, self.interlock_mandatory, self.interlock_exclusive = self._load_interlock_groups()
 
         # ===== Scroll Area =====
         scroll = QScrollArea()
@@ -240,6 +245,33 @@ class PageMode(GlassCard):
         self.mode_data[idx] = checked
         name = self._get_mode_name(idx)
         button.inner_label.setText(self._format_text(name, checked))
+
+        grp = self.interlock_groups[idx] if idx < len(self.interlock_groups) else 0
+        if grp > 0:
+            is_mandatory = self.interlock_mandatory[grp] if grp < len(self.interlock_mandatory) else False
+            if not checked and is_mandatory:
+                # 필수 그룹: 마지막 하나면 끄기 차단
+                on_count = sum(1 for i, g in enumerate(self.interlock_groups) if g == grp and self.mode_data[i])
+                if on_count == 0:  # 이미 꺼진 상태에서 신호 → 원복
+                    button.blockSignals(True)
+                    button.setChecked(True)
+                    button.blockSignals(False)
+                    self.mode_data[idx] = True
+                    button.inner_label.setText(self._format_text(self._get_mode_name(idx), True))
+                    return
+            is_exclusive = self.interlock_exclusive[grp] if grp < len(self.interlock_exclusive) else False
+            if checked and is_exclusive:
+                # 배타: 같은 그룹 나머지 OFF
+                for other_idx, btn in enumerate(self.buttons):
+                    if other_idx == idx: continue
+                    other_grp = self.interlock_groups[other_idx] if other_idx < len(self.interlock_groups) else 0
+                    if other_grp == grp and self.mode_data[other_idx]:
+                        btn.blockSignals(True)
+                        btn.setChecked(False)
+                        btn.blockSignals(False)
+                        self.mode_data[other_idx] = False
+                        btn.inner_label.setText(self._format_text(self._get_mode_name(other_idx), False))
+
         if self.plc_client and self.plc_client.is_connected:
             self.plc_client.send_mode_settings(self.mode_data)
 
@@ -269,6 +301,76 @@ class PageMode(GlassCard):
             new_name = dlg.get_text()
             ModeManager.instance().set_name(idx, new_name)
 
+    # =========================================================
+    # 인터록 설정
+    # =========================================================
+    _SETTINGS_PATH = "settings.json"
+    # 그룹별 색상 (그룹 1~8)
+    _GROUP_COLORS = [
+        None,               # 0 = 없음
+        "#E74C3C",          # 1 = 빨강
+        "#3498DB",          # 2 = 파랑
+        "#2ECC71",          # 3 = 초록
+        "#F39C12",          # 4 = 주황
+        "#9B59B6",          # 5 = 보라
+        "#1ABC9C",          # 6 = 청록
+        "#E67E22",          # 7 = 진주황
+        "#E91E63",          # 8 = 핑크
+    ]
+
+    def _load_interlock_groups(self):
+        try:
+            with open(self._SETTINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            groups = data.get("interlock_groups", [0] * TOTAL_SLOTS)
+            if len(groups) < TOTAL_SLOTS:
+                groups += [0] * (TOTAL_SLOTS - len(groups))
+            mandatory = data.get("interlock_mandatory", [False] * 9)
+            if len(mandatory) < 9:
+                mandatory += [False] * (9 - len(mandatory))
+            # exclusive: 하위호환 - 기존 데이터 없으면 모든 그룹을 배타로 간주
+            exclusive = data.get("interlock_exclusive", [True] * 9)
+            if len(exclusive) < 9:
+                exclusive += [True] * (9 - len(exclusive))
+            return groups[:TOTAL_SLOTS], mandatory[:9], exclusive[:9]
+        except Exception:
+            return [0] * TOTAL_SLOTS, [False] * 9, [True] * 9
+
+    def _save_interlock_groups(self):
+        try:
+            try:
+                with open(self._SETTINGS_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+            data["interlock_groups"] = self.interlock_groups
+            data["interlock_mandatory"] = self.interlock_mandatory
+            data["interlock_exclusive"] = self.interlock_exclusive
+            with open(self._SETTINGS_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[인터록] 저장 실패: {e}")
+
+    def _open_interlock_dialog(self):
+        dlg = InterlockDialog(
+            self.interlock_groups[:],
+            self.interlock_mandatory[:],
+            self.interlock_exclusive[:],
+            self._get_mode_name,
+            self._GROUP_COLORS,
+            parent=self
+        )
+        if dlg.exec() == QDialog.Accepted:
+            self.interlock_groups = dlg.get_groups()
+            self.interlock_mandatory = dlg.get_mandatory()
+            self.interlock_exclusive = dlg.get_exclusive()
+            self._save_interlock_groups()
+
+    def showEvent(self, event):
+        # 설정 페이지에서 인터록 변경 시 반영
+        self.interlock_groups, self.interlock_mandatory, self.interlock_exclusive = self._load_interlock_groups()
+        super().showEvent(event)
+
     def update_language(self, lang_code=None):
         # [수정] 타이틀 업데이트 로직 제거 (타이틀이 없으므로)
         self.refresh_ui()
@@ -283,3 +385,239 @@ class PageMode(GlassCard):
                 
                 name = self._get_mode_name(i)
                 btn.inner_label.setText(self._format_text(name, is_on))
+
+# =========================================================
+# [다이얼로그] 인터록 그룹 설정
+# =========================================================
+class InterlockDialog(QDialog):
+    def __init__(self, groups, mandatory, exclusive, get_name_fn, group_colors, parent=None):
+        super().__init__(parent)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._groups = groups[:]
+        self._mandatory = mandatory[:]    # [False, bool×8]  index 0 미사용
+        self._exclusive = exclusive[:]    # [True,  bool×8]  index 0 미사용
+        self._get_name = get_name_fn
+        self._colors = group_colors
+        self._max_group = len(group_colors) - 1  # 8
+
+        self.setStyleSheet("background: #111827; color: white;")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
+
+        # ── 헤더 ──
+        hdr = QHBoxLayout()
+        title = QLabel("인터록 그룹 설정")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #00E5FF;")
+        hdr.addWidget(title)
+        hdr.addStretch(1)
+
+        hdr.addSpacing(20)
+        btn_clear = QPushButton("전체 해제")
+        btn_clear.setFixedHeight(34)
+        btn_clear.setStyleSheet(
+            "QPushButton { background: rgba(255,70,70,0.2); border: 1px solid #FF4646; "
+            "border-radius: 6px; color: #FF4646; font-size: 13px; font-weight: bold; padding: 0 12px; }"
+            "QPushButton:pressed { background: rgba(255,70,70,0.4); }")
+        btn_clear.clicked.connect(self._clear_all)
+        hdr.addWidget(btn_clear)
+        root.addLayout(hdr)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background: #374151;"); root.addWidget(sep)
+
+        # ── 그룹 옵션 카드 행 ──
+        cards_bar = QHBoxLayout()
+        cards_bar.setSpacing(8)
+        self._mandatory_btns = [None]
+        self._exclusive_btns = [None]
+        for g in range(1, self._max_group + 1):
+            c = self._colors[g]
+            card = QFrame()
+            card.setStyleSheet(f"QFrame {{ background: {c}22; border: 1px solid {c}66; border-radius: 8px; }}")
+            card.setFixedWidth(108)
+            cv = QVBoxLayout(card)
+            cv.setContentsMargins(6, 6, 6, 6)
+            cv.setSpacing(4)
+
+            lbl = QLabel(f"G{g}")
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet(f"background: {c}; color: white; font-size: 15px; font-weight: bold; "
+                              f"border-radius: 5px; padding: 2px 0; border: none;")
+            cv.addWidget(lbl)
+
+            # 배타 토글
+            btn_ex = QPushButton("배타 OFF")
+            btn_ex.setFixedHeight(30)
+            btn_ex.setCheckable(True)
+            btn_ex.setChecked(self._exclusive[g])
+            btn_ex.clicked.connect(lambda checked, gi=g: self._toggle_exclusive(gi, checked))
+            self._exclusive_btns.append(btn_ex)
+            cv.addWidget(btn_ex)
+
+            # 필수 토글
+            btn_mn = QPushButton("필수 OFF")
+            btn_mn.setFixedHeight(30)
+            btn_mn.setCheckable(True)
+            btn_mn.setChecked(self._mandatory[g])
+            btn_mn.clicked.connect(lambda checked, gi=g: self._toggle_mandatory(gi, checked))
+            self._mandatory_btns.append(btn_mn)
+            cv.addWidget(btn_mn)
+
+            cards_bar.addWidget(card)
+            self._refresh_exclusive_btn(g)
+            self._refresh_mandatory_btn(g)
+
+        cards_bar.addStretch(1)
+        root.addLayout(cards_bar)
+
+        # ── 안내 ──
+        hint = QLabel("모드 버튼을 탭하면 그룹 순환 (없음 → G1 → G2 → … → G8 → 없음).  배타: 하나 ON 시 나머지 자동 OFF.  필수: 마지막 하나는 끌 수 없음.")
+        hint.setStyleSheet("color: #9CA3AF; font-size: 13px;")
+        root.addWidget(hint)
+
+        # ── 모드 그리드 ──
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        QScroller.grabGesture(scroll.viewport(), QScroller.TouchGesture)
+
+        grid_w = QWidget(); grid_w.setStyleSheet("background: transparent;")
+        grid = QGridLayout(grid_w)
+        grid.setHorizontalSpacing(10); grid.setVerticalSpacing(8)
+        grid.setContentsMargins(0, 0, 0, 0)
+
+        self._btns = []
+        cols = 4
+        for i in range(TOTAL_SLOTS):
+            btn = QPushButton()
+            btn.setMinimumHeight(68)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn.clicked.connect(lambda _, idx=i: self._cycle_group(idx))
+            self._btns.append(btn)
+            grid.addWidget(btn, i // cols, i % cols)
+        for c in range(cols):
+            grid.setColumnStretch(c, 1)
+
+        scroll.setWidget(grid_w)
+        root.addWidget(scroll, 1)
+
+        # ── 하단 버튼 ──
+        foot = QHBoxLayout()
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedHeight(46)
+        btn_cancel.setStyleSheet(
+            "QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #555; "
+            "border-radius: 8px; color: #CCC; font-size: 16px; font-weight: bold; }"
+            "QPushButton:pressed { background: rgba(255,255,255,0.2); }")
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_ok = QPushButton("저장")
+        btn_ok.setFixedHeight(46)
+        btn_ok.setStyleSheet(
+            "QPushButton { background: rgba(0,229,255,0.15); border: 1px solid #00E5FF; "
+            "border-radius: 8px; color: #00E5FF; font-size: 16px; font-weight: bold; }"
+            "QPushButton:pressed { background: rgba(0,229,255,0.35); }")
+        btn_ok.clicked.connect(self.accept)
+
+        foot.addWidget(btn_cancel); foot.addWidget(btn_ok)
+        root.addLayout(foot)
+
+        self._refresh_all()
+
+    def _refresh_mandatory_btn(self, g):
+        btn = self._mandatory_btns[g]
+        c = self._colors[g]
+        is_on = self._mandatory[g]
+        if is_on:
+            btn.setText("필수 ON ★")
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {c}; border: none; border-radius: 5px; "
+                f"color: white; font-size: 12px; font-weight: bold; }}"
+                f"QPushButton:pressed {{ background: {c}CC; }}"
+            )
+        else:
+            btn.setText("필수 OFF")
+            btn.setStyleSheet(
+                "QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #555; border-radius: 5px; "
+                "color: #777; font-size: 12px; font-weight: bold; }"
+                "QPushButton:pressed { background: rgba(255,255,255,0.18); }"
+            )
+
+    def _toggle_mandatory(self, g, checked):
+        self._mandatory[g] = checked
+        self._refresh_mandatory_btn(g)
+
+    def _refresh_exclusive_btn(self, g):
+        btn = self._exclusive_btns[g]
+        c = self._colors[g]
+        is_on = self._exclusive[g]
+        if is_on:
+            btn.setText("배타 ON ⊗")
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {c}; border: none; border-radius: 5px; "
+                f"color: white; font-size: 12px; font-weight: bold; }}"
+                f"QPushButton:pressed {{ background: {c}CC; }}"
+            )
+        else:
+            btn.setText("배타 OFF")
+            btn.setStyleSheet(
+                "QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #555; border-radius: 5px; "
+                "color: #777; font-size: 12px; font-weight: bold; }"
+                "QPushButton:pressed { background: rgba(255,255,255,0.18); }"
+            )
+
+    def _toggle_exclusive(self, g, checked):
+        self._exclusive[g] = checked
+        self._refresh_exclusive_btn(g)
+        self._refresh_all()  # 모드 버튼 suffix 갱신
+
+    def _refresh_all(self):
+        for i, btn in enumerate(self._btns):
+            self._refresh_btn(i, btn)
+
+    def _refresh_btn(self, idx, btn):
+        grp = self._groups[idx]
+        name = self._get_name(idx)
+        if grp > 0:
+            tags = []
+            if self._exclusive[grp]: tags.append("⊗")
+            if self._mandatory[grp]: tags.append("★")
+            suffix = " " + "".join(tags) if tags else ""
+        else:
+            suffix = ""
+        if grp == 0:
+            btn.setStyleSheet(
+                "QPushButton { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); "
+                "border-radius: 8px; color: #9CA3AF; font-size: 13px; font-weight: bold; }"
+                "QPushButton:pressed { background: rgba(255,255,255,0.15); }"
+            )
+            btn.setText(f"{name}\n—")
+        else:
+            c = self._colors[grp]
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {c}33; border: 2px solid {c}; "
+                f"border-radius: 8px; color: {c}; font-size: 13px; font-weight: bold; }}"
+                f"QPushButton:pressed {{ background: {c}66; }}"
+            )
+            btn.setText(f"{name}\nG{grp}{suffix}")
+
+    def _cycle_group(self, idx):
+        self._groups[idx] = (self._groups[idx] + 1) % (self._max_group + 1)
+        self._refresh_btn(idx, self._btns[idx])
+
+    def _clear_all(self):
+        self._groups = [0] * TOTAL_SLOTS
+        self._refresh_all()
+
+    def get_groups(self):
+        return self._groups[:]
+
+    def get_mandatory(self):
+        return self._mandatory[:]
+
+    def get_exclusive(self):
+        return self._exclusive[:]

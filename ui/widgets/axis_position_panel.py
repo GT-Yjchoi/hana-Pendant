@@ -53,8 +53,8 @@ class AxisPositionPanel(QWidget):
 
             # 3. 값 (Value - 오른쪽 정렬 유지)
             val = QLabel("0.000")
-            # 오른쪽 정렬 (축 이름과 멀어지면서 가운데 공간 확보됨 -> 큰 숫자도 OK)
             val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            val.setMinimumWidth(120)  # "-1000.000" 9자 기준 고정폭 → 자릿수 변화 시 레이아웃 흔들림 방지
             val.setStyleSheet("color: white; font-size: 26px; font-weight: bold; font-family: 'Roboto Mono', monospace;")
 
             # 4. 단위 (Unit)
@@ -83,7 +83,7 @@ class AxisPositionPanel(QWidget):
             return
 
         try:
-            data = self.plc_client.read_words(0x09, 50000, 1)
+            data = self.plc_client.read_words(0x09, self.plc_client.AXIS_PARAM_ADDR, 1)
             if data:
                 use_mask = data[0]
                 for i, (lbl, box) in enumerate(self._row_items):

@@ -1,3 +1,5 @@
+import json
+import os
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGraphicsDropShadowEffect
 
@@ -9,14 +11,67 @@ from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
 # ============================================================
 AXIS_ERROR_DESCRIPTIONS = {
     0x3001: "과부하 발생",
- 
+
     # 여기에 에러코드와 설명을 계속 추가하세요.
     # 예시: 0x0050: "인코더 이상",
 }
 
+# ============================================================
+# 시퀀스 알람 테이블
+# 입력대기(IN) 스텝 타임아웃 시 띄울 알람 메시지
+# 키: 알람 번호 (int, 1부터 시작)
+# 값: 알람 메시지 (str)
+# ============================================================
+SEQUENCE_ALARMS = {
+    1: "입력 대기 타임아웃",
+    2: "척 감지 이상",
+    3: "흡착 감지 이상",
+    4: "공급기 이상",
+    5: "컨베이어 이상",
+
+    # 여기에 시퀀스 알람을 계속 추가하세요.
+    # 예시: 6: "리프터 상승 타임아웃",
+}
+
+_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "settings.json")
+
+
+def load_sequence_alarms(settings_path=None):
+    """settings.json의 sequence_alarms를 읽어 SEQUENCE_ALARMS 딕셔너리를 갱신합니다."""
+    path = settings_path or _SETTINGS_PATH
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        saved = data.get("sequence_alarms")
+        if saved:
+            SEQUENCE_ALARMS.clear()
+            SEQUENCE_ALARMS.update({int(k): v for k, v in saved.items()})
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass  # 저장된 데이터 없으면 기본값 유지
+
+
+def save_sequence_alarms(settings_path=None):
+    """SEQUENCE_ALARMS를 settings.json에 저장합니다."""
+    path = settings_path or _SETTINGS_PATH
+    try:
+        settings = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+        settings["sequence_alarms"] = {str(k): v for k, v in sorted(SEQUENCE_ALARMS.items())}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=4, ensure_ascii=False)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[알람] 저장 실패: {e}")
+
+
+# 앱 시작 시 settings.json에서 자동 로드
+load_sequence_alarms()
+
 class AlarmOverlay(QWidget):
     sig_reset_pressed = Signal()
     sig_reset_released = Signal()
+    sig_dismissed = Signal()  # X버튼으로 닫을 때
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -75,7 +130,7 @@ class AlarmOverlay(QWidget):
             QPushButton:hover { color: white; }
             QPushButton:pressed { color: #aaa; }
         """)
-        self.btn_close.clicked.connect(self.hide)
+        self.btn_close.clicked.connect(self._on_close_clicked)
         close_row.addWidget(self.btn_close)
         box_layout.addLayout(close_row)
 
@@ -111,7 +166,7 @@ class AlarmOverlay(QWidget):
         """)
         self.btn_reset.pressed.connect(self.sig_reset_pressed.emit)
         self.btn_reset.released.connect(self.sig_reset_released.emit)
-        
+
         # 버튼 중앙 정렬을 위한 레이아웃
         btn_layout = QVBoxLayout()
         btn_layout.setAlignment(Qt.AlignCenter)
@@ -119,9 +174,20 @@ class AlarmOverlay(QWidget):
         box_layout.addLayout(btn_layout)
 
         layout.addWidget(self.box)
-        
+
         # 초기엔 숨김
         self.hide()
+
+    def _on_close_clicked(self):
+        self.hide()
+        self.sig_dismissed.emit()
+
+    def show_sequence_alarm(self, alarm_no):
+        """시퀀스 알람 (IN 스텝 타임아웃 등)을 화면에 띄움"""
+        msg = SEQUENCE_ALARMS.get(alarm_no, f"시퀀스 알람 #{alarm_no}")
+        self.lbl_msg.setText(f"A-{alarm_no:03d}: {msg}")
+        self.show()
+        self.raise_()
 
     def show_error(self, axis_list, error_codes=None):
         """축 알람 메시지를 설정하고 화면에 띄움"""

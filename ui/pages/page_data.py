@@ -93,7 +93,7 @@ class GlassConfirmDialog(QDialog):
 class PageData(GlassCard):
     sig_file_loaded = Signal(str)
 
-    def __init__(self, sequence_data=None, position_points=None, mode_data=None, view_order_data=None):
+    def __init__(self, sequence_data=None, position_points=None, timer_library=None, mode_data=None, view_order_data=None):
         # [수정] 타이틀 제거
         super().__init__("")
         
@@ -112,6 +112,7 @@ class PageData(GlassCard):
             self.sequence_data["Main"] = []
 
         self.position_points = position_points if position_points is not None else {}
+        self.timer_library = timer_library if timer_library is not None else {}
         self.mode_data = mode_data if mode_data is not None else []
         self.view_order_data = view_order_data if view_order_data is not None else []
         
@@ -382,10 +383,11 @@ class PageData(GlassCard):
             clean_sequence[seq_name] = clean_steps
 
         save_data = {
-            "version": 1.4,
+            "version": 1.5,
             "saved_at": str(datetime.now()),
             "sequence": clean_sequence,
             "position_points": self.position_points,
+            "timer_library": self.timer_library,
             "mode": self.mode_data,
             "view_order": self.view_order_data,
             "user_modes": ModeManager.instance().to_dict() if ModeManager else {}
@@ -465,7 +467,11 @@ class PageData(GlassCard):
             self.position_points.clear()
             pp = new_data.get("position_points", {})
             self.position_points.update(pp)
-            
+
+            self.timer_library.clear()
+            tl = new_data.get("timer_library", {})
+            self.timer_library.update(tl)
+
             self.view_order_data.clear()
             vo = new_data.get("view_order", [])
             self.view_order_data.extend(vo)

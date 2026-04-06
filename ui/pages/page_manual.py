@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel, QHBoxLayout, QVBoxLayout,
-    QWidget, QPushButton, QButtonGroup, QSizePolicy,
+    QWidget, QSizePolicy,
     QScrollArea, QFrame, QScrollBar, QScroller, QScrollerProperties
 )
 
@@ -48,29 +48,6 @@ class PageManual(GlassCard):
              self.pos_panel.body.setAlignment(Qt.AlignTop)
         left.addWidget(self.pos_panel, 1)
 
-        arm_layout = QVBoxLayout()
-        arm_layout.setSpacing(8)
-        
-        self.btn_product_arm = QPushButton()
-        self.btn_runner_arm = QPushButton()
-
-        for b in (self.btn_product_arm, self.btn_runner_arm):
-            b.setCheckable(True)
-            b.setProperty("class", "ArmSelectBtn")
-            b.setMinimumHeight(60)
-
-        arm_group = QButtonGroup(self)
-        arm_group.setExclusive(True)
-        arm_group.addButton(self.btn_product_arm)
-        arm_group.addButton(self.btn_runner_arm)
-
-        self.btn_product_arm.setChecked(True)
-
-        arm_layout.addWidget(self.btn_product_arm)
-        arm_layout.addWidget(self.btn_runner_arm)
-        
-        left.addLayout(arm_layout)
-
         # ----------------------------------------------------------
         # [MIDDLE] IO Panel (외부에서 스크롤 적용) (비율 5)
         # ----------------------------------------------------------
@@ -93,11 +70,8 @@ class PageManual(GlassCard):
         
         if self.plc_client:
             self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
-            self.plc_client.sig_connected.connect(self._on_plc_connected)
 
         self.update_language()
-        # 시작 시 settings.json으로 초기 가시성 설정 (PLC 연결 전 기본값)
-        self._init_runner_arm_visibility()
 
     # ★ [수정] 에러 라인 삭제 및 튜닝
     def _create_smooth_scroll_area(self, widget):
@@ -137,54 +111,5 @@ class PageManual(GlassCard):
         if 'outputs' in data: 
             self.io_panel.outputs.update_from_words(data['outputs'])
 
-    def _init_runner_arm_visibility(self):
-        """settings.json에서 축 사용 설정을 읽어 초기 가시성 결정 (PLC 연결 전 대비)"""
-        try:
-            import os, json
-            if os.path.exists("settings.json"):
-                with open("settings.json", "r", encoding="utf-8") as f:
-                    s = json.load(f)
-                axis_uses = s.get("axis_uses", [True] * 8)
-                use_y2 = axis_uses[3] if len(axis_uses) > 3 else True
-                use_z2 = axis_uses[4] if len(axis_uses) > 4 else True
-                is_runner_used = bool(use_y2 or use_z2)
-                self.btn_runner_arm.setVisible(is_runner_used)
-                if not is_runner_used and self.btn_runner_arm.isChecked():
-                    self.btn_product_arm.click()
-        except Exception as e:
-            print(f"[PageManual] Runner arm init error: {e}")
-
-    def _on_plc_connected(self, connected: bool):
-        """PLC 연결 완료 시 가시성 재확인"""
-        if connected:
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(300, self._check_runner_arm_visibility)
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self._check_runner_arm_visibility)
-
-    def _check_runner_arm_visibility(self):
-        if not self.plc_client or not self.plc_client.is_connected:
-            return
-        try:
-            data = self.plc_client.read_words(0x09, 50000, 1)
-            if data:
-                use_mask = data[0]
-                use_y2 = (use_mask >> 3) & 1
-                use_z2 = (use_mask >> 4) & 1
-                is_runner_used = bool(use_y2 or use_z2)
-                
-                if self.btn_runner_arm.isVisible() != is_runner_used:
-                    self.btn_runner_arm.setVisible(is_runner_used)
-                
-                if not is_runner_used and self.btn_runner_arm.isChecked():
-                    self.btn_product_arm.click()
-        except Exception as e:
-            print(f"Runner Arm Check Error: {e}")
-
     def update_language(self, lang_code=None):
-        lm = LanguageManager.instance()
-        self.btn_product_arm.setText(lm.get_text("btn_prod_arm"))
-        self.btn_runner_arm.setText(lm.get_text("btn_runner_arm"))
+        pass

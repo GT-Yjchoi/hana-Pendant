@@ -1,409 +1,552 @@
-
 (* ===========================================================================
-    변수 등록리스트
+   [FB 본문]  ── 3개 인스턴스로 운용 ──
 
+   PROGRAM 인스턴스 선언:
+       FB_Main   : <이FB타입명>;   (* 슬롯 0 고정, b_Run = 외부 제어 *)
+       FB_Sub    : <이FB타입명>;   (* 슬롯 동적, b_Run = FB_Main.b_CallStart *)
+       FB_SubSub : <이FB타입명>;   (* 슬롯 동적, b_Run = FB_Sub.b_CallStart  *)
 
- 	VAR_IN_OUT
-		b_Run: BOOL;
-	END_VAR
-	VAR_INPUT
-		b_Reset: BOOL:=FALSE;
-		gw_ModeWord0: WORD;		(* DT206: 모드 설정 워드 0 (모드 0~15) *)
-		gw_ModeWord1: WORD;		(* DT207: 모드 설정 워드 1 (모드 16~31) *)
-		gw_ModeWord2: WORD;		(* DT208: 모드 설정 워드 2 (모드 32~39) *)
-	END_VAR
-	VAR_IN_OUT
-		arr_StepData: ARRAY [0..49] OF DUT_STEP_DATA;
-		gw_SeqPopup: WORD;		(* DT159: HMI 팝업 요청 (1=팝업 표시) *)
-		gw_PopupResp: WORD;		(* DT160: HMI 응답 (1=계속, 2=정지) *)
-		gw_InternalBit0: WORD;	(* WR0: M00~M15 내부비트 *)
-		gw_InternalBit1: WORD;	(* WR1: M16~M31 내부비트 *)
-	END_VAR
-	VAR_OUTPUT
-		arr_bStart: ARRAY [1..8] OF BOOL:=[8(FALSE)];
-		arr_bSeqOut: ARRAY [1..8] OF BOOL:=[8(FALSE)];
-		valveOutput: ARRAY [0..31] OF BOOL:=[32(FALSE)];
-		i_CurrentStep: INT:=0;
-		b_StepDone: BOOL:=FALSE;
-		b_Error: BOOL:=FALSE;
-		i_ErrorID: INT:=0;
-		b_Step_End: BOOL:=FALSE;
-	END_VAR
-	VAR
-		arr_bBusy: ARRAY [1..8] OF BOOL:=[8(FALSE)];
-		arr_bDone: ARRAY [1..8] OF BOOL:=[8(FALSE)];
-		i_BusyStartAddr: INT:=0;
-		i_DoneStartAddr: INT:=0;
-		i_SeqState: INT:=0;
-		i_LoopAxis: INT:=0;
-		w_AxisMask: WORD:=0;
-		b_AllDone: BOOL:=FALSE;
-		b_AnyBusy: BOOL:=FALSE;
-		i_WriteTableNo: INT:=10;
-		w_WriteAddr: WORD:=99;
-		tmr_StartWait: TON;
-		t_WaitTime: TIME:=T#0.5s;
-		w_ShiftNum: WORD:=0;
-		b_TimerStart: BOOL:=FALSE;
-		i_ResetLoop: INT:=0;
-		i_OutIndex: INT:=0;
-		b_DelayStart: BOOL:=FALSE;
-		t_DelaySetting: TIME:=T#0s;
-		tmr_StepDelay: TON;
-		b_WaitDone: BOOL:=FALSE;
-		b_DelayDone: BOOL:=FALSE;
-		tmr_InputWait: TON;
-		b_InputWaitStart: BOOL:=FALSE;
-		b_InputWaitDone: BOOL:=FALSE;
-		t_InputTimeout: TIME:=T#5s;
-		b_CurrentInput: BOOL:=FALSE;
-		i_WaitPort: INT:=0;
-		w_InputMask: WORD:=0;
-		i_PopupResponse: INT:=0;
-		b_InputCondMet: BOOL:=FALSE;	(* 입력 조건 충족 여부 (타임아웃 블록 충돌 방지용) *)
-		b_TimeoutImmediate: BOOL:=FALSE;	(* 타임아웃 미사용(diParam2=0) 즉시 분기 플래그 *)
-		b_JmpCond: BOOL:=FALSE;			(* JMP 조건 평가 결과 *)
-		i_JmpPort: INT:=0;				(* JMP 조건 포트/모드 번호 *)
-		i_JmpBit: INT:=0;				(* JMP 모드 조건 비트 번호 *)
-		@'': @'';
-	END_VAR
+   PROGRAM 배선 (6줄):
+       FB_Sub.i_SlotNo      := FB_Main.i_CallSlotOut;
+       FB_Sub.b_Run         := FB_Main.b_CallStart;
+       FB_Main.b_SubDone    := FB_Sub.b_Step_End;
+       FB_Main.b_SubError   := FB_Sub.b_Error;
 
+       FB_SubSub.i_SlotNo   := FB_Sub.i_CallSlotOut;
+       FB_SubSub.b_Run      := FB_Sub.b_CallStart;
+       FB_Sub.b_SubDone     := FB_SubSub.b_Step_End;
+       FB_Sub.b_SubError    := FB_SubSub.b_Error;
 
+   스텝 데이터 메모리 레이아웃 (DT20000~, 슬롯당 1000 Words):
+       Word +0  : iCommand  (WORD)
+       Word +1  : wOption   (WORD)
+       Word +2~3: diParam1  (DINT, Low/High)
+       Word +4~5: diParam2  (DINT, Low/High)
+       Word +6~7: diParam3  (DINT, Low/High)
+       Word +8~9: diParam4  (DINT, Low/High)
+
+   ── VAR_INPUT ──
+       i_SlotNo        : INT;    (* 실행할 슬롯 번호 0~39, 시작 시 래치됨 *)
+       b_Run           : BOOL;
+       b_Reset         : BOOL;
+
+       b_SubDone       : BOOL;   (* 서브 완료 - PROGRAM에서 연결 *)
+       b_SubError      : BOOL;   (* 서브 에러  - PROGRAM에서 연결 *)
+       w_ServoBusy     : WORD;
+       w_ServoDone     : WORD;
+       w_Input0        : WORD;
+       w_Input1        : WORD;
+       w_ModeWord0     : WORD;
+       w_ModeWord1     : WORD;
+       w_ModeWord2     : WORD;
+       t_WaitTime      : TIME;
+
+   ── VAR_IN_OUT ──
+       i_ControlCmd    : INT;    (* 0=정지, 1=자동, 2=확인운전 - FB 내부에서 0으로 클리어 가능 *)
+       i_CheckRunState : INT;    (* 확인운전 상태 - FB 내부에서 클리어 가능 *)
+       w_system_Output : WORD;   (* 시스템 출력 - FB가 직접 비트 조작 *)
+       w_Valve_Output  : WORD;   (* 밸브 출력  - FB가 직접 비트 조작 *)
+       w_internal_Bit0 : WORD;   (* 내부 비트 0~15 *)
+       w_internal_Bit1 : WORD;   (* 내부 비트 16~31 *)
+       w_R_Input       : WORD;   (* R입력 R0~RF, DT126 워드 비트 - HMI port 200~215 *)
+
+   ── VAR_OUTPUT ──
+       b_Error         : BOOL;
+       i_ErrorID       : INT;
+       b_StepDone      : BOOL;
+       b_Step_End      : BOOL;   (* 시퀀스 END 도달 - PROGRAM에서 b_SubDone에 연결 *)
+       w_SeqPopup      : WORD;
+       i_CurrentStep   : INT;
+       i_CallSlotOut   : INT;    (* 호출할 슬롯 번호 *)
+       b_CallStart     : BOOL;   (* 서브 기동 트리거 - PROGRAM에서 b_Run에 연결 *)
+       b_CallParallelOut : BOOL; (* 병렬 호출 여부 *)
+
+   ── VAR (내부) ──
+       (* 슬롯/스텝 *)
+       (* 전역변수 필요: g_SeqData AT DT20000 : ARRAY[0..3999] OF DUT_STEP_DATA *)
+       i_ActiveSlotNo  : INT;
+       di_StepBase     : DINT;
+       i_StepCmd       : INT;
+       w_StepOpt       : WORD;
+       di_StepP1       : DINT;
+       di_StepP2       : DINT;
+       di_StepP3       : DINT;
+       di_StepP4       : DINT;
+       (* 상태머신 *)
+       i_SeqState      : INT;
+       (* 서보 *)
+       arr_bBusy       : ARRAY[1..5] OF BOOL;
+       arr_bDone       : ARRAY[1..5] OF BOOL;
+       arr_bStart      : ARRAY[1..5] OF BOOL;
+       i_LoopAxis      : INT;
+       b_AnyBusy       : BOOL;
+       b_AllDone       : BOOL;
+       i_WriteTableNo  : INT;
+       w_WriteAddr     : WORD;
+       (* 출력 제어 *)
+       i_OutIndex      : INT;
+       i_OutType       : INT;
+       w_InputMask     : WORD;
+       w_BitMask       : WORD;
+       (* 입력 대기 *)
+       i_WaitPort      : INT;
+       t_InputTimeout  : TIME;
+       b_InputWaitStart : BOOL;
+       b_InputWaitDone  : BOOL;
+       b_CurrentInput   : BOOL;
+       b_InputCondMet   : BOOL;
+       b_TimeoutImmediate : BOOL;
+       (* 타이머 *)
+       tmr_StartWait   : TON;
+       b_TimerStart    : BOOL;
+       b_WaitDone      : BOOL;
+       tmr_StepDelay   : TON;
+       b_DelayStart    : BOOL;
+       b_DelayDone     : BOOL;
+       t_DelaySetting  : TIME;
+       tmr_InputWait   : TON;
+       tmr_HoldTimer   : TON;
+       b_HoldTimerStart : BOOL;
+       b_HoldDone      : BOOL;
+       b_HoldInput     : BOOL;
+       i_HoldPort      : INT;
+       t_HoldSetting   : TIME;
+       (* 타이머 기동후출력 - 2슬롯 개별 선언 *)
+       tmr_OD0 : TON; tmr_OD1 : TON;
+       b_OutDelayStart   : ARRAY[0..1] OF BOOL;
+       b_OutDelayPending : ARRAY[0..1] OF BOOL;
+       t_OutDelaySetting : ARRAY[0..1] OF TIME;
+       i_OutDelayPort    : ARRAY[0..1] OF INT;
+       i_OutDelayType    : ARRAY[0..1] OF INT;
+       w_OutDelayOpt     : ARRAY[0..1] OF WORD;
+       i_OutDelaySlot    : INT;
+       (* JMP *)
+       i_JmpPort       : INT;
+       i_JmpBit        : INT;
+       b_JmpCond       : BOOL;
+       (* CALL *)
+       i_CallSlot      : INT;
+       b_CallParallel  : BOOL;
+       (* 에지 검출 *)
+       b_RunPrev       : BOOL;
+       b_RunRising     : BOOL;
+       b_CheckRunPrev  : BOOL;
+       b_CheckRunRising : BOOL;
+       (* 기타 *)
+       w_PopupResp     : WORD;
 =========================================================================== *)
 
 
+(* ── 0. 상승 에지 검출 ── *)
+b_RunRising      := b_Run AND NOT b_RunPrev;
+b_RunPrev        := b_Run;
+
+b_CheckRunRising := (i_CheckRunState = 1) AND NOT b_CheckRunPrev;
+b_CheckRunPrev   := (i_CheckRunState = 1);
 
 
-
-
-(* ===========================================================================
-   [FB 본문]
-=========================================================================== *)
-
-(* 1. 입력 매핑 *)
-FOR i_LoopAxis := 1 TO 8 DO
-    w_ShiftNum := INT_TO_WORD(7 + i_LoopAxis);
-    w_AxisMask := SHL(WORD#1, w_ShiftNum); 
-    IF (WX11 AND w_AxisMask) <> 0 THEN arr_bBusy[i_LoopAxis] := TRUE; ELSE arr_bBusy[i_LoopAxis] := FALSE; END_IF;
-
-    w_ShiftNum := INT_TO_WORD(i_LoopAxis - 1);
-    w_AxisMask := SHL(WORD#1, w_ShiftNum);
-    IF (WX12 AND w_AxisMask) <> 0 THEN arr_bDone[i_LoopAxis] := TRUE; ELSE arr_bDone[i_LoopAxis] := FALSE; END_IF;
+(* ── 1. 서보 상태 입력 매핑 ── *)
+FOR i_LoopAxis := 1 TO 5 DO
+    arr_bBusy[i_LoopAxis] := (w_ServoBusy AND SHL(WORD#1, INT_TO_WORD(7 + i_LoopAxis))) <> 0;
+    arr_bDone[i_LoopAxis] := (w_ServoDone AND SHL(WORD#1, INT_TO_WORD(i_LoopAxis - 1))) <> 0;
 END_FOR;
 
-(* 리셋 로직 *)
-IF b_Reset THEN
-    i_SeqState := 0;
-    i_CurrentStep := 0; 
-    b_Error := FALSE;
-    i_ErrorID := 0;
-    b_StepDone := FALSE;
-    b_TimerStart := FALSE;
-    b_DelayStart := FALSE;
-    b_InputWaitStart := FALSE;
-    gw_SeqPopup := 0;
-    gw_PopupResp := 0;
 
-    FOR i_LoopAxis := 1 TO 8 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
-    FOR i_ResetLoop := 0 TO 31 DO valveOutput[i_ResetLoop] := FALSE; END_FOR;
-    gw_InternalBit0 := 0;   (* M00~M15 내부비트 초기화 *)
-    gw_InternalBit1 := 0;   (* M16~M31 내부비트 초기화 *)
-    
+(* ── 리셋 ── *)
+IF b_Reset THEN
+    i_SeqState       := 0;
+    i_CurrentStep    := 0;
+    i_ActiveSlotNo   := 0;
+    b_Error          := FALSE;
+    i_ErrorID        := 0;
+    b_StepDone       := FALSE;
+    b_Step_End       := FALSE;
+    b_TimerStart     := FALSE;
+    b_DelayStart     := FALSE;
+    b_InputWaitStart := FALSE;
+    b_HoldTimerStart := FALSE;
+    b_OutDelayStart[0]:=FALSE; b_OutDelayPending[0]:=FALSE;
+    b_OutDelayStart[1]:=FALSE; b_OutDelayPending[1]:=FALSE;
+    w_SeqPopup       := 0;
+    w_PopupResp      := 0;
+    b_CallStart       := FALSE;
+    i_CallSlotOut     := 0;
+    i_CallSlot        := 0;
+    b_CallParallelOut := FALSE;
+    FOR i_LoopAxis := 1 TO 5 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
+    w_system_Output  := 0;
+    w_Valve_Output   := 0;
+    w_internal_Bit0  := 0;
+    w_internal_Bit1  := 0;
     RETURN;
 END_IF;
 
 
-(* 2. 시퀀스 로직 *)
+(* ── 2. 타이머 기동후출력 백그라운드 처리 (2슬롯 인라인) ── *)
+tmr_OD0(IN:=b_OutDelayStart[0],PT:=t_OutDelaySetting[0]);
+IF b_OutDelayPending[0] AND tmr_OD0.Q THEN b_OutDelayStart[0]:=FALSE; b_OutDelayPending[0]:=FALSE;
+    w_BitMask:=SHL(WORD#1,INT_TO_WORD(i_OutDelayPort[0] MOD 16));
+    IF i_OutDelayType[0]=0 THEN IF w_OutDelayOpt[0]=1 THEN w_system_Output:=w_system_Output OR w_BitMask; ELSE w_system_Output:=w_system_Output AND(NOT w_BitMask); END_IF;
+    ELSIF i_OutDelayType[0]=1 THEN IF w_OutDelayOpt[0]=1 THEN w_Valve_Output:=w_Valve_Output OR w_BitMask; ELSE w_Valve_Output:=w_Valve_Output AND(NOT w_BitMask); END_IF;
+    ELSIF i_OutDelayPort[0]<16 THEN IF w_OutDelayOpt[0]=1 THEN w_internal_Bit0:=w_internal_Bit0 OR w_BitMask; ELSE w_internal_Bit0:=w_internal_Bit0 AND(NOT w_BitMask); END_IF;
+    ELSE IF w_OutDelayOpt[0]=1 THEN w_internal_Bit1:=w_internal_Bit1 OR w_BitMask; ELSE w_internal_Bit1:=w_internal_Bit1 AND(NOT w_BitMask); END_IF; END_IF; END_IF;
+
+tmr_OD1(IN:=b_OutDelayStart[1],PT:=t_OutDelaySetting[1]);
+IF b_OutDelayPending[1] AND tmr_OD1.Q THEN b_OutDelayStart[1]:=FALSE; b_OutDelayPending[1]:=FALSE;
+    w_BitMask:=SHL(WORD#1,INT_TO_WORD(i_OutDelayPort[1] MOD 16));
+    IF i_OutDelayType[1]=0 THEN IF w_OutDelayOpt[1]=1 THEN w_system_Output:=w_system_Output OR w_BitMask; ELSE w_system_Output:=w_system_Output AND(NOT w_BitMask); END_IF;
+    ELSIF i_OutDelayType[1]=1 THEN IF w_OutDelayOpt[1]=1 THEN w_Valve_Output:=w_Valve_Output OR w_BitMask; ELSE w_Valve_Output:=w_Valve_Output AND(NOT w_BitMask); END_IF;
+    ELSIF i_OutDelayPort[1]<16 THEN IF w_OutDelayOpt[1]=1 THEN w_internal_Bit0:=w_internal_Bit0 OR w_BitMask; ELSE w_internal_Bit0:=w_internal_Bit0 AND(NOT w_BitMask); END_IF;
+    ELSE IF w_OutDelayOpt[1]=1 THEN w_internal_Bit1:=w_internal_Bit1 OR w_BitMask; ELSE w_internal_Bit1:=w_internal_Bit1 AND(NOT w_BitMask); END_IF; END_IF; END_IF;
+
+
+
+(* ── 3. 시퀀스 로직 ── *)
 CASE i_SeqState OF
 
     0: (* 대기 *)
-        b_StepDone := FALSE;
-        b_TimerStart := FALSE; 
-        b_DelayStart := FALSE; 
-		b_Step_End := false;
-        IF b_Run THEN
-            IF i_CurrentStep < 0 OR i_CurrentStep > 49 THEN i_CurrentStep := 0; END_IF;
-            i_SeqState := 10; 
+        b_StepDone       := FALSE;
+        b_TimerStart     := FALSE;
+        b_DelayStart     := FALSE;
+        b_Step_End       := FALSE;
+        IF i_ControlCmd = 1 AND b_Run THEN
+            i_ActiveSlotNo := i_SlotNo;   (* 슬롯 번호 래치 *)
+            IF i_CurrentStep < 0 OR i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
+            i_SeqState := 10;
+        ELSIF i_ControlCmd = 2 AND b_CheckRunRising THEN
+            i_ActiveSlotNo := i_SlotNo;
+            IF i_CurrentStep < 0 OR i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
+            i_SeqState := 10;
         END_IF;
 
-    10: (* 커맨드 해석 *)
-        CASE arr_StepData[i_CurrentStep].iCommand OF
+    1: (* 확인운전 - 스텝 완료 후 다음 스텝 진행 대기 *)
+        IF i_CheckRunState = 1 THEN
+            i_SeqState := 10;
+        END_IF;
+
+    10: (* 스텝 데이터 읽기 + 커맨드 해석 *)
+        (* 전역변수: g_SeqData AT DT20000 : ARRAY[0..3999] OF DUT_STEP_DATA *)
+        (* 인덱스 = 슬롯 × 100 + 스텝  (최대 39×100+99 = 3999)             *)
+        di_StepBase := INT_TO_DINT(i_ActiveSlotNo) * 100 + INT_TO_DINT(i_CurrentStep);
+        i_StepCmd  := g_SeqData[di_StepBase].iCommand;
+        w_StepOpt  := g_SeqData[di_StepBase].wOption;
+        di_StepP1  := g_SeqData[di_StepBase].diParam1;
+        di_StepP2  := g_SeqData[di_StepBase].diParam2;
+        di_StepP3  := g_SeqData[di_StepBase].diParam3;
+        di_StepP4  := g_SeqData[di_StepBase].diParam4;
+
+        CASE i_StepCmd OF
             10: i_SeqState := 11;
             20: i_SeqState := 40;
             21: i_SeqState := 60;
             30: i_SeqState := 50;
             40: i_SeqState := 70;
-            99: b_Run := FALSE; i_CurrentStep := 0; i_SeqState := 0; b_Step_End := true;
+            50: i_SeqState := 80;
+            99: i_CurrentStep := 0; b_Step_End := TRUE;
+                IF i_ControlCmd = 2 THEN
+                    i_CheckRunState := 0;
+                END_IF;
+                i_SeqState := 0;
             0:  i_SeqState := 0;
-            ELSE i_ErrorID := 99; i_SeqState := 900; 
+            ELSE i_ErrorID := 99; i_SeqState := 900;
         END_CASE;
 
-    (* ---- [위치 이동] ---- *)
+
+    (* ──── [위치 이동 POS] ──── *)
     11: (* 테이블 번호 쓰기 *)
-        i_WriteTableNo := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam1) + 10026;
-        FOR i_LoopAxis := 1 TO 8 DO
-            w_ShiftNum := INT_TO_WORD(i_LoopAxis - 1);
-            w_AxisMask := SHL(WORD#1, w_ShiftNum);
-            IF (arr_StepData[i_CurrentStep].wOption AND w_AxisMask) <> 0 THEN
-                w_WriteAddr := 16#0100 OR INT_TO_WORD(i_LoopAxis - 1);
-                F151_WRT(s1_BankSlot := 16#0000, s2_Start := Adr_Of_Var(i_WriteTableNo), n_Number := 1, d_Start := w_WriteAddr);
+        i_WriteTableNo := DINT_TO_INT(di_StepP1) + 10026;
+        FOR i_LoopAxis := 1 TO 5 DO
+            IF (w_StepOpt AND SHL(WORD#1, INT_TO_WORD(i_LoopAxis - 1))) <> 0 THEN
+                F151_WRT(s1_BankSlot:=16#0000, s2_Start:=Adr_Of_Var(i_WriteTableNo), n_Number:=1, d_Start:=INT_TO_WORD(16#0100 + i_LoopAxis - 1));
             END_IF;
         END_FOR;
         i_SeqState := 20;
 
     20: (* 기동 신호 ON *)
-        FOR i_LoopAxis := 1 TO 8 DO
-            w_ShiftNum := INT_TO_WORD(i_LoopAxis - 1);
-            w_AxisMask := SHL(WORD#1, w_ShiftNum);
-            IF (arr_StepData[i_CurrentStep].wOption AND w_AxisMask) <> 0 THEN
-                arr_bStart[i_LoopAxis] := TRUE;
-            END_IF;
+        FOR i_LoopAxis := 1 TO 5 DO
+            IF (w_StepOpt AND SHL(WORD#1, INT_TO_WORD(i_LoopAxis - 1))) <> 0 THEN arr_bStart[i_LoopAxis] := TRUE; END_IF;
         END_FOR;
-        b_TimerStart := FALSE; 
+        b_TimerStart := FALSE;
         i_SeqState := 21;
 
     21: (* 기동 확인 *)
         b_AnyBusy := FALSE;
-        FOR i_LoopAxis := 1 TO 8 DO
-            IF arr_bStart[i_LoopAxis] AND arr_bBusy[i_LoopAxis] THEN
-                arr_bStart[i_LoopAxis] := FALSE; 
-                b_AnyBusy := TRUE; 
-            END_IF;
+        FOR i_LoopAxis := 1 TO 5 DO
+            IF arr_bStart[i_LoopAxis] AND arr_bBusy[i_LoopAxis] THEN arr_bStart[i_LoopAxis]:=FALSE; b_AnyBusy:=TRUE; END_IF;
         END_FOR;
 
         IF b_AnyBusy THEN
             b_TimerStart := FALSE;
-            FOR i_LoopAxis := 1 TO 8 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
+            FOR i_LoopAxis := 1 TO 5 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
             i_SeqState := 30;
         ELSE
-            b_TimerStart := TRUE; 
-            
-            (* [수정] .Q 대신 b_WaitDone 변수 확인 *)
-            (* 주의: 아래쪽 타이머 호출 코드에 의해 b_WaitDone이 업데이트됨 *)
+            b_TimerStart := TRUE;
             IF b_WaitDone THEN
                 b_AllDone := TRUE;
-                FOR i_LoopAxis := 1 TO 8 DO
-                     w_ShiftNum := INT_TO_WORD(i_LoopAxis - 1);
-                     w_AxisMask := SHL(WORD#1, w_ShiftNum);
-                     IF (arr_StepData[i_CurrentStep].wOption AND w_AxisMask) <> 0 THEN
-                         IF NOT arr_bDone[i_LoopAxis] THEN b_AllDone := FALSE; END_IF;
-                     END_IF;
+                FOR i_LoopAxis := 1 TO 5 DO
+                    IF (w_StepOpt AND SHL(WORD#1, INT_TO_WORD(i_LoopAxis - 1))) <> 0 THEN
+                        IF NOT arr_bDone[i_LoopAxis] THEN b_AllDone := FALSE; END_IF;
+                    END_IF;
                 END_FOR;
-                b_TimerStart := FALSE; 
-                FOR i_LoopAxis := 1 TO 8 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
+                b_TimerStart := FALSE;
+                FOR i_LoopAxis := 1 TO 5 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
                 IF b_AllDone THEN i_SeqState := 99; ELSE i_ErrorID := 21; i_SeqState := 900; END_IF;
             END_IF;
         END_IF;
 
     30: (* 완료 대기 *)
         b_AllDone := TRUE;
-        FOR i_LoopAxis := 1 TO 8 DO
-            w_ShiftNum := INT_TO_WORD(i_LoopAxis - 1);
-            w_AxisMask := SHL(WORD#1, w_ShiftNum);
-            IF (arr_StepData[i_CurrentStep].wOption AND w_AxisMask) <> 0 THEN
+        FOR i_LoopAxis := 1 TO 5 DO
+            IF (w_StepOpt AND SHL(WORD#1, INT_TO_WORD(i_LoopAxis - 1))) <> 0 THEN
                 IF arr_bBusy[i_LoopAxis] THEN b_AllDone := FALSE; END_IF;
             END_IF;
         END_FOR;
         IF b_AllDone THEN i_SeqState := 99; END_IF;
 
-    (* ---- [출력 제어] ---- *)
+
+    (* ──── [출력 제어 OUT] ──── *)
     40:
-        i_OutIndex := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam1);
-        IF i_OutIndex >= 0 AND i_OutIndex <= 31 THEN
-            valveOutput[i_OutIndex] := (arr_StepData[i_CurrentStep].wOption = 1);
-        ELSIF i_OutIndex >= 100 AND i_OutIndex <= 115 THEN
-            (* M00~M15 → gw_InternalBit0 비트 제어 *)
-            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_OutIndex - 100));
-            IF arr_StepData[i_CurrentStep].wOption = 1 THEN
-                gw_InternalBit0 := gw_InternalBit0 OR w_InputMask;
-            ELSE
-                gw_InternalBit0 := gw_InternalBit0 AND (NOT w_InputMask);
+        i_OutIndex  := DINT_TO_INT(di_StepP1);
+        i_OutType   := DINT_TO_INT(di_StepP2);
+        w_BitMask   := SHL(WORD#1, INT_TO_WORD(i_OutIndex MOD 16));
+        IF di_StepP3 > 0 THEN
+            (* 타이머 기동후출력: 빈 슬롯 찾아서 타이머 시작 후 즉시 다음 스텝 진행 *)
+            i_OutDelaySlot := -1;
+            IF NOT b_OutDelayPending[0] THEN i_OutDelaySlot := 0;
+            ELSIF NOT b_OutDelayPending[1] THEN i_OutDelaySlot := 1;
             END_IF;
-        ELSIF i_OutIndex >= 116 AND i_OutIndex <= 131 THEN
-            (* M16~M31 → gw_InternalBit1 비트 제어 *)
-            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_OutIndex - 116));
-            IF arr_StepData[i_CurrentStep].wOption = 1 THEN
-                gw_InternalBit1 := gw_InternalBit1 OR w_InputMask;
+            IF i_OutDelaySlot >= 0 THEN
+                i_OutDelayPort[i_OutDelaySlot]    := i_OutIndex;
+                i_OutDelayType[i_OutDelaySlot]    := DINT_TO_INT(di_StepP2);
+                w_OutDelayOpt[i_OutDelaySlot]     := w_StepOpt;
+                t_OutDelaySetting[i_OutDelaySlot] := DINT_TO_TIME(di_StepP3);
+                b_OutDelayStart[i_OutDelaySlot]   := TRUE;
+                b_OutDelayPending[i_OutDelaySlot] := TRUE;
             ELSE
-                gw_InternalBit1 := gw_InternalBit1 AND (NOT w_InputMask);
+                (* 슬롯 없음: 에러 처리 *)
+                i_ErrorID  := 98;
+                i_SeqState := 900;
             END_IF;
+        ELSE
+            (* 즉시 출력 *)
+            CASE i_OutType OF
+                0: (* 시스템 출력 *)
+                    IF w_StepOpt = 1 THEN w_system_Output := w_system_Output OR w_BitMask;
+                    ELSE                  w_system_Output := w_system_Output AND (NOT w_BitMask);
+                    END_IF;
+                1: (* 밸브 출력 *)
+                    IF w_StepOpt = 1 THEN w_Valve_Output := w_Valve_Output OR w_BitMask;
+                    ELSE                  w_Valve_Output := w_Valve_Output AND (NOT w_BitMask);
+                    END_IF;
+                2: (* 내부비트 *)
+                    IF i_OutIndex < 16 THEN
+                        IF w_StepOpt = 1 THEN w_internal_Bit0 := w_internal_Bit0 OR w_BitMask;
+                        ELSE                  w_internal_Bit0 := w_internal_Bit0 AND (NOT w_BitMask);
+                        END_IF;
+                    ELSE
+                        IF w_StepOpt = 1 THEN w_internal_Bit1 := w_internal_Bit1 OR w_BitMask;
+                        ELSE                  w_internal_Bit1 := w_internal_Bit1 AND (NOT w_BitMask);
+                        END_IF;
+                    END_IF;
+            END_CASE;
         END_IF;
         i_SeqState := 99;
 
-    (* ---- [입력 대기] ---- *)
-    60: (* 입력 대기 초기화 *)
-        i_WaitPort := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam1);
-        t_InputTimeout := DINT_TO_TIME(arr_StepData[i_CurrentStep].diParam2);
+
+    (* ──── [입력 대기 IN] ──── *)
+    60: (* 초기화 *)
+        i_WaitPort       := DINT_TO_INT(di_StepP1);
+        t_InputTimeout   := DINT_TO_TIME(di_StepP2);
         b_InputWaitStart := TRUE;
-        i_SeqState := 61;
+        i_SeqState       := 61;
 
     61: (* 입력 상태 확인 *)
-        (* 입력 읽기 *)
         IF i_WaitPort >= 0 AND i_WaitPort <= 15 THEN
-            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_WaitPort));
-            b_CurrentInput := (WX0 AND w_InputMask) <> 0;
-        ELSIF i_WaitPort >= 16 AND i_WaitPort <= 31 THEN
-            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_WaitPort - 16));
-            b_CurrentInput := (WX1 AND w_InputMask) <> 0;
+            w_InputMask  := SHL(WORD#1, INT_TO_WORD(i_WaitPort));
+            b_CurrentInput := (w_Input0 AND w_InputMask) <> 0;
+        ELSIF i_WaitPort >= 32 AND i_WaitPort <= 47 THEN
+            w_InputMask  := SHL(WORD#1, INT_TO_WORD(i_WaitPort - 32));
+            b_CurrentInput := (w_Input1 AND w_InputMask) <> 0;
         ELSIF i_WaitPort >= 100 AND i_WaitPort <= 115 THEN
-            (* M00~M15 → gw_InternalBit0 비트 읽기 *)
-            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_WaitPort - 100));
-            b_CurrentInput := (gw_InternalBit0 AND w_InputMask) <> 0;
+            w_InputMask  := SHL(WORD#1, INT_TO_WORD(i_WaitPort - 100));
+            b_CurrentInput := (w_internal_Bit0 AND w_InputMask) <> WORD#0;
         ELSIF i_WaitPort >= 116 AND i_WaitPort <= 131 THEN
-            (* M16~M31 → gw_InternalBit1 비트 읽기 *)
-            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_WaitPort - 116));
-            b_CurrentInput := (gw_InternalBit1 AND w_InputMask) <> 0;
+            w_InputMask  := SHL(WORD#1, INT_TO_WORD(i_WaitPort - 116));
+            b_CurrentInput := (w_internal_Bit1 AND w_InputMask) <> WORD#0;
+        ELSIF i_WaitPort >= 200 AND i_WaitPort <= 215 THEN
+            w_InputMask  := SHL(WORD#1, INT_TO_WORD(i_WaitPort - 200));
+            b_CurrentInput := (w_R_Input AND w_InputMask) <> WORD#0;
         ELSE
             b_CurrentInput := FALSE;
         END_IF;
 
-        (* ON/OFF 조건 체크 *)
         b_InputCondMet := FALSE;
-        IF arr_StepData[i_CurrentStep].wOption = 1 THEN
+        IF w_StepOpt = 1 THEN
             IF b_CurrentInput THEN
-                b_InputWaitStart := FALSE;
-                i_SeqState := 99;
-                b_InputCondMet := TRUE;
+                b_InputWaitStart := FALSE; i_SeqState := 99; b_InputCondMet := TRUE;
             END_IF;
         ELSE
             IF NOT b_CurrentInput THEN
-                b_InputWaitStart := FALSE;
-                i_SeqState := 99;
-                b_InputCondMet := TRUE;
+                b_InputWaitStart := FALSE; i_SeqState := 99; b_InputCondMet := TRUE;
             END_IF;
         END_IF;
 
-        (* 타임아웃 처리 (조건 미충족 시에만) *)
-        (* b_TimeoutImmediate: diParam2=0(미사용)일 때 즉시 분기 *)
-        b_TimeoutImmediate := (arr_StepData[i_CurrentStep].diParam2 = 0);
+        b_TimeoutImmediate := (di_StepP2 = 0);
         IF NOT b_InputCondMet THEN
             IF b_InputWaitDone OR b_TimeoutImmediate THEN
                 b_InputWaitStart := FALSE;
-                CASE DINT_TO_INT(arr_StepData[i_CurrentStep].diParam3) OF
-                    1: (* 계속 대기 - 타이머 리셋 후 입력 대기 유지 *)
-                        b_InputWaitStart := TRUE;
-                    2: (* stop - 에러 정지 *)
-                        i_ErrorID := 61;
-                        i_SeqState := 900;
-                    3: (* jump - 특정 스텝으로 *)
-                        i_CurrentStep := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam4);
-                        i_SeqState := 10;
-                    ELSE (* ask - 작업자 팝업 요청 *)
-                        gw_SeqPopup := 1;
-                        gw_PopupResp := 0;
-                        i_SeqState := 62;
+                CASE DINT_TO_INT(di_StepP3) OF
+                    0: b_InputWaitStart := TRUE;
+                    1: w_SeqPopup := INT_TO_WORD(DINT_TO_INT(di_StepP4));
+                       i_ControlCmd := 0; i_CheckRunState := 0; i_SeqState := 0;
+                    2: w_SeqPopup := INT_TO_WORD(DINT_TO_INT(di_StepP4) + 1000);
+                       i_SeqState := 99;
                 END_CASE;
             END_IF;
         END_IF;
 
-    62: (* 작업자 응답 대기 *)
-        i_PopupResponse := WORD_TO_INT(gw_PopupResp);
-        IF i_PopupResponse = 1 THEN       (* 계속 *)
-            gw_SeqPopup := 0;
-            gw_PopupResp := 0;
-            b_InputWaitStart := TRUE;     (* 타이머 리셋 후 입력 대기 재개 *)
-            i_SeqState := 61;
-        ELSIF i_PopupResponse = 2 THEN    (* 정지 *)
-            gw_SeqPopup := 0;
-            gw_PopupResp := 0;
-            i_ErrorID := 62;
-            i_SeqState := 900;
+
+    (* ──── [CALL - 서브 시퀀스 호출] ──── *)
+    80: (* CALL 기동 *)
+        i_CallSlot        := DINT_TO_INT(di_StepP1);
+        b_CallParallel    := (w_StepOpt = 1);
+        i_CallSlotOut     := i_CallSlot;
+        b_CallParallelOut := b_CallParallel;
+        b_CallStart       := TRUE;
+        i_SeqState        := 82;
+
+    82: (* b_CallStart 하강 후 분기 *)
+        b_CallStart := FALSE;
+        IF b_CallParallel THEN
+            i_SeqState := 99;   (* 병렬: 즉시 다음 스텝 *)
+        ELSE
+            i_SeqState := 81;   (* 동기: 완료 대기 *)
         END_IF;
 
-    (* ---- [점프] ---- *)
-    70: (* JMP 처리 *)
-        IF arr_StepData[i_CurrentStep].wOption = 0 THEN
-            (* 무조건 점프 *)
-            i_CurrentStep := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam1);
+    81: (* 서브 완료 대기 *)
+        IF b_SubDone THEN
+            i_SeqState := 99;
+        ELSIF b_SubError THEN
+            i_ErrorID := 50; i_SeqState := 900;
+        END_IF;
+
+
+    (* ──── [점프 JMP] ──── *)
+    70:
+        IF w_StepOpt = 0 THEN
+            i_CurrentStep := DINT_TO_INT(di_StepP1);
             i_SeqState := 10;
         ELSE
-            (* 조건부 점프 - 조건 읽기 *)
-            i_JmpPort := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam3);
-            IF DINT_TO_INT(arr_StepData[i_CurrentStep].diParam2) = 1 THEN
-                (* MODE 조건 (0~39) *)
-                i_JmpBit := i_JmpPort MOD 16;
+            i_JmpPort := DINT_TO_INT(di_StepP3);
+            IF DINT_TO_INT(di_StepP2) = 2 THEN
+                (* 운전상태 비교: 0=정지, 1=자동, 2=확인운전 *)
+                b_JmpCond := (i_ControlCmd = DINT_TO_INT(di_StepP3));
+            ELSIF DINT_TO_INT(di_StepP2) = 1 THEN
+                i_JmpBit    := i_JmpPort MOD 16;
                 w_InputMask := SHL(WORD#1, INT_TO_WORD(i_JmpBit));
                 CASE i_JmpPort / 16 OF
-                    0: b_JmpCond := (gw_ModeWord0 AND w_InputMask) <> 0;
-                    1: b_JmpCond := (gw_ModeWord1 AND w_InputMask) <> 0;
-                    2: b_JmpCond := (gw_ModeWord2 AND w_InputMask) <> 0;
+                    0: b_JmpCond := (w_ModeWord0 AND w_InputMask) <> 0;
+                    1: b_JmpCond := (w_ModeWord1 AND w_InputMask) <> 0;
+                    2: b_JmpCond := (w_ModeWord2 AND w_InputMask) <> 0;
                     ELSE b_JmpCond := FALSE;
                 END_CASE;
             ELSE
-                (* PORT 조건 *)
                 IF i_JmpPort >= 0 AND i_JmpPort <= 15 THEN
                     w_InputMask := SHL(WORD#1, INT_TO_WORD(i_JmpPort));
-                    b_JmpCond := (WX0 AND w_InputMask) <> 0;
-                ELSIF i_JmpPort >= 16 AND i_JmpPort <= 31 THEN
-                    w_InputMask := SHL(WORD#1, INT_TO_WORD(i_JmpPort - 16));
-                    b_JmpCond := (WX1 AND w_InputMask) <> 0;
+                    b_JmpCond := (w_Input0 AND w_InputMask) <> 0;
+                ELSIF i_JmpPort >= 32 AND i_JmpPort <= 47 THEN
+                    w_InputMask := SHL(WORD#1, INT_TO_WORD(i_JmpPort - 32));
+                    b_JmpCond := (w_Input1 AND w_InputMask) <> 0;
                 ELSIF i_JmpPort >= 100 AND i_JmpPort <= 115 THEN
-                    (* M00~M15 → gw_InternalBit0 비트 읽기 *)
                     w_InputMask := SHL(WORD#1, INT_TO_WORD(i_JmpPort - 100));
-                    b_JmpCond := (gw_InternalBit0 AND w_InputMask) <> 0;
+                    b_JmpCond := (w_internal_Bit0 AND w_InputMask) <> WORD#0;
                 ELSIF i_JmpPort >= 116 AND i_JmpPort <= 131 THEN
-                    (* M16~M31 → gw_InternalBit1 비트 읽기 *)
                     w_InputMask := SHL(WORD#1, INT_TO_WORD(i_JmpPort - 116));
-                    b_JmpCond := (gw_InternalBit1 AND w_InputMask) <> 0;
+                    b_JmpCond := (w_internal_Bit1 AND w_InputMask) <> WORD#0;
+                ELSIF i_JmpPort >= 200 AND i_JmpPort <= 215 THEN
+                    w_InputMask := SHL(WORD#1, INT_TO_WORD(i_JmpPort - 200));
+                    b_JmpCond := (w_R_Input AND w_InputMask) <> WORD#0;
                 ELSE
                     b_JmpCond := FALSE;
                 END_IF;
             END_IF;
-            (* ON/OFF 비교 및 점프 실행 *)
-            IF DINT_TO_INT(arr_StepData[i_CurrentStep].diParam4) = 1 THEN
-                (* ON 조건 *)
-                IF b_JmpCond THEN
-                    i_CurrentStep := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam1);
-                    i_SeqState := 10;
-                ELSE
-                    i_SeqState := 99;
+            IF DINT_TO_INT(di_StepP4) = 1 THEN
+                IF b_JmpCond THEN i_CurrentStep := DINT_TO_INT(di_StepP1); i_SeqState := 10;
+                ELSE              i_SeqState := 99;
                 END_IF;
             ELSE
-                (* OFF 조건 *)
-                IF NOT b_JmpCond THEN
-                    i_CurrentStep := DINT_TO_INT(arr_StepData[i_CurrentStep].diParam1);
-                    i_SeqState := 10;
-                ELSE
-                    i_SeqState := 99;
+                IF NOT b_JmpCond THEN i_CurrentStep := DINT_TO_INT(di_StepP1); i_SeqState := 10;
+                ELSE                  i_SeqState := 99;
                 END_IF;
             END_IF;
         END_IF;
 
-    (* ---- [타이머 지연] ---- *)
-    50:
-        t_DelaySetting := DINT_TO_TIME(arr_StepData[i_CurrentStep].diParam1);
-        b_DelayStart := TRUE;
 
-        (* [수정] .Q 대신 b_DelayDone 변수 확인 *)
-        IF b_DelayDone THEN
-            b_DelayStart := FALSE; 
-            i_SeqState := 99;      
+    (* ──── [타이머 TMR] ──── *)
+    (* di_StepP3 = 0: 단순 대기 / di_StepP3 = 1: 신호 유지 모드 *)
+    50:
+        IF DINT_TO_INT(di_StepP3) = 1 THEN
+            i_HoldPort       := DINT_TO_INT(di_StepP2);
+            t_HoldSetting    := DINT_TO_TIME(di_StepP1);
+            b_HoldTimerStart := FALSE;
+            i_SeqState       := 51;
+        ELSE
+            t_DelaySetting := DINT_TO_TIME(di_StepP1);
+            b_DelayStart   := TRUE;
+            IF b_DelayDone THEN
+                b_DelayStart := FALSE; i_SeqState := 99;
+            END_IF;
+        END_IF;
+
+    51: (* 신호 유지 대기 루프 *)
+        IF i_HoldPort >= 0 AND i_HoldPort <= 15 THEN
+            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_HoldPort));
+            b_HoldInput := (w_Input0 AND w_InputMask) <> 0;
+        ELSIF i_HoldPort >= 32 AND i_HoldPort <= 47 THEN
+            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_HoldPort - 32));
+            b_HoldInput := (w_Input1 AND w_InputMask) <> 0;
+        ELSIF i_HoldPort >= 100 AND i_HoldPort <= 115 THEN
+            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_HoldPort - 100));
+            b_HoldInput := (w_internal_Bit0 AND w_InputMask) <> WORD#0;
+        ELSIF i_HoldPort >= 116 AND i_HoldPort <= 131 THEN
+            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_HoldPort - 116));
+            b_HoldInput := (w_internal_Bit1 AND w_InputMask) <> WORD#0;
+        ELSIF i_HoldPort >= 200 AND i_HoldPort <= 215 THEN
+            w_InputMask := SHL(WORD#1, INT_TO_WORD(i_HoldPort - 200));
+            b_HoldInput := (w_R_Input AND w_InputMask) <> WORD#0;
+        ELSE
+            b_HoldInput := FALSE;
+        END_IF;
+
+        IF w_StepOpt = 1 THEN b_HoldTimerStart := b_HoldInput;
+        ELSE                  b_HoldTimerStart := NOT b_HoldInput;
+        END_IF;
+
+        IF b_HoldDone THEN
+            b_HoldTimerStart := FALSE; i_SeqState := 99;
         END_IF;
 
 
     99: (* 스텝 완료 *)
-        b_StepDone := TRUE; 
+        b_StepDone := TRUE;
         i_CurrentStep := i_CurrentStep + 1;
-        IF i_CurrentStep > 49 THEN i_CurrentStep := 0; END_IF;
-        IF b_Run THEN i_SeqState := 10; ELSE i_SeqState := 0; END_IF;
+        IF i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
+        IF i_ControlCmd = 2 THEN
+            i_SeqState := 1;    (* 확인운전: 다음 스텝 전 일시정지 *)
+        ELSE
+            i_SeqState := 10;   (* 자동운전: 즉시 다음 스텝 *)
+        END_IF;
 
     900: (* 에러 *)
-        b_Error := TRUE;
+        b_Error      := TRUE;
         b_TimerStart := FALSE;
         b_DelayStart := FALSE;
 
 END_CASE;
 
-(* ===========================================================================
-   [3. 타이머 호출 (Output Mapping 적용)] 
-   - Q => 변수명 : 이렇게 하면 .Q를 안 써도 결과가 변수에 담깁니다.
-=========================================================================== *)
 
-(* 에러 체크용 타이머 *)
-tmr_StartWait(IN := b_TimerStart, PT := t_WaitTime, Q => b_WaitDone);
-
-(* 시퀀스 지연용 타이머 *)
-tmr_StepDelay(IN := b_DelayStart, PT := t_DelaySetting, Q => b_DelayDone);
-
-(* 입력 대기 타임아웃 타이머 *)
-tmr_InputWait(IN := b_InputWaitStart, PT := t_InputTimeout, Q => b_InputWaitDone);
+(* ── 3. 타이머 호출 (매 스캔) ── *)
+tmr_StartWait (IN := b_TimerStart,     PT := t_WaitTime,      Q => b_WaitDone);
+tmr_StepDelay (IN := b_DelayStart,     PT := t_DelaySetting,  Q => b_DelayDone);
+tmr_InputWait (IN := b_InputWaitStart, PT := t_InputTimeout,  Q => b_InputWaitDone);
+tmr_HoldTimer (IN := b_HoldTimerStart, PT := t_HoldSetting,   Q => b_HoldDone);

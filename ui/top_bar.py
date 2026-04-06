@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt, QTimer, QTime, QDate, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtGui import QPixmap
 
 class TopBar(QFrame):
     sig_jog_clicked = Signal()
@@ -8,6 +9,7 @@ class TopBar(QFrame):
     def __init__(self, plc_client=None):
         super().__init__()
         self.plc_client = plc_client
+        self.op_status = 0
         
         # 전체 스타일 설정
         self.setFixedHeight(70) 
@@ -29,10 +31,28 @@ class TopBar(QFrame):
         # [LEFT] 로고 & 상태 정보
         # -----------------------------------------------------------
         
-        # 1. 회사 로고 (GTAUTOMATION)
-        self.lbl_logo = QLabel("GTAUTOMATION")
+        # 1. 회사 로고 (이미지 + AUTOMATION 텍스트)
+        import os
+        logo_row = QHBoxLayout()
+        logo_row.setSpacing(6)
+        logo_row.setContentsMargins(0, 0, 0, 0)
+
+        self.lbl_logo_img = QLabel()
+        logo_path = os.path.join(os.path.dirname(__file__), "..", "gtlogo.png")
+        pixmap = QPixmap(logo_path)
+        if not pixmap.isNull():
+            self.lbl_logo_img.setPixmap(pixmap.scaledToHeight(28, Qt.SmoothTransformation))
+        self.lbl_logo_img.setStyleSheet("background: transparent;")
+        logo_row.addWidget(self.lbl_logo_img)
+
+        self.lbl_logo = QLabel("AUTOMATION")
         self.lbl_logo.setStyleSheet("color: white; font-size: 24px; font-weight: 900; letter-spacing: 1px;")
-        layout.addWidget(self.lbl_logo)
+        logo_row.addWidget(self.lbl_logo)
+
+        logo_widget = QWidget()
+        logo_widget.setLayout(logo_row)
+        logo_widget.setStyleSheet("background: transparent;")
+        layout.addWidget(logo_widget)
         
         self._add_separator(layout)
 
@@ -133,15 +153,13 @@ class TopBar(QFrame):
     def _on_monitor_data(self, data):
         """PLC 데이터 수신 시 UI 갱신"""
         # 1. 운전 모드 (DT129)
-        mode = data.get('op_status', 0)
-        if mode == 2:
+        self.op_status = data.get('op_status', 0)
+        mode = self.op_status
+        if mode == 1:
             self.lbl_mode.setText("MODE: AUTO")
             self.lbl_mode.setStyleSheet("color: #2ECC71; font-size: 16px; font-weight: 900;")
-        elif mode == 3:
+        elif mode == 2:
             self.lbl_mode.setText("MODE: CHECK")
-            self.lbl_mode.setStyleSheet("color: #F1C40F; font-size: 16px; font-weight: 900;")
-        elif mode == 1:
-            self.lbl_mode.setText("MODE: MANUAL")
             self.lbl_mode.setStyleSheet("color: #F1C40F; font-size: 16px; font-weight: 900;")
         else:
             self.lbl_mode.setText("MODE: STOP")

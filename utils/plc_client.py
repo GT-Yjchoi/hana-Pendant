@@ -23,29 +23,39 @@ class PLCClient(QObject):
         self.USE_HEADER = True      
         self.DEST_UNIT_NO = 0x01    
         
-        # ===== 하트비트 설정 =====
-        self.HEARTBEAT_ADDR = 214       # DT214에 하트비트 저장
-        self.heartbeat_value = 0        # 하트비트 현재 값 (0~100)
-        self._heartbeat_skip = False    # 하트비트 전송 시 무한루프 방지
-        
-        # ===== 메모리 맵 (이미지 기준) =====
-        # 1. 실시간 모니터링 블록 (PLC → HMI): DT100~DT141 (42 Words)
-        self.MONITOR_ADDR = 100
-        # DT100~DT160 (61 Words): DT159=시퀀스팝업요청, DT160=작업자응답
+        # ===== 메모리 맵 =====
+
+        # 1. 실시간 모니터링 블록 (PLC → HMI): DT100~
+        self.MONITOR_ADDR  = 100
         self.MONITOR_COUNT = 61
-        
-        # 2. 제어 명령 블록 (HMI → PLC): DT200~DT208
-        self.CONTROL_BASE = 200
-        
-        # 3. 시퀀스 데이터 블록: DT10000~
-        self.SEQ_BASE_ADDR = 10000
-        self.SLOT_SIZE = 500        # 슬롯당 크기 (50스텝 × 10워드)
-        self.MAX_SLOTS = 40         # 최대 슬롯 수
-        
-        # 4. 포인트 데이터 블록: DT30000~
-        self.POINT_BASE_ADDR = 30000
-        self.POINT_SIZE = 32        # 포인트당 크기
-        self.MAX_POINTS = 100       # 최대 포인트 수
+        self.ADDR_SEQ_POPUP = 159   # DT159: 시퀀스 팝업 요청코드
+
+        # 2. 제어 명령 블록 (HMI → PLC): DT200~
+        self.ADDR_CTRL_CMD    = 200  # 운전 제어 명령
+        self.ADDR_JOG_PRESS   = 201  # 조작압 선택
+        self.ADDR_CHECK_RUN   = 202  # 확인운전 제어
+        self.ADDR_VALVE_OUT   = 204  # 밸브 수동출력 (204~205, 2 Words)
+        self.ADDR_JOG_CTRL    = 205  # 조그 제어
+        self.ADDR_MODE        = 206  # 모드 설정 (206~208, 3 Words)
+        self.ADDR_JOG_SPEED   = 211  # 조그 속도
+        self.ADDR_ALARM_RESET = 212  # 알람 리셋
+        self.HEARTBEAT_ADDR   = 214  # 하트비트
+        self.heartbeat_value  = 0
+        self._heartbeat_skip  = False
+
+        # 3. 시퀀스 데이터 블록: DT20000~ (40슬롯 × 1000 = DT20000~DT59999)
+        self.SEQ_BASE_ADDR = 20000
+        self.SLOT_SIZE     = 1000   # 100스텝 × 10워드
+        self.MAX_SLOTS     = 40
+
+        # 4. 포인트 데이터 블록: DT16000~ (100개 × 32 = DT16000~DT19199)
+        self.POINT_BASE_ADDR = 16000
+        self.POINT_SIZE      = 32
+        self.MAX_POINTS      = 100
+
+        # 5. 축 설정 블록: DT15000~ (50 Words)
+        self.AXIS_PARAM_ADDR   = 15000
+        self.ADDR_AXIS_DATASET = self.AXIS_PARAM_ADDR + 33  # 데이터셋 트리거
 
     def connect_to_plc(self, ip, port):
         """PLC 연결"""
@@ -215,6 +225,19 @@ class PLCClient(QObject):
         high = (v >> 16) & 0xFFFF
         self.write_words(area_code, addr, [low, high])
 
+    def patch_tmr_step_time(self, slot_id, step_idx, time_sec):
+        """TMR 스텝의 diParam1(시간값)만 PLC에 직접 패치 (슬롯 전체 재전송 없이)"""
+        if not self.is_connected:
+            return False
+        if not (0 <= slot_id < self.MAX_SLOTS) or not (0 <= step_idx < 100):
+            return False
+        # Word 오프셋: 스텝당 10Words, diParam1 = +2~3
+        addr = self.SEQ_BASE_ADDR + slot_id * self.SLOT_SIZE + step_idx * 10 + 2
+        value = int(round(time_sec * 100))
+        result = self.write_dint(0x09, addr, value)
+        print(f"[PLC] TMR 패치 Slot={slot_id} Step={step_idx} DT{addr} = {value} ({time_sec}s)")
+        return result
+
     # =========================================================
     # 제어 명령 (HMI → PLC) - DT200~208
     # =========================================================
@@ -222,13 +245,12 @@ class PLCClient(QObject):
     def send_control_command(self, mode):
         """
         DT200: 운전 제어 명령
-        - 1: 수작 (미사용?)
-        - 2: 자동 (AUTO RUN)
-        - 3: 일정지 (CHECK RUN)
-        - 4: 리셋 (미사용?)
+        - 0: 정지
+        - 1: 자동 (AUTO RUN)
+        - 2: 확인운전 (CHECK RUN)
         """
-        print(f"[PLC] 운전 제어 명령 → DT200 = {mode}")
-        return self.write_words(0x09, 200, [mode])
+        print(f"[PLC] 운전 제어 명령 → DT{self.ADDR_CTRL_CMD} = {mode}")
+        return self.write_words(0x09, self.ADDR_CTRL_CMD, [mode])
     
     def send_jog_command(self, jog_value):
         """
@@ -236,32 +258,32 @@ class PLCClient(QObject):
         - 0: 제품압
         - 1: 티칭압
         """
-        print(f"[PLC] 조작 압 선택 → DT201 = {jog_value}")
-        return self.write_words(0x09, 201, [jog_value])
+        print(f"[PLC] 조작 압 선택 → DT{self.ADDR_JOG_PRESS} = {jog_value}")
+        return self.write_words(0x09, self.ADDR_JOG_PRESS, [jog_value])
     
     def send_check_run_command(self, state):
         """
         DT202: 확인운전 제어
         - 확인운전 시작/중지 명령
         """
-        print(f"[PLC] 확인운전 제어 → DT202 = {state}")
-        return self.write_words(0x09, 202, [state])
+        print(f"[PLC] 확인운전 제어 → DT{self.ADDR_CHECK_RUN} = {state}")
+        return self.write_words(0x09, self.ADDR_CHECK_RUN, [state])
     
     def write_jog_bits(self, bit_mask):
         """
-        DT203~204: 밸브 수동 제어 (Bit 단위)
+        DT204~205: 밸브 수동 제어 (Bit 단위)
         - 32개 밸브를 Bit로 제어 (2 Words)
         """
         low = bit_mask & 0xFFFF
         high = (bit_mask >> 16) & 0xFFFF
-        return self.write_words(0x09, 203, [low, high])
-    
+        return self.write_words(0x09, self.ADDR_VALVE_OUT, [low, high])
+
     def write_jog_bit(self, bit_pos, is_on):
         """
-        DT203~204: 특정 밸브 On/Off
+        DT204~205: 특정 밸브 On/Off
         bit_pos: 0~31 (밸브 번호)
         """
-        addr = 203 if bit_pos < 16 else 204
+        addr = self.ADDR_VALVE_OUT if bit_pos < 16 else self.ADDR_VALVE_OUT + 1
         bit_index = bit_pos % 16
         self.write_bit(0x09, addr, bit_index, is_on)
     
@@ -270,7 +292,7 @@ class PLCClient(QObject):
         DT205: 조그 제어 명령 (Bit 단위)
         - 즉별 조그 이동 신호
         """
-        return self.write_words(0x09, 205, [jog_bit])
+        return self.write_words(0x09, self.ADDR_JOG_CTRL, [jog_bit])
     
     def send_mode_settings(self, mode_data):
         """
@@ -288,15 +310,15 @@ class PLCClient(QObject):
             if mode_data[i]:
                 words[word_idx] |= (1 << bit_idx)
         
-        print(f"[PLC] 모드 설정 → DT206~208 = {words}")
-        return self.write_words(0x09, 206, words)
+        print(f"[PLC] 모드 설정 → DT{self.ADDR_MODE}~{self.ADDR_MODE+2} = {words}")
+        return self.write_words(0x09, self.ADDR_MODE, words)
 
     def read_mode_settings(self):
         """
         DT206~208에서 현재 모드 설정 읽기
         반환: 길이 44의 boolean 리스트 (모드 0~43)
         """
-        words = self.read_words(0x09, 206, 3)
+        words = self.read_words(0x09, self.ADDR_MODE, 3)
         if not words or len(words) < 3:
             return None
         result = []
@@ -546,25 +568,18 @@ class PLCClient(QObject):
             
         elif step_type == "OUT":
             cmd = 20
-            # ★ "on" 키 지원 (시퀀스 편집기 호환)
             on_value = step_data.get("on", step_data.get("on_off", False))
             opt = 1 if on_value else 0
-            # ★ "port" 키 지원 (시퀀스 편집기 호환)
             port = int(step_data.get("port", step_data.get("io_index", 0)))
-            
-            print(f"[DEBUG OUT] step_data: {step_data}")
-            print(f"[DEBUG OUT] port={port}, on={on_value}")
-            
-            # ★ 내부 제어 비트 (100~131) 처리
-            if 100 <= port <= 131:
-                # 내부비트는 PLC에서 DT215로 처리
-                # 여기서는 그대로 전송 (PLC가 해석)
-                p1 = port
-                print(f"[DEBUG OUT] 내부비트 M{port-100:02d} → P1={p1}")
-            else:
-                # 일반 밸브 (0~31)
-                p1 = port
-                print(f"[DEBUG OUT] 밸브 V{port} → P1={p1}")
+            # out_type: 0=시스템출력(DT203), 1=밸브출력(DT204), 2=내부비트(DT300~301)
+            out_type = int(step_data.get("out_type", 0))
+            p1 = port
+            p2 = out_type
+            # p3: 딜레이 시간 (0=즉시, >0=타이머 기동후출력, 단위 0.01초)
+            if step_data.get("delay_enable", False):
+                delay_time = float(step_data.get("delay_time", 0.0))
+                p3 = int(delay_time * 100)
+            print(f"[DEBUG OUT] out_type={out_type}, bit={port}, on={on_value}, delay_p3={p3}")
             
         elif step_type == "IN":
             cmd = 21
@@ -577,12 +592,15 @@ class PLCClient(QObject):
             print(f"[DEBUG IN] step_data: {step_data}")
             print(f"[DEBUG IN] port={port}, on={on_value}")
             
-            # ★ 내부 제어 비트 (100~131) 처리
-            if 100 <= port <= 131:
-                p1 = port
+            # ★ 포트 종류별 처리
+            if 200 <= port <= 215:
+                p1 = port  # R입력 (DT126 비트, PLC FB에서 200~215로 판별)
+                print(f"[DEBUG IN] R입력 R{port-200:02X} (DT126.{port-200}) → P1={p1}")
+            elif 100 <= port <= 131:
+                p1 = port  # 내부 비트
                 print(f"[DEBUG IN] 내부비트 M{port-100:02d} → P1={p1}")
             else:
-                p1 = port
+                p1 = port  # 시스템/밸브 입력 X
                 print(f"[DEBUG IN] 입력 X{port:02X} → P1={p1}")
             
             # ★ P2: 타임아웃 (1초 = 100 단위, 미사용 시 0)
@@ -590,21 +608,19 @@ class PLCClient(QObject):
             timeout_sec = float(step_data.get("timeout", 5.0))
             p2 = int(timeout_sec * 100) if timeout_enabled else 0
             
-            # ★ P3: 타임아웃 동작 (0:ask, 1:continue, 2:stop, 3:jump)
-            action = step_data.get("timeout_action", "ask")
-            if action == "continue":
+            # ★ P3: 타임아웃 동작 (0:계속대기, 1:알람+정지, 2:알람+진행)
+            action = step_data.get("timeout_action", "continue")
+            if action == "ask":
                 p3 = 1
-            elif action == "stop":
+            elif action == "alarm_go":
                 p3 = 2
-            elif action == "jump":
-                p3 = 3
-            else:  # "ask"
+            else:  # "continue"
                 p3 = 0
-            
-            # ★ P4: 점프 타겟 (action=jump일 때만 사용)
-            p4 = int(step_data.get("timeout_jump", 0))
-            
-            print(f"[DEBUG IN] timeout={timeout_sec}s({p2}units), action={action}({p3}), jump={p4}")
+
+            # ★ P4: 알람 번호 (알람 동작일 때 사용)
+            p4 = int(step_data.get("timeout_alarm_no", 1))
+
+            print(f"[DEBUG IN] timeout={timeout_sec}s({p2}units), action={action}({p3}), alarm_no={p4}")
             
         elif step_type == "TMR":
             cmd = 30
@@ -615,39 +631,41 @@ class PLCClient(QObject):
                 p1 = int(step_data["value"])
             else:
                 p1 = 100
+
+            if step_data.get("tmr_mode") == "hold":
+                # 신호 유지 모드: p2=포트, p3=1(모드플래그), opt=ON(1)/OFF(0)
+                p2 = int(step_data.get("port", 0))
+                p3 = 1
+                opt = 1 if step_data.get("on", True) else 0
+                print(f"[DEBUG TMR-HOLD] port={p2}, on={bool(opt)}, hold_time={p1}")
+            # else: 단순 대기 - p2=p3=0, opt=0 그대로
                 
         elif step_type == "JMP":
             cmd = 40
-            
-            # 무조건/조건부 구분
+
             is_conditional = step_data.get("condition", False)
-            
+
             if is_conditional:
-                # 조건부 점프
+                # 조건부 점프 (opt=1)
                 opt = 1
-                p1 = int(step_data.get("target_step", 0))  # 점프할 스텝 번호
-                
-                # P2: 비교 타입 (0:입력/내부비트, 1:모드)
+                p1 = int(step_data.get("target_step", 0))
+
                 cond_type = step_data.get("cond_type", "PORT")
                 if cond_type == "MODE":
                     p2 = 1
-                else:  # PORT (입력 + 내부비트 통합, BIT 제거됨)
+                elif cond_type == "STATE":
+                    p2 = 2
+                else:
                     p2 = 0
-                
-                # P3: 비교할 포트/모드 번호
                 p3 = int(step_data.get("cond_value", 0))
-                
-                # P4: ON(1) / OFF(0) 비교
                 p4 = 1 if step_data.get("cond_on", True) else 0
-                
+
                 print(f"[DEBUG JMP 조건부] target={p1}, type={cond_type}({p2}), value={p3}, on={p4}")
-                
+
             else:
-                # 무조건 점프
+                # 무조건 점프 (opt=0)
                 opt = 0
                 p1 = int(step_data.get("target_step", 0))
-                # p2, p3, p4는 사용 안 함
-                
                 print(f"[DEBUG JMP 무조건] target={p1}")
             
         elif step_type == "CALL":
@@ -703,12 +721,12 @@ class PLCClient(QObject):
                 print(f"  X Step {idx} 변환 실패: {e}")
                 flat_data.extend([0] * 10)
         
-        # 50개 스텝 = 500 Words로 패딩
-        total_len = 50 * 10
+        # 100개 스텝 = 1000 Words로 패딩
+        total_len = 100 * 10
         if len(flat_data) < total_len:
             flat_data.extend([0] * (total_len - len(flat_data)))
-        
-        # ★★★ 한 번에 전송 (500 Words < 1000 Words 제한) ★★★
+
+        # ★★★ 한 번에 전송 (1000 Words = 1000 Words 제한, 분할 전송) ★★★
         addr = self.SEQ_BASE_ADDR + (slot_id * self.SLOT_SIZE)
         print(f"[PLC] → DT{addr}에 {len(flat_data)} Words 전송 중...")
         

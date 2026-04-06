@@ -164,7 +164,8 @@ class PageAuto(GlassCard):
         if self.layout(): self.layout().setContentsMargins(10, 5, 10, 10)
         
         self.plc_client = plc_client
-        self.current_mode = 0 # 현재 운전 모드 (0:정지, 2:자동, 3:확인)
+        self.current_mode = 0  # 현재 운전 모드 (0:정지, 1:자동, 2:확인)
+        self._prev_op_status = 0
         
         # UI 레이아웃 구성
         main_layout = QHBoxLayout()
@@ -259,37 +260,43 @@ class PageAuto(GlassCard):
 
     def _on_auto_clicked(self):
         # [수정] 이미 운전 중이면 팝업 차단
-        if self.current_mode == 2 or self.current_mode == 3:
-            return 
-            
+        if self.current_mode == 1 or self.current_mode == 2:
+            return
+
         if AutoConfirmOverlay("자동 운전", "자동 운전을 시작하시겠습니까?", self.window()).exec():
-            self._send_mode(2)
+            self._send_mode(1)
 
     def _on_check_clicked(self):
         # [수정] 이미 운전 중이면 팝업 차단
-        if self.current_mode == 2 or self.current_mode == 3:
+        if self.current_mode == 1 or self.current_mode == 2:
             return
 
         if AutoConfirmOverlay("확인 운전", "확인 운전을 시작하시겠습니까?", self.window()).exec():
-            self._send_mode(3)
+            self._send_mode(2)
 
     def _on_monitor_data(self, data):
+        mode = data.get('op_status', 0)
+
+        # 확인운전 종료 감지(2→0): 화면 표시 여부 무관하게 DT202=0 전송
+        if self._prev_op_status == 2 and mode == 0:
+            self._send_check_state(0)
+        self._prev_op_status = mode
+
         if not self.isVisible(): return
-        # 1. IO 업데이트 (위치는 AxisPositionPanel이 직접 sig_monitor_data로 처리)
+        # 1. IO 업데이트
         if 'inputs' in data: self.io_panel.inputs.update_from_words(data['inputs'])
         if 'outputs' in data: self.io_panel.outputs.update_from_words(data['outputs'])
-        
+
         # 3. 운전 상태
-        mode = data.get('op_status', 0)
-        self.current_mode = mode # 상태 저장
+        self.current_mode = mode
         check_run_state = data.get('check_run_status', 0)
         
-        self.btn_auto.setStyleSheet(STYLE_GREEN_ON if mode == 2 else STYLE_GRAY_OFF)
-        self.btn_check.setStyleSheet(STYLE_YELLOW_ON if mode == 3 else STYLE_GRAY_OFF)
-        self.btn_stop.setStyleSheet(STYLE_RED_ON if mode in [2, 3] else STYLE_GRAY_OFF)
-        
-        self.sub_box.setVisible(mode == 3)
-        if mode == 3:
+        self.btn_auto.setStyleSheet(STYLE_GREEN_ON if mode == 1 else STYLE_GRAY_OFF)
+        self.btn_check.setStyleSheet(STYLE_YELLOW_ON if mode == 2 else STYLE_GRAY_OFF)
+        self.btn_stop.setStyleSheet(STYLE_RED_ON if mode in [1, 2] else STYLE_GRAY_OFF)
+
+        self.sub_box.setVisible(mode == 2)
+        if mode == 2:
             self.btn_sub_start.setStyleSheet("background: #27AE60; color: white; border: 2px solid white;" if check_run_state == 1 else "background: #34495E; color: #BBB;")
             self.btn_sub_pause.setStyleSheet("background: #E67E22; color: white; border: 2px solid white;" if check_run_state == 0 else "background: #34495E; color: #BBB;")
         
