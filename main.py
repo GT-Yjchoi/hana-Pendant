@@ -11,7 +11,7 @@ os.environ.setdefault("QT_SCALE_FACTOR", "1")
 os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from ui.main_window import MainWindow
 from ui.theme import APP_STYLESHEET
 from utils.plc_client import PLCClient
@@ -40,6 +40,14 @@ def main():
     screen = app.primaryScreen()
     window.setGeometry(screen.geometry())
     window.showFullScreen()
+
+    # 부팅 시 데스크톱 패널이 늦게 로드될 때 하단 잘림 방지:
+    # 이벤트 루프 시작 후 1초 뒤에 geometry를 재적용
+    def reapply_geometry():
+        s = app.primaryScreen()
+        window.setGeometry(s.geometry())
+        window.showFullScreen()
+    QTimer.singleShot(1000, reapply_geometry)
     
     # 6. [NEW] 프로그램 종료 시 연결 해제
     app.aboutToQuit.connect(plc_client.disconnect_plc)
