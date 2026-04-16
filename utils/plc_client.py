@@ -39,7 +39,9 @@ class PLCClient(QObject):
         self.ADDR_MODE        = 206  # 모드 설정 (206~208, 3 Words)
         self.ADDR_JOG_SPEED   = 211  # 조그 속도
         self.ADDR_ALARM_RESET = 212  # 알람 리셋
+        self.ADDR_SOFT_ESTOP  = 213  # 소프트 비상정지 (0=정상, 1=비상정지)
         self.HEARTBEAT_ADDR   = 214  # 하트비트
+        self.ADDR_JOG_MODE    = 215  # 수동조작 모드 선택 (0=앱솔루트기동, 1=JOG기동)
         self.heartbeat_value  = 0
         self._heartbeat_skip  = False
 
@@ -80,10 +82,12 @@ class PLCClient(QObject):
     def disconnect_plc(self):
         """PLC 연결 해제"""
         self._monitor_running = False
+        self._reconnect_running = False
+        self.is_connected = True  # 재연결 루프 while 조건(not is_connected) 즉시 탈출
         if self.sock:
-            try: 
+            try:
                 self.sock.close()
-            except: 
+            except:
                 pass
         self.sock = None
         self.is_connected = False
@@ -327,6 +331,25 @@ class PLCClient(QObject):
             bit_idx = i % 16
             result.append(bool(words[word_idx] & (1 << bit_idx)))
         return result
+
+    def send_soft_estop(self, active):
+        """
+        DT213: 소프트 비상정지
+        - True  / 1 : 비상정지 발동
+        - False / 0 : 비상정지 해제
+        """
+        val = 1 if active else 0
+        print(f"[PLC] 소프트 비상정지 → DT{self.ADDR_SOFT_ESTOP} = {val}")
+        return self.write_words(0x09, self.ADDR_SOFT_ESTOP, [val])
+
+    def send_jog_mode(self, mode):
+        """
+        DT215: 수동조작 모드 선택
+        - 0: 앱솔루트기동 (위치결정 수동조작)
+        - 1: JOG기동 (JOG 수동조작)
+        """
+        print(f"[PLC] 수동조작 모드 → DT{self.ADDR_JOG_MODE} = {mode} ({'JOG' if mode else 'ABS'})")
+        return self.write_words(0x09, self.ADDR_JOG_MODE, [mode])
 
     # =========================================================
     # 모니터링 (PLC → HMI) - DT100~141

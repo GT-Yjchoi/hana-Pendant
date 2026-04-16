@@ -16,10 +16,9 @@ class AxisPositionPanel(QWidget):
             self.plc_client.sig_connected.connect(self._refresh_visibility)
 
         grid = QGridLayout(self)
-        # ★ [수정] 좌우 여백을 25px로 늘려 전체적으로 넓게 쓰도록 함
-        grid.setContentsMargins(25, 15, 25, 5) 
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
+        grid.setContentsMargins(8, 10, 8, 4)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(8)
 
         title = QLabel("현재 위치")
         title.setProperty("class", "PosPanelTitle")
@@ -32,13 +31,11 @@ class AxisPositionPanel(QWidget):
         axes = ["X", "Y", "Z", "Y2", "Z2", "θ", "R1", "R2"]
         
         for i, axis in enumerate(axes, start=1):
-            # 1. 축 이름 (왼쪽으로 이동)
+            # 1. 축 이름
             lbl_axis = QLabel(axis)
-            # ★ [수정] 왼쪽 정렬로 변경
             lbl_axis.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            lbl_axis.setFixedWidth(60) 
-            # 왼쪽 패딩을 주어 벽에서 살짝 띄움
-            lbl_axis.setStyleSheet("color: #CCCCCC; font-size: 20px; font-weight: bold; padding-left: 5px;")
+            lbl_axis.setFixedWidth(36)
+            lbl_axis.setStyleSheet("color: #CCCCCC; font-size: 18px; font-weight: bold;")
 
             # 2. 값 표시 영역
             box = QFrame()
@@ -47,19 +44,19 @@ class AxisPositionPanel(QWidget):
             box.setMinimumHeight(40) 
             
             h = QHBoxLayout(box)
-            # 내부 여백을 없애서 오른쪽 끝까지 공간 활용
-            h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(10) 
+            h.setContentsMargins(0, 0, 2, 0)
+            h.setSpacing(4)
 
             # 3. 값 (Value - 오른쪽 정렬 유지)
             val = QLabel("0.000")
             val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            val.setMinimumWidth(120)  # "-1000.000" 9자 기준 고정폭 → 자릿수 변화 시 레이아웃 흔들림 방지
-            val.setStyleSheet("color: white; font-size: 26px; font-weight: bold; font-family: 'Roboto Mono', monospace;")
+            val.setMinimumWidth(150)  # "-1000.000" 9자 기준
+            val.setStyleSheet("color: white; font-size: 22px; font-weight: bold; font-family: 'Roboto Mono', monospace;")
 
             # 4. 단위 (Unit)
             unit = QLabel("mm")
-            unit.setStyleSheet("color: rgba(233,238,243,160); font-weight: bold; font-size: 16px;")
+            unit.setFixedWidth(28)
+            unit.setStyleSheet("color: rgba(233,238,243,160); font-weight: bold; font-size: 13px;")
 
             h.addWidget(val, 1) # 늘어나는 공간을 숫자가 차지
             h.addWidget(unit, 0)

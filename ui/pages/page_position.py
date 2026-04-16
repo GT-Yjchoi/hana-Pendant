@@ -519,11 +519,15 @@ class PagePosition(GlassCard):
     def _is_point_visible(self, name):
         """포인트의 visible_mode 조건에 따라 현재 표시 여부 반환"""
         vm = self.position_points.get(name, {}).get("visible_mode", -1)
-        if vm < 0:
-            return True  # 항상 표시
-        if self.mode_data and vm < len(self.mode_data):
-            return bool(self.mode_data[vm])
-        return False
+        # 구버전 int 형식 하위 호환
+        if isinstance(vm, int):
+            if vm < 0:
+                return True
+            return bool(self.mode_data[vm]) if self.mode_data and vm < len(self.mode_data) else False
+        # 신규 list 형식: 빈 리스트 = 항상 표시, 아니면 OR 조건
+        if not vm:
+            return True
+        return any(bool(self.mode_data[i]) for i in vm if self.mode_data and i < len(self.mode_data))
 
     def _sync_points_combobox(self):
         current_text = self.point_combo.currentText()

@@ -1,7 +1,8 @@
+import os, json
 from PySide6.QtCore import Qt, Signal, QEventLoop
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QFrame, QGridLayout, QLabel, QButtonGroup
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QFrame, QGridLayout, QLabel, QButtonGroup, QScrollArea, QScroller
 )
 
 class JogControlDialog(QWidget):
@@ -151,24 +152,126 @@ class JogControlDialog(QWidget):
         layout.addSpacing(10)
         # ---------------------------------------------------------
 
-        # 4. 하단 보조 버튼
-        aux_grid = QGridLayout(); aux_grid.setSpacing(8)
-        h_aux = 45 
-        
-        aux_grid.addWidget(self._create_btn("반전", h=h_aux), 0, 0)
-        aux_grid.addWidget(self._create_btn("반전 복귀", h=h_aux), 0, 1)
-        aux_grid.addWidget(self._create_btn("회전", h=h_aux), 1, 0)
-        aux_grid.addWidget(self._create_btn("회전 복귀", h=h_aux), 1, 1)
-        # [수정] 버튼 이름 변경 (글자수 줄임)
-        aux_grid.addWidget(self._create_btn("척 개", h=h_aux), 2, 0)
-        aux_grid.addWidget(self._create_btn("척 폐", h=h_aux), 2, 1)
+        # 4. 하단 밸브 버튼 (settings.json jog_valve=True 항목, 최대 6개)
+        self._valve_btns = []
+        self._valve_configs = []
+        jog_valves = self._load_jog_valves()
 
-        layout.addLayout(aux_grid)
+        if jog_valves:
+            lbl_valve = QLabel("VALVE")
+            lbl_valve.setStyleSheet("color: #AAA; font-size: 12px; margin-bottom: 2px;")
+            lbl_valve.setAlignment(Qt.AlignCenter)
+            layout.addWidget(lbl_valve)
+
+            valve_grid = QGridLayout()
+            valve_grid.setSpacing(6)
+            for idx, cfg in enumerate(jog_valves):
+                btn = self._create_valve_btn(cfg)
+                self._valve_btns.append(btn)
+                self._valve_configs.append(cfg)
+                valve_grid.addWidget(btn, idx // 2, idx % 2)
+            layout.addLayout(valve_grid)
+
         layout.addStretch(1)
         main_layout.addWidget(self.container)
 
         self._set_speed(JogControlDialog._last_speed)
         self._init_runner_arm()
+
+    def _load_jog_valves(self):
+        """settings.json에서 jog_valve=True인 밸브를 jog_order 순으로 최대 6개 반환"""
+        try:
+            path = "settings.json"
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    s = json.load(f)
+                cfgs = s.get("valve_config", [])
+                result = [c for c in cfgs if c.get("jog_valve", False)]
+                result.sort(key=lambda x: x.get("jog_order", 99))
+                return result[:6]
+        except Exception as e:
+            print(f"[JOG] valve config load error: {e}")
+        return []
+
+    def _valve_dt_addr(self, bit_index):
+        """bit_index → (DT주소, 비트위치)"""
+        if bit_index < 16:
+            return 203, bit_index
+        else:
+            return 204, bit_index - 16
+
+    def _create_valve_btn(self, cfg):
+        """JOG 팝업용 밸브 버튼 생성"""
+        name = cfg.get("name", "밸브")
+        mode = cfg.get("mode", "toggle")
+        bit_index = cfg.get("index", 0)
+
+        btn = QPushButton(name)
+        btn.setMinimumHeight(45)
+        btn.setProperty("bit_index", bit_index)
+        btn.setProperty("valve_mode", mode)
+
+        if mode == "toggle":
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda checked, bi=bit_index: self._on_valve_toggle(bi, checked))
+        else:
+            btn.pressed.connect(lambda bi=bit_index: self._on_valve_press(bi))
+            btn.released.connect(lambda bi=bit_index: self._on_valve_release(bi))
+
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255,255,255,0.05);
+                border: 2px solid #005f73;
+                border-radius: 8px;
+                color: white;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: rgba(255,120,0,0.7);
+                border: 2px solid #FF9900;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: rgba(0,229,255,0.2);
+                border: 2px solid #00E5FF;
+            }
+        """)
+        return btn
+
+    def _on_valve_toggle(self, bit_index, checked):
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        try:
+            dt_addr, bit_pos = self._valve_dt_addr(bit_index)
+            data = self.plc_client.read_words(0x09, dt_addr, 1)
+            if data:
+                val = data[0] | (1 << bit_pos) if checked else data[0] & ~(1 << bit_pos)
+                self.plc_client.write_words(0x09, dt_addr, [val & 0xFFFF])
+        except Exception as e:
+            print(f"[JOG Valve] toggle error: {e}")
+
+    def _on_valve_press(self, bit_index):
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        try:
+            dt_addr, bit_pos = self._valve_dt_addr(bit_index)
+            data = self.plc_client.read_words(0x09, dt_addr, 1)
+            if data:
+                self.plc_client.write_words(0x09, dt_addr, [(data[0] | (1 << bit_pos)) & 0xFFFF])
+        except Exception as e:
+            print(f"[JOG Valve] press error: {e}")
+
+    def _on_valve_release(self, bit_index):
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        try:
+            dt_addr, bit_pos = self._valve_dt_addr(bit_index)
+            data = self.plc_client.read_words(0x09, dt_addr, 1)
+            if data:
+                self.plc_client.write_words(0x09, dt_addr, [(data[0] & ~(1 << bit_pos)) & 0xFFFF])
+        except Exception as e:
+            print(f"[JOG Valve] release error: {e}")
 
     def _on_arm_toggled(self, checked):
         self.btn_runner_arm.setText("런너암 조작" if checked else "제품암 조작")
@@ -257,14 +360,6 @@ class JogControlDialog(QWidget):
         elif name == "하 (Z+)": bit_pos = 8 if is_runner else 4
         elif name == "상 (Z-)": bit_pos = 9 if is_runner else 5
 
-        elif name == "반전": bit_pos = 6
-        elif name == "회전": bit_pos = 7
-
-        elif name == "척 개": bit_pos = 8
-        elif name == "척 폐": bit_pos = 9
-
-        elif name == "반전 복귀": bit_pos = 10
-        elif name == "회전 복귀": bit_pos = 11
 
         if bit_pos >= 0:
             try:

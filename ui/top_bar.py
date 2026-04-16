@@ -1,6 +1,12 @@
+import os, sys
 from PySide6.QtCore import Qt, QTimer, QTime, QDate, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 from PySide6.QtGui import QPixmap
+
+def _resource_path(rel):
+    """PyInstaller 빌드와 일반 실행 모두에서 리소스 절대경로 반환"""
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base, rel)
 
 class TopBar(QFrame):
     sig_jog_clicked = Signal()
@@ -38,7 +44,7 @@ class TopBar(QFrame):
         logo_row.setContentsMargins(0, 0, 0, 0)
 
         self.lbl_logo_img = QLabel()
-        logo_path = os.path.join(os.path.dirname(__file__), "..", "gtlogo.png")
+        logo_path = _resource_path("gtlogo.png")
         pixmap = QPixmap(logo_path)
         if not pixmap.isNull():
             self.lbl_logo_img.setPixmap(pixmap.scaledToHeight(28, Qt.SmoothTransformation))

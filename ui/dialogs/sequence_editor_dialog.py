@@ -41,7 +41,7 @@ except ImportError:
     IOManager = None
 
 try:
-    from ui.widgets.touch_keyboard import TouchKeyboard
+    from widgets.touch_keyboard import TouchKeyboard
 except ImportError:
     TouchKeyboard = None
 
@@ -317,6 +317,13 @@ class SequenceEditorDialog(QDialog):
                     chk.toggled.connect(lambda checked, idx=i: self._on_axis_checkbox_changed(idx, checked))
 
             self.stack.addWidget(StepUIGenerator.create_io_editor(self))
+            # OUT/IN 라디오버튼 시그널 1회만 연결 (_load_data_to_ui에서 반복 연결 제거)
+            if hasattr(self, 'out_type_grp'):
+                for b in self.out_type_grp.buttons():
+                    b.toggled.connect(self._on_out_type_changed)
+            if hasattr(self, 'in_type_grp'):
+                for b in self.in_type_grp.buttons():
+                    b.toggled.connect(self._on_in_type_changed)
             self.stack.addWidget(StepUIGenerator.create_tmr_editor(self))
             self.stack.addWidget(StepUIGenerator.create_jmp_editor(self))
             self.stack.addWidget(StepUIGenerator.create_call_editor(self))
@@ -406,11 +413,6 @@ class SequenceEditorDialog(QDialog):
                 if hasattr(self, 'out_type_grp'):
                     btn = self.out_type_grp.button(out_type)
                     if btn: btn.setChecked(True)
-                if hasattr(self, 'out_type_grp'):
-                    for b in self.out_type_grp.buttons():
-                        try: b.toggled.disconnect(self._on_out_type_changed)
-                        except: pass
-                        b.toggled.connect(self._on_out_type_changed)
             elif type_code == "IN":
                 # in_type 기존 데이터 없으면 port값으로 추론
                 if "in_type" not in data:
@@ -427,11 +429,6 @@ class SequenceEditorDialog(QDialog):
                 if hasattr(self, 'in_type_grp'):
                     btn = self.in_type_grp.button(in_type)
                     if btn: btn.setChecked(True)
-                if hasattr(self, 'in_type_grp'):
-                    for b in self.in_type_grp.buttons():
-                        try: b.toggled.disconnect(self._on_in_type_changed)
-                        except: pass
-                        b.toggled.connect(self._on_in_type_changed)
 
             # ★ 버튼 텍스트에 이름 표시
             if hasattr(self, 'io_combo_btn'):
@@ -695,8 +692,20 @@ class SequenceEditorDialog(QDialog):
                 if name in self.timer_library:
                     del self.timer_library[name]
 
+            def _rename_timer(old_name, new_name):
+                if old_name not in self.timer_library:
+                    return
+                self.timer_library[new_name] = self.timer_library.pop(old_name)
+                for seq_steps in self.sequences.values():
+                    if not isinstance(seq_steps, list):
+                        continue
+                    for step in seq_steps:
+                        if step.get("timer_ref") == old_name:
+                            step["timer_ref"] = new_name
+                            step["name"] = new_name
+
             dlg = CardListDialog(timer_names, current=current_ref, title="[T] 타이머를 선택하세요", columns=4,
-                                 on_delete=_delete_timer, parent=self)
+                                 on_delete=_delete_timer, on_rename=_rename_timer, parent=self)
             result = dlg.exec()
             selected = dlg.get_selected() if result == QDialog.Accepted else None
         else:
@@ -904,6 +913,10 @@ class SequenceEditorDialog(QDialog):
         self.point_combo.blockSignals(False)
 
     def _update_io_combo(self, is_out):
+        # 동일 타입이면 재빌드 생략 (매 스텝 클릭마다 80개 아이템 재생성 방지)
+        if getattr(self, '_io_combo_is_out', None) == is_out:
+            return
+        self._io_combo_is_out = is_out
         self.io_combo.blockSignals(True)
         self.io_combo.clear()
         mgr = IOManager.instance() if IOManager else None
@@ -919,39 +932,52 @@ class SequenceEditorDialog(QDialog):
     def _init_tabs(self): pass
     def _on_seq_tab_changed(self, index): pass
 
+    def _make_step_label(self, i, step):
+        label = step.get('name', '')
+        if step.get("type") == "POS":
+            p_name = step.get("point_name", "")
+            if p_name:
+                label = f"{label}  ({p_name})"
+        elif step.get("type") == "CALL":
+            t_seq = step.get("target_seq", "")
+            if t_seq:
+                label = f"{label}  ({t_seq})"
+        return f"[{i+1:02d}] {label}"
+
     def _load_step_list_from_memory(self):
-        self.step_list.clear()
+        current_list = self.sequences.get(self.current_seq_key, [])
+        new_labels = [self._make_step_label(i, s) for i, s in enumerate(current_list)]
+        cur_count = self.step_list.count()
+        new_count = len(new_labels)
+
+        # 기존 아이템 수와 다르거나 내용이 바뀐 경우에만 업데이트
+        same = (cur_count == new_count) and all(
+            self.step_list.item(i).text() == new_labels[i] for i in range(cur_count)
+        )
+        if not same:
+            self.step_list.blockSignals(True)
+            self.step_list.clear()
+            self.step_list.addItems(new_labels)
+            self.step_list.blockSignals(False)
+
         self.active_step_data = None
         self.stack.setCurrentIndex(0)
-        current_list = self.sequences.get(self.current_seq_key, [])
-        for i, step in enumerate(current_list):
-            label = step.get('name')
-            if step.get("type") == "POS":
-                p_name = step.get("point_name", "")
-                if p_name:
-                    label = f"{label}  ({p_name})"
-            elif step.get("type") == "CALL":
-                t_seq = step.get("target_seq", "")
-                if t_seq:
-                    label = f"{label}  ({t_seq})"
-            self.step_list.addItem(f"[{i+1:02d}] {label}")
         if self.step_list.count() > 0:
             self.step_list.setCurrentRow(0)
             self._on_item_clicked(self.step_list.item(0))
 
     def _next_step_name(self, type_code):
-        """해당 타입에서 비어 있는 가장 낮은 번호로 이름 생성"""
+        """현재 시퀀스 내에서 비어 있는 가장 낮은 번호로 이름 생성"""
         base_name = {"POS":"위치 이동","OUT":"출력 제어","IN":"입력 대기","TMR":"타이머","JMP":"점프","CALL":"호출","END":"END"}.get(type_code, "Step")
         used = set()
-        for seq in self.sequences.values():
-            for step in seq:
-                if step.get("type") == type_code:
-                    name = step.get("name", "")
-                    prefix = base_name + "_"
-                    if name.startswith(prefix):
-                        suffix = name[len(prefix):]
-                        if suffix.isdigit():
-                            used.add(int(suffix))
+        prefix = base_name + "_"
+        for step in self.sequences.get(self.current_seq_key, []):
+            if step.get("type") == type_code:
+                name = step.get("name", "")
+                if name.startswith(prefix):
+                    suffix = name[len(prefix):]
+                    if suffix.isdigit():
+                        used.add(int(suffix))
         n = 1
         while n in used:
             n += 1
@@ -1676,8 +1702,23 @@ class SequenceEditorDialog(QDialog):
             def _delete_timer(name):
                 if name in self.timer_library:
                     del self.timer_library[name]
+
+            def _rename_timer(old_name, new_name):
+                if old_name not in self.timer_library:
+                    return
+                self.timer_library[new_name] = self.timer_library.pop(old_name)
+                for seq_steps in self.sequences.values():
+                    if not isinstance(seq_steps, list):
+                        continue
+                    for step in seq_steps:
+                        if step.get("timer_ref") == old_name:
+                            step["timer_ref"] = new_name
+                            step["name"] = new_name
+                        if step.get("delay_timer_ref") == old_name:
+                            step["delay_timer_ref"] = new_name
+
             dlg = CardListDialog(timer_names, current=current_ref, title="[딜레이] 타이머를 선택하세요", columns=4,
-                                 on_delete=_delete_timer, parent=self)
+                                 on_delete=_delete_timer, on_rename=_rename_timer, parent=self)
             result = dlg.exec()
             selected = dlg.get_selected() if result == QDialog.Accepted else None
         else:

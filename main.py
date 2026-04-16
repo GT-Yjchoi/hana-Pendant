@@ -7,6 +7,7 @@ os.environ.setdefault("GTK_IM_MODULE", "ibus")
 os.environ.setdefault("XMODIFIERS", "@im=ibus")
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
 from ui.main_window import MainWindow
 from ui.theme import APP_STYLESHEET
 from utils.plc_client import PLCClient
@@ -18,6 +19,7 @@ def main():
     # 2. 기본 스타일 'Fusion'으로 설정
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLESHEET)
+    app.setOverrideCursor(Qt.BlankCursor)
 
     # 4. [NEW] PLC 통신 모듈 생성
     # 프로그램 전체에서 하나만 만들어 공유합니다.
@@ -26,7 +28,7 @@ def main():
     # 5. [MODIFIED] 윈도우 생성 시 PLC 클라이언트 전달
     # (ui/main_window.py의 __init__도 이에 맞춰 수정되어 있어야 합니다)
     window = MainWindow(plc_client)
-    window.show()
+    window.showFullScreen()
     
     # 6. [NEW] 프로그램 종료 시 연결 해제
     app.aboutToQuit.connect(plc_client.disconnect_plc)

@@ -28,7 +28,12 @@ from ui.dialogs.jog_control_dialog import JogControlDialog
 from ui.overlays.alarm_overlay import AlarmOverlay
 
 # 유틸리티 임포트
-from utils.plc_client import PLCClient 
+from utils.plc_client import PLCClient
+
+try:
+    from utils.gpio_estop import GpioEstop
+except ImportError:
+    GpioEstop = None 
 
 try:
     from utils.languages import LanguageManager
@@ -76,10 +81,8 @@ class MainWindow(QWidget):
         self.setObjectName("Root")
         self.setWindowTitle("HMI Program - Servo Control System")
         
-        self.setFixedSize(1024, 600)
-        
-        # 전체 화면 모드
-        self.showFullScreen() 
+        # 전체 화면 모드 (main.py에서 showFullScreen() 호출)
+
 
         # [PLC 클라이언트 설정]
         if plc_client:
@@ -307,7 +310,34 @@ class MainWindow(QWidget):
         if ModeManager:
             ModeManager.instance().sig_names_changed.connect(self._auto_save_data)
 
+        # GPIO 비상정지 모니터
+        self._gpio_estop = None
+        if GpioEstop:
+            self._gpio_estop = GpioEstop(self)
+            self._gpio_estop.sig_estop.connect(self._on_gpio_estop)
+            self._gpio_estop.start()
+
         QTimer.singleShot(500, self._try_auto_connect)
+
+    def _on_gpio_estop(self, active):
+        """GPIO22 비상정지 신호 → DT213 전송 + 알람 팝업"""
+        self._gpio_estop_active = active
+        if self.plc_client and self.plc_client.is_connected:
+            self.plc_client.send_soft_estop(active)
+        if active:
+            # X0 비상정지와 동일한 팝업 표시 (axis_alarm 9 = 비상정지)
+            self.alarm_overlay.show_error([9], [0] * 8)
+        else:
+            # 해제 시 팝업 닫기 (알람 리셋 중이 아닐 때)
+            if not self._alarm_resetting and not self._seq_alarm_showing:
+                self.alarm_overlay.hide()
+                self.current_error_code = None
+
+    def closeEvent(self, event):
+        """앱 종료 시 GPIO 정리"""
+        if self._gpio_estop:
+            self._gpio_estop.stop()
+        super().closeEvent(event)
 
     def _try_auto_connect(self):
         """설정 파일에서 IP/Port를 읽어와 자동 연결 시도"""
@@ -492,7 +522,7 @@ class MainWindow(QWidget):
                 self.current_error_code = key
                 self.alarm_overlay.show_error(axis_alarms, axis_error_codes)
         else:
-            if not self.alarm_overlay.isHidden() and not self._alarm_resetting and not self._seq_alarm_showing:
+            if not self.alarm_overlay.isHidden() and not self._alarm_resetting and not self._seq_alarm_showing and not getattr(self, '_gpio_estop_active', False):
                 self.alarm_overlay.hide()
                 self.current_error_code = None
 

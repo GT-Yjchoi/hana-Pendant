@@ -111,6 +111,14 @@ class OverlayDialog(QDialog):
     def setFixedContentSize(self, w, h):
         self.content_frame.setFixedSize(w, h)
 
+    def exec(self):
+        result = super().exec()
+        # 닫힌 뒤 명시적 삭제 → QScroller TouchGesture 인식기 즉시 해제
+        # (parent=self로 생성된 경우 Qt 부모-자식 관계가 C++ 객체를 계속 살려두어
+        #  gesture recognizer가 누적되고 터치 응답이 점점 느려지는 것을 방지)
+        self.deleteLater()
+        return result
+
     def paintEvent(self, event):
         from PySide6.QtGui import QPainter, QColor
         painter = QPainter(self)
@@ -331,12 +339,13 @@ class CardListDialog(OverlayDialog):
     CARD_H = 95  # 모든 카드 공통 높이
 
     def __init__(self, items, current=None, title="항목을 선택하세요", columns=4,
-                 on_delete=None, parent=None):
+                 on_delete=None, on_rename=None, parent=None):
         super().__init__(parent)
         self.selected_item = None
         self._columns = columns
         self._current = current
         self._on_delete_cb = on_delete
+        self._on_rename_cb = on_rename
         self._items = list(items)
         self.setFixedContentSize(850, 600)
 
@@ -390,10 +399,10 @@ class CardListDialog(OverlayDialog):
 
         row, col = 0, 0
         for item in self._items:
-            show_delete = self._on_delete_cb is not None and not item.startswith("+")
+            show_actions = (self._on_delete_cb is not None or self._on_rename_cb is not None) and not item.startswith("+")
 
-            if show_delete:
-                # ── 삭제 버튼 포함 카드 ──
+            if show_actions:
+                # ── 액션 버튼 포함 카드 ──
                 frame = QFrame()
                 frame.setFixedHeight(self.CARD_H)
                 frame.setCursor(Qt.PointingHandCursor)
@@ -413,7 +422,7 @@ class CardListDialog(OverlayDialog):
                 f_layout.setContentsMargins(6, 6, 6, 6)
                 f_layout.setSpacing(4)
 
-                # 상단 행: 이름(선택 버튼) + ✕
+                # 상단 행: 이름(선택 버튼) + ✎ + ✕
                 top_row = QHBoxLayout()
                 top_row.setContentsMargins(0, 0, 0, 0)
                 top_row.setSpacing(4)
@@ -435,25 +444,48 @@ class CardListDialog(OverlayDialog):
                 btn_name.clicked.connect(lambda checked, i=item: self._on_selected(i))
                 top_row.addWidget(btn_name, 1)
 
-                btn_del = QPushButton("✕")
-                btn_del.setFixedSize(28, 28)
-                btn_del.setStyleSheet("""
-                    QPushButton {
-                        background: rgba(200,50,50,0.25);
-                        border: 1px solid rgba(255,70,70,0.5);
-                        border-radius: 6px;
-                        color: #FF6B6B;
-                        font-size: 14px;
-                        font-weight: bold;
-                        padding: 0;
-                    }
-                    QPushButton:pressed {
-                        background: rgba(255,70,70,0.5);
-                        color: white;
-                    }
-                """)
-                btn_del.clicked.connect(lambda checked, i=item: self._delete_item(i))
-                top_row.addWidget(btn_del)
+                if self._on_rename_cb is not None:
+                    btn_rename = QPushButton("✎")
+                    btn_rename.setFixedSize(28, 28)
+                    btn_rename.setStyleSheet("""
+                        QPushButton {
+                            background: rgba(70,140,255,0.2);
+                            border: 1px solid rgba(70,140,255,0.5);
+                            border-radius: 6px;
+                            color: #7EB8FF;
+                            font-size: 14px;
+                            font-weight: bold;
+                            padding: 0;
+                        }
+                        QPushButton:pressed {
+                            background: rgba(70,140,255,0.5);
+                            color: white;
+                        }
+                    """)
+                    btn_rename.clicked.connect(lambda checked, i=item: self._rename_item(i))
+                    top_row.addWidget(btn_rename)
+
+                if self._on_delete_cb is not None:
+                    btn_del = QPushButton("✕")
+                    btn_del.setFixedSize(28, 28)
+                    btn_del.setStyleSheet("""
+                        QPushButton {
+                            background: rgba(200,50,50,0.25);
+                            border: 1px solid rgba(255,70,70,0.5);
+                            border-radius: 6px;
+                            color: #FF6B6B;
+                            font-size: 14px;
+                            font-weight: bold;
+                            padding: 0;
+                        }
+                        QPushButton:pressed {
+                            background: rgba(255,70,70,0.5);
+                            color: white;
+                        }
+                    """)
+                    btn_del.clicked.connect(lambda checked, i=item: self._delete_item(i))
+                    top_row.addWidget(btn_del)
+
                 f_layout.addLayout(top_row)
                 f_layout.addStretch(1)
 
@@ -497,6 +529,21 @@ class CardListDialog(OverlayDialog):
         if item in self._items:
             self._items.remove(item)
         self._build_grid()
+
+    def _rename_item(self, item):
+        if not self._on_rename_cb:
+            return
+        existing = [i for i in self._items if i != item and not i.startswith("+")]
+        dlg = RenameDialog(item, existing, parent=self, confirm_text="변경")
+        if dlg.exec() == QDialog.Accepted:
+            new_name = dlg.get_new_name()
+            if new_name and new_name != item:
+                self._on_rename_cb(item, new_name)
+                idx = self._items.index(item)
+                self._items[idx] = new_name
+                if self._current == item:
+                    self._current = new_name
+                self._build_grid()
 
     def _on_selected(self, item):
         self.selected_item = item
@@ -657,9 +704,31 @@ class PopupListSelector(QWidget):
         dlg.accept()
 
 # =========================================================
-# [4] 이름 변경 다이얼로그 (Rename)
+# [★] 표시 조건 복수 선택 다이얼로그
 # =========================================================
-class RenameDialog(OverlayDialog):
+def _normalize_vis_mode(vm):
+    """int(구버전) → list 변환. 이미 list면 그대로 반환."""
+    if isinstance(vm, list):
+        return vm
+    if isinstance(vm, int):
+        return [] if vm < 0 else [vm]
+    return []
+
+def _vis_mode_summary(selected_indices, mode_names_fn):
+    """선택된 모드 인덱스 목록 → 버튼 표시 텍스트."""
+    if not selected_indices:
+        return "항상 표시"
+    names = [f"[{i:02d}] {mode_names_fn(i)}" for i in sorted(selected_indices)]
+    if len(names) == 1:
+        return names[0]
+    return f"{names[0]} 외 {len(names)-1}개"
+
+
+class VisModeMultiPickerDialog(OverlayDialog):
+    """
+    44개 모드 카드를 복수 선택할 수 있는 팝업.
+    accept() 후 get_selected_modes() → list[int] (빈 리스트 = 항상 표시)
+    """
     _MODE_NAMES = [
         "제품측 취출", "런너측 취출", "주행 대기", "하강 대기",
         "주행도중개방", "복귀도중개방", "안전도어 회피", "안전도어 회피2",
@@ -671,12 +740,152 @@ class RenameDialog(OverlayDialog):
         "흡착3 사용", "흡착3 감지", "흡착4 사용", "흡착4 감지",
         "2포인트 개방", "공정감시 모드",
     ]
+    COLS = 4
 
+    def __init__(self, current_modes=None, parent=None):
+        super().__init__(parent)
+        self._selected = set(current_modes or [])
+        self.setFixedContentSize(860, 580)
+
+        self.setStyleSheet("""
+            QLabel { color: white; font-size: 15px; font-weight: bold;
+                     border: none; background: transparent; }
+            QPushButton#always {
+                background: rgba(255,255,255,0.08); border: 1px solid #555;
+                border-radius: 8px; color: #95A5A6;
+                font-size: 15px; font-weight: bold; height: 44px;
+            }
+            QPushButton#always:checked {
+                background: rgba(46,204,113,0.20); border: 2px solid #2ECC71;
+                color: #2ECC71;
+            }
+            QPushButton#always:pressed { background: rgba(255,255,255,0.18); }
+            QPushButton#ok {
+                background: rgba(46,204,113,0.20); border: 1px solid #2ECC71;
+                border-radius: 8px; color: #2ECC71;
+                font-size: 16px; font-weight: bold; height: 46px;
+            }
+            QPushButton#ok:pressed { background: rgba(46,204,113,0.45); }
+            QPushButton#cancel {
+                background: rgba(255,70,70,0.15); border: 1px solid #FF4646;
+                border-radius: 8px; color: #FF6B6B;
+                font-size: 16px; font-weight: bold; height: 46px;
+            }
+            QPushButton#cancel:pressed { background: rgba(255,70,70,0.35); }
+        """)
+
+        # 타이틀
+        lbl = QLabel("표시 조건 선택  (복수 선택 가능)")
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("color: #468CFF; font-size: 17px; font-weight: bold;")
+        self.layout.addWidget(lbl)
+
+        # 항상 표시 토글
+        self.btn_always = QPushButton("★ 항상 표시")
+        self.btn_always.setObjectName("always")
+        self.btn_always.setCheckable(True)
+        self.btn_always.setChecked(not self._selected)
+        self.btn_always.clicked.connect(self._on_always_toggled)
+        self.layout.addWidget(self.btn_always)
+
+        # 모드 카드 그리드 (스크롤)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setStyleSheet("background: transparent; border: none;")
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        apply_touch_scroll(self._scroll)
+
+        self._grid_widget = QWidget()
+        self._grid_widget.setStyleSheet("background: transparent;")
+        self._grid = QGridLayout(self._grid_widget)
+        self._grid.setSpacing(8)
+        self._grid.setContentsMargins(4, 4, 4, 4)
+        self._scroll.setWidget(self._grid_widget)
+        self.layout.addWidget(self._scroll, 1)
+
+        self._mode_btns = {}
+        self._build_mode_grid()
+
+        # 하단 버튼
+        foot = QHBoxLayout()
+        foot.setSpacing(10)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setObjectName("cancel")
+        btn_cancel.setFixedHeight(46)
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok = QPushButton("완료")
+        btn_ok.setObjectName("ok")
+        btn_ok.setFixedHeight(46)
+        btn_ok.clicked.connect(self.accept)
+        foot.addWidget(btn_cancel)
+        foot.addWidget(btn_ok)
+        self.layout.addLayout(foot)
+
+    def _mode_name(self, idx):
+        try:
+            from utils.mode_manager import ModeManager
+            mgr = ModeManager.instance() if ModeManager else None
+            if mgr:
+                return mgr.get_name(idx)
+        except Exception:
+            pass
+        return self._MODE_NAMES[idx] if idx < len(self._MODE_NAMES) else f"User Mode {idx-33}"
+
+    def _build_mode_grid(self):
+        for i in range(44):
+            row, col = divmod(i, self.COLS)
+            name = self._mode_name(i)
+            btn = QPushButton(f"[{i:02d}]\n{name}")
+            btn.setCheckable(True)
+            btn.setChecked(i in self._selected)
+            btn.setFixedHeight(60)
+            btn.setStyleSheet(self._card_style(i in self._selected))
+            btn.clicked.connect(lambda checked, idx=i: self._on_mode_toggled(idx, checked))
+            self._grid.addWidget(btn, row, col)
+            self._mode_btns[i] = btn
+
+    def _card_style(self, checked):
+        if checked:
+            return ("QPushButton { background: rgba(46,204,113,0.20); border: 2px solid #2ECC71; "
+                    "border-radius: 8px; color: #2ECC71; font-size: 12px; font-weight: bold; }"
+                    "QPushButton:pressed { background: rgba(46,204,113,0.40); }")
+        return ("QPushButton { background: rgba(255,255,255,0.05); border: 1px solid #444; "
+                "border-radius: 8px; color: #AAA; font-size: 12px; font-weight: bold; }"
+                "QPushButton:pressed { background: rgba(70,140,255,0.20); }")
+
+    def _on_always_toggled(self, checked):
+        if checked:
+            self._selected.clear()
+            for idx, btn in self._mode_btns.items():
+                btn.setChecked(False)
+                btn.setStyleSheet(self._card_style(False))
+
+    def _on_mode_toggled(self, idx, checked):
+        if checked:
+            self._selected.add(idx)
+            self.btn_always.setChecked(False)
+        else:
+            self._selected.discard(idx)
+            if not self._selected:
+                self.btn_always.setChecked(True)
+        self._mode_btns[idx].setStyleSheet(self._card_style(checked))
+
+    def get_selected_modes(self):
+        """빈 리스트 = 항상 표시, 나머지 = 선택된 모드 인덱스 리스트."""
+        return sorted(self._selected)
+
+
+# =========================================================
+# [4] 이름 변경 다이얼로그 (Rename)
+# =========================================================
+class RenameDialog(OverlayDialog):
     def __init__(self, current_name, existing_names, parent=None, confirm_text="변경", visible_mode=None):
         super().__init__(parent)
         self.existing_names = [n for n in existing_names if n != current_name]
         self._current_name = current_name
-        self._visible_mode = visible_mode  # None=모드 UI 숨김, -1=항상, 0~43=모드번호
+        # visible_mode=None → 표시 조건 UI 숨김
+        # visible_mode=int or list → 표시 조건 UI 표시 (int는 하위 호환 변환)
+        self._visible_mode = _normalize_vis_mode(visible_mode) if visible_mode is not None else None
         self.setWindowTitle("명칭 변경")
         self.setFixedContentSize(450, 260 if visible_mode is None else 350)
         self.setStyleSheet("""
@@ -725,26 +934,29 @@ class RenameDialog(OverlayDialog):
             if kb.exec() == QDialog.Accepted:
                 self.input_field.setText(kb.get_text())
 
+    def _mode_name(self, idx):
+        try:
+            from utils.mode_manager import ModeManager
+            mgr = ModeManager.instance() if ModeManager else None
+            if mgr:
+                return mgr.get_name(idx)
+        except Exception:
+            pass
+        return VisModeMultiPickerDialog._MODE_NAMES[idx] if idx < len(VisModeMultiPickerDialog._MODE_NAMES) else f"User Mode {idx-33}"
+
     def _refresh_vis_btn(self):
         if self._visible_mode is None or not hasattr(self, 'btn_vis'):
             return
-        if self._visible_mode < 0:
-            self.btn_vis.setText("항상 표시")
+        text = _vis_mode_summary(self._visible_mode, self._mode_name)
+        is_always = not self._visible_mode
+        self.btn_vis.setText(text)
+        if is_always:
             self.btn_vis.setStyleSheet(
                 "QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #666; border-radius: 6px; "
                 "color: #95A5A6; font-size: 15px; font-weight: bold; height: 45px; text-align: left; padding-left: 15px; }"
                 "QPushButton:pressed { background: rgba(255,255,255,0.2); }"
             )
         else:
-            try:
-                from utils.mode_manager import ModeManager
-                mgr = ModeManager.instance() if ModeManager else None
-                name = mgr.get_name(self._visible_mode) if mgr else (
-                    self._MODE_NAMES[self._visible_mode] if self._visible_mode < len(self._MODE_NAMES) else f"User Mode {self._visible_mode - 33}"
-                )
-            except Exception:
-                name = self._MODE_NAMES[self._visible_mode] if self._visible_mode < len(self._MODE_NAMES) else f"User Mode {self._visible_mode - 33}"
-            self.btn_vis.setText(f"[{self._visible_mode:02d}] {name}")
             self.btn_vis.setStyleSheet(
                 "QPushButton { background: rgba(46,204,113,0.15); border: 1px solid #2ECC71; border-radius: 6px; "
                 "color: #2ECC71; font-size: 15px; font-weight: bold; height: 45px; text-align: left; padding-left: 15px; }"
@@ -752,23 +964,10 @@ class RenameDialog(OverlayDialog):
             )
 
     def _open_vis_mode_picker(self):
-        items = ["[항상 표시]"]
-        try:
-            from utils.mode_manager import ModeManager
-            mgr = ModeManager.instance() if ModeManager else None
-        except Exception:
-            mgr = None
-        for i in range(44):
-            name = mgr.get_name(i) if mgr else (self._MODE_NAMES[i] if i < len(self._MODE_NAMES) else f"User Mode {i - 33}")
-            items.append(f"[{i:02d}] {name}")
-        current = items[0] if self._visible_mode < 0 else (items[self._visible_mode + 1] if self._visible_mode + 1 < len(items) else None)
-        dlg = CardListDialog(items, current, " 표시 조건 선택", columns=3, parent=self)
+        dlg = VisModeMultiPickerDialog(self._visible_mode or [], parent=self)
         if dlg.exec() == QDialog.Accepted:
-            selected = dlg.get_selected()
-            if selected and selected in items:
-                sel_idx = items.index(selected)
-                self._visible_mode = -1 if sel_idx == 0 else sel_idx - 1
-                self._refresh_vis_btn()
+            self._visible_mode = dlg.get_selected_modes()
+            self._refresh_vis_btn()
 
     def check_and_accept(self):
         new_name = self.input_field.text().strip()
@@ -923,22 +1122,10 @@ class NumericKeypad(OverlayDialog):
 # [6] 새 포인트 이름 입력 (New Point) - 문법 수정됨
 # =========================================================
 class NewPointDialog(OverlayDialog):
-    _MODE_NAMES = [
-        "제품측 취출", "런너측 취출", "주행 대기", "하강 대기",
-        "주행도중개방", "복귀도중개방", "안전도어 회피", "안전도어 회피2",
-        "낙하측 반전", "주행도중 반전", "취출대기 반전", "고정측 취출",
-        "제품 형내개방", "런너 형내개방", "에젝터 연동", "언더컷 취출모드",
-        "척1 사용", "척1 감지", "척2 사용", "척2 감지",
-        "척3 사용", "척3 감지", "척4 사용", "척4 감지",
-        "흡착1 사용", "흡착1 감지", "흡착2 사용", "흡착2 감지",
-        "흡착3 사용", "흡착3 감지", "흡착4 사용", "흡착4 감지",
-        "2포인트 개방", "공정감시 모드",
-    ]
-
     def __init__(self, existing_names, parent=None):
         super().__init__(parent)
         self.existing_names = existing_names
-        self._visible_mode = -1  # -1=항상 표시
+        self._visible_mode = []  # [] = 항상 표시
         self.setWindowTitle("새 위치 포인트")
         self.setFixedContentSize(450, 340)
 
@@ -1004,38 +1191,38 @@ class NewPointDialog(OverlayDialog):
             if kb.exec() == QDialog.Accepted:
                 self.input_field.setText(kb.get_text())
 
-    def _open_vis_mode_picker(self):
-        items = ["[항상 표시]"]
+    def _mode_name(self, idx):
         try:
             from utils.mode_manager import ModeManager
             mgr = ModeManager.instance() if ModeManager else None
+            if mgr:
+                return mgr.get_name(idx)
         except Exception:
-            mgr = None
-        for i in range(44):
-            name = mgr.get_name(i) if mgr else (self._MODE_NAMES[i] if i < len(self._MODE_NAMES) else f"User Mode {i-33}")
-            items.append(f"[{i:02d}] {name}")
+            pass
+        return VisModeMultiPickerDialog._MODE_NAMES[idx] if idx < len(VisModeMultiPickerDialog._MODE_NAMES) else f"User Mode {idx-33}"
 
-        current = items[0] if self._visible_mode < 0 else (items[self._visible_mode + 1] if self._visible_mode + 1 < len(items) else None)
-        dlg = CardListDialog(items, current, " 표시 조건 선택", columns=3, parent=self)
+    def _refresh_vis_btn(self):
+        text = _vis_mode_summary(self._visible_mode, self._mode_name)
+        is_always = not self._visible_mode
+        self.btn_vis.setText(text)
+        if is_always:
+            self.btn_vis.setStyleSheet(
+                "QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #666; border-radius: 8px; "
+                "color: #95A5A6; font-size: 15px; font-weight: bold; height: 50px; text-align: left; padding-left: 15px; }"
+                "QPushButton:pressed { background: rgba(255,255,255,0.2); }"
+            )
+        else:
+            self.btn_vis.setStyleSheet(
+                "QPushButton { background: rgba(46,204,113,0.15); border: 1px solid #2ECC71; border-radius: 8px; "
+                "color: #2ECC71; font-size: 15px; font-weight: bold; height: 50px; text-align: left; padding-left: 15px; }"
+                "QPushButton:pressed { background: rgba(46,204,113,0.35); }"
+            )
+
+    def _open_vis_mode_picker(self):
+        dlg = VisModeMultiPickerDialog(self._visible_mode, parent=self)
         if dlg.exec() == QDialog.Accepted:
-            selected = dlg.get_selected()
-            if selected and selected in items:
-                sel_idx = items.index(selected)
-                self._visible_mode = -1 if sel_idx == 0 else sel_idx - 1
-                if self._visible_mode < 0:
-                    self.btn_vis.setText("항상 표시")
-                    self.btn_vis.setStyleSheet(
-                        "QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #666; border-radius: 8px; "
-                        "color: #95A5A6; font-size: 15px; font-weight: bold; height: 50px; text-align: left; padding-left: 15px; }"
-                        "QPushButton:pressed { background: rgba(255,255,255,0.2); }"
-                    )
-                else:
-                    self.btn_vis.setText(selected)
-                    self.btn_vis.setStyleSheet(
-                        "QPushButton { background: rgba(46,204,113,0.15); border: 1px solid #2ECC71; border-radius: 8px; "
-                        "color: #2ECC71; font-size: 15px; font-weight: bold; height: 50px; text-align: left; padding-left: 15px; }"
-                        "QPushButton:pressed { background: rgba(46,204,113,0.35); }"
-                    )
+            self._visible_mode = dlg.get_selected_modes()
+            self._refresh_vis_btn()
 
     def _on_ok(self):
         name = self.input_field.text().strip()
@@ -1049,6 +1236,144 @@ class NewPointDialog(OverlayDialog):
 
     def get_name(self):
         return self.input_field.text().strip()
+
+    def get_visible_mode(self):
+        return self._visible_mode
+
+
+# =========================================================
+# [★] 타이머 순서 변경 다이얼로그
+# =========================================================
+class TimerReorderDialog(OverlayDialog):
+    """
+    타이머 리스트를 보여주고 선택 후 ▲/▼ 버튼으로 순서를 변경하는 팝업.
+    accept() 시 get_ordered_names() 로 새 순서를 반환.
+    """
+    def __init__(self, timer_names, parent=None):
+        super().__init__(parent)
+        self.setFixedContentSize(420, 560)
+
+        self.setStyleSheet("""
+            QLabel   { color: white; font-size: 16px; font-weight: bold;
+                       border: none; background: transparent; }
+            QListWidget {
+                background: #1A222C;
+                border: 1px solid #3E4A59;
+                border-radius: 8px;
+                color: #DDD;
+                font-size: 17px;
+                font-weight: bold;
+                outline: 0;
+            }
+            QListWidget::item { padding: 10px 14px; border-bottom: 1px solid #2A3040; }
+            QListWidget::item:selected {
+                background: rgba(70,140,255,0.30);
+                color: #7EB8FF;
+                border-left: 3px solid #468CFF;
+            }
+            QPushButton {
+                background: rgba(70,140,255,0.15);
+                border: 1px solid rgba(70,140,255,0.5);
+                border-radius: 8px;
+                color: white;
+                font-size: 22px;
+                font-weight: bold;
+            }
+            QPushButton:pressed { background: rgba(70,140,255,0.45); }
+            QPushButton:disabled { background: rgba(255,255,255,0.05); color: #555;
+                                   border: 1px solid #333; }
+            QPushButton#ok     { background: rgba(46,204,113,0.20);
+                                 border: 1px solid #2ECC71; color: #2ECC71; font-size: 16px; }
+            QPushButton#ok:pressed { background: rgba(46,204,113,0.45); }
+            QPushButton#cancel { background: rgba(255,70,70,0.15);
+                                 border: 1px solid #FF4646; color: #FF6B6B; font-size: 16px; }
+            QPushButton#cancel:pressed { background: rgba(255,70,70,0.35); }
+        """)
+
+        # 타이틀
+        lbl = QLabel("타이머 순서 변경")
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("color: #468CFF; font-size: 18px; font-weight: bold;")
+        self.layout.addWidget(lbl)
+
+        # 본문: 리스트 + ▲▼ 버튼
+        body = QHBoxLayout()
+        body.setSpacing(10)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSpacing(2)
+        self.list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        apply_touch_scroll(self.list_widget)
+        for name in timer_names:
+            self.list_widget.addItem(name)
+        if self.list_widget.count():
+            self.list_widget.setCurrentRow(0)
+        self.list_widget.currentRowChanged.connect(self._update_buttons)
+        body.addWidget(self.list_widget, 1)
+
+        # ▲▼ 버튼 영역
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(12)
+        btn_col.setAlignment(Qt.AlignVCenter)
+
+        self.btn_up = QPushButton("▲")
+        self.btn_up.setFixedSize(60, 70)
+        self.btn_up.clicked.connect(self._move_up)
+
+        self.btn_down = QPushButton("▼")
+        self.btn_down.setFixedSize(60, 70)
+        self.btn_down.clicked.connect(self._move_down)
+
+        btn_col.addWidget(self.btn_up)
+        btn_col.addWidget(self.btn_down)
+        body.addLayout(btn_col)
+
+        self.layout.addLayout(body, 1)
+
+        # 하단 확인/취소
+        foot = QHBoxLayout()
+        foot.setSpacing(10)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setObjectName("cancel")
+        btn_cancel.setFixedHeight(48)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_ok = QPushButton("완료")
+        btn_ok.setObjectName("ok")
+        btn_ok.setFixedHeight(48)
+        btn_ok.clicked.connect(self.accept)
+
+        foot.addWidget(btn_cancel)
+        foot.addWidget(btn_ok)
+        self.layout.addLayout(foot)
+
+        self._update_buttons()
+
+    def _update_buttons(self):
+        row = self.list_widget.currentRow()
+        total = self.list_widget.count()
+        self.btn_up.setEnabled(row > 0)
+        self.btn_down.setEnabled(0 <= row < total - 1)
+
+    def _move_up(self):
+        row = self.list_widget.currentRow()
+        if row <= 0:
+            return
+        item = self.list_widget.takeItem(row)
+        self.list_widget.insertItem(row - 1, item)
+        self.list_widget.setCurrentRow(row - 1)
+
+    def _move_down(self):
+        row = self.list_widget.currentRow()
+        if row < 0 or row >= self.list_widget.count() - 1:
+            return
+        item = self.list_widget.takeItem(row)
+        self.list_widget.insertItem(row + 1, item)
+        self.list_widget.setCurrentRow(row + 1)
+
+    def get_ordered_names(self):
+        return [self.list_widget.item(i).text()
+                for i in range(self.list_widget.count())]
 
     def get_visible_mode(self):
         return self._visible_mode

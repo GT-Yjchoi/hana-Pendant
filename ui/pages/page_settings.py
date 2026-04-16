@@ -493,19 +493,24 @@ class PageSettings(GlassCard):
         grid.setVerticalSpacing(8)
         
         # 헤더
-        headers = ["사용", "번호", "이름", "동작 모드", "순서"]
+        headers = ["사용", "번호", "이름", "동작 모드", "순서", "JOG"]
         for c, h in enumerate(headers):
             lbl = QLabel(h)
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setStyleSheet("color: #FFD700; font-weight: bold; font-size: 13px;")
             grid.addWidget(lbl, 0, c)
-        
+
         # 밸브 32개 설정 UI
         self.valve_checks = []      # 사용 여부 체크박스
         self.valve_name_edits = []  # 이름 입력창
         self.valve_mode_combos = [] # 동작 모드 콤보박스
         self.valve_up_btns = []     # 위로 버튼
         self.valve_down_btns = []   # 아래로 버튼
+        self.valve_jog_btns = []    # JOG 팝업 표시 여부
+        self.valve_jog_up_btns = [] # JOG 순서 위로
+        self.valve_jog_down_btns = [] # JOG 순서 아래로
+        self._jog_order = []        # JOG 선택 밸브 인덱스 순서 리스트
+        self._JOG_MAX = 6           # JOG 팝업 최대 밸브 수
         
         for i in range(32):
             row = i + 1
@@ -647,7 +652,74 @@ class PageSettings(GlassCard):
             btn_widget = QWidget()
             btn_widget.setLayout(btn_layout)
             grid.addWidget(btn_widget, row, 4)
-        
+
+            # JOG 열: [JOG 토글] [▲] [▼]
+            jog_cell = QWidget()
+            jog_h = QHBoxLayout(jog_cell)
+            jog_h.setContentsMargins(2, 0, 2, 0)
+            jog_h.setSpacing(3)
+
+            btn_jog = QPushButton("JOG")
+            btn_jog.setFixedSize(45, 33)
+            btn_jog.setCheckable(True)
+            btn_jog.setChecked(False)
+            btn_jog.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255,255,255,0.07);
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    color: #666;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+                QPushButton:checked {
+                    background: rgba(0,229,255,0.2);
+                    border: 1px solid #00E5FF;
+                    color: #00E5FF;
+                }
+            """)
+            _jog_ord_btn_style = """
+                QPushButton {
+                    background: rgba(255,255,255,0.05);
+                    border: 1px solid #444;
+                    border-radius: 3px;
+                    color: #555;
+                    font-size: 9px;
+                }
+                QPushButton:enabled {
+                    color: #00B4D8;
+                    border: 1px solid #00B4D8;
+                }
+                QPushButton:pressed { background: rgba(0,180,216,0.3); }
+            """
+            btn_ju = QPushButton("▲")
+            btn_ju.setFixedSize(22, 15)
+            btn_ju.setStyleSheet(_jog_ord_btn_style)
+            btn_ju.setEnabled(False)
+
+            btn_jd = QPushButton("▼")
+            btn_jd.setFixedSize(22, 15)
+            btn_jd.setStyleSheet(_jog_ord_btn_style)
+            btn_jd.setEnabled(False)
+
+            ud_col = QVBoxLayout()
+            ud_col.setSpacing(1)
+            ud_col.setContentsMargins(0, 0, 0, 0)
+            ud_col.addWidget(btn_ju)
+            ud_col.addWidget(btn_jd)
+
+            jog_h.addWidget(btn_jog)
+            jog_h.addLayout(ud_col)
+
+            btn_jog.toggled.connect(lambda checked, b=btn_jog, idx=i: self._on_jog_valve_toggled(b, checked, idx))
+            btn_ju.clicked.connect(lambda checked, idx=i: self._move_jog_order(idx, -1))
+            btn_jd.clicked.connect(lambda checked, idx=i: self._move_jog_order(idx, +1))
+
+            self.valve_jog_btns.append(btn_jog)
+            self.valve_jog_up_btns.append(btn_ju)
+            self.valve_jog_down_btns.append(btn_jd)
+            grid.addWidget(jog_cell, row, 5)
+
         vbox.addWidget(grp_valve)
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
@@ -716,16 +788,51 @@ class PageSettings(GlassCard):
         self.valve_mode_combos[idx1].setChecked(m2)
         self.valve_mode_combos[idx2].setChecked(m1)
     
+    def _on_jog_valve_toggled(self, btn, checked, valve_idx):
+        """JOG 버튼 토글 — 최대 6개 초과 시 자동 해제, _jog_order 동기화"""
+        if checked:
+            if len(self._jog_order) >= self._JOG_MAX:
+                btn.blockSignals(True)
+                btn.setChecked(False)
+                btn.blockSignals(False)
+                return
+            if valve_idx not in self._jog_order:
+                self._jog_order.append(valve_idx)
+        else:
+            if valve_idx in self._jog_order:
+                self._jog_order.remove(valve_idx)
+        self._refresh_jog_order_btns()
+
+    def _move_jog_order(self, valve_idx, direction):
+        """JOG 순서 이동 (direction: -1=위, +1=아래)"""
+        if valve_idx not in self._jog_order:
+            return
+        pos = self._jog_order.index(valve_idx)
+        new_pos = pos + direction
+        if 0 <= new_pos < len(self._jog_order):
+            self._jog_order[pos], self._jog_order[new_pos] = self._jog_order[new_pos], self._jog_order[pos]
+        self._refresh_jog_order_btns()
+
+    def _refresh_jog_order_btns(self):
+        """JOG ▲/▼ 버튼 활성화 상태 갱신"""
+        for i, btn_jog in enumerate(self.valve_jog_btns):
+            in_jog = i in self._jog_order
+            self.valve_jog_up_btns[i].setEnabled(in_jog)
+            self.valve_jog_down_btns[i].setEnabled(in_jog)
+
     def _build_valve_config(self):
         """현재 UI 상태로 valve_config 리스트 생성"""
         valve_config = []
         for i in range(32):
             mode = "toggle" if self.valve_mode_combos[i].isChecked() else "momentary"
+            jog_pos = self._jog_order.index(i) if i in self._jog_order else -1
             valve_config.append({
                 "index": i,
                 "name": self.valve_name_edits[i].text(),
                 "mode": mode,
                 "enabled": self.valve_checks[i].isChecked(),
+                "jog_valve": i in self._jog_order,
+                "jog_order": jog_pos,
                 "order": i
             })
         return valve_config
@@ -789,12 +896,22 @@ class PageSettings(GlassCard):
                     valve_config = settings.get("valve_config", None)
 
                     if valve_config and len(valve_config) == 32:
+                        # jog_order 복원: jog_order >= 0 인 것들을 순서대로 정렬
+                        jog_entries = [(cfg.get("jog_order", -1), i)
+                                       for i, cfg in enumerate(valve_config)
+                                       if cfg.get("jog_valve", False)]
+                        jog_entries.sort(key=lambda x: x[0])
+                        self._jog_order = [idx for _, idx in jog_entries]
+
                         for i, cfg in enumerate(valve_config):
                             self.valve_checks[i].setChecked(cfg.get("enabled", True))
                             self.valve_name_edits[i].setText(cfg.get("name", f"밸브 {i+1}"))
                             mode = cfg.get("mode", "toggle")
-                            # 토글 버튼: "toggle" → True (checked), "momentary" → False
                             self.valve_mode_combos[i].setChecked(mode == "toggle")
+                            self.valve_jog_btns[i].blockSignals(True)
+                            self.valve_jog_btns[i].setChecked(cfg.get("jog_valve", False))
+                            self.valve_jog_btns[i].blockSignals(False)
+                        self._refresh_jog_order_btns()
 
                         print(f"[Settings] 밸브 설정 로드 완료")
         except Exception as e:
@@ -1379,7 +1496,20 @@ class PageSettings(GlassCard):
         
         vbox_etc = QVBoxLayout(grp_etc)
         vbox_etc.setContentsMargins(15, 35, 15, 15)
-        
+
+        hbox_home_btn = QHBoxLayout()
+        hbox_home_btn.addStretch(1)
+        self.btn_home_toggle = QPushButton("OFF")
+        self.btn_home_toggle.setFixedSize(100, 40)
+        self.btn_home_toggle.setCheckable(True)
+        self.btn_home_toggle.setChecked(False)
+        self.btn_home_toggle.setStyleSheet("""
+            QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #666; color: #AAA; border-radius: 8px; font-weight: bold; font-size: 15px; }
+        """)
+        self.btn_home_toggle.clicked.connect(self._on_home_toggle_clicked)
+        hbox_home_btn.addWidget(self.btn_home_toggle)
+        vbox_etc.addLayout(hbox_home_btn)
+
         lbl_preset = QLabel("데이터셋 (Zero Preset) - 버튼을 누르면 해당 축 원점 설정 (DT50033)")
         lbl_preset.setStyleSheet("color: #DDD; font-size: 13px; margin-bottom: 5px;")
         vbox_etc.addWidget(lbl_preset)
@@ -1410,7 +1540,7 @@ class PageSettings(GlassCard):
         vbox_etc.addLayout(grid_preset)
         vbox.addWidget(grp_etc)
         vbox.addStretch(1)
-        
+
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
 
@@ -1460,6 +1590,21 @@ class PageSettings(GlassCard):
                 line_edit.setText(dlg.get_text())
         except:
             pass
+
+    def _on_home_toggle_clicked(self):
+        is_on = self.btn_home_toggle.isChecked()
+        if is_on:
+            self.btn_home_toggle.setText("ON")
+            self.btn_home_toggle.setStyleSheet("""
+                QPushButton { background: rgba(0, 200, 100, 0.3); border: 1px solid #00CC66; color: #00CC66; border-radius: 8px; font-weight: bold; font-size: 15px; }
+            """)
+        else:
+            self.btn_home_toggle.setText("OFF")
+            self.btn_home_toggle.setStyleSheet("""
+                QPushButton { background: rgba(255,255,255,0.08); border: 1px solid #666; color: #AAA; border-radius: 8px; font-weight: bold; font-size: 15px; }
+            """)
+        if self.plc_client and self.plc_client.is_connected:
+            self.plc_client.send_jog_mode(1 if is_on else 0)
 
     def _on_dataset_pressed(self, axis_index):
         if not self.plc_client or not self.plc_client.is_connected: return

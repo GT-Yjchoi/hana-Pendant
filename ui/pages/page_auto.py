@@ -109,7 +109,16 @@ class InfoPanel(QWidget):
         main_layout.addWidget(self.lbl_title, 0, Qt.AlignTop | Qt.AlignLeft)
         
         self.bg_frame = QFrame()
-        self.bg_frame.setStyleSheet("background-color: rgba(255, 255, 255, 0.08); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1);")
+        self.bg_frame.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+            QLabel {
+                border: none;
+            }
+        """)
         main_layout.addWidget(self.bg_frame)
         
         box_layout = QVBoxLayout(self.bg_frame)

@@ -13,10 +13,11 @@ except ImportError:
     TouchKeyboard = None
 
 try:
-    from ui.dialogs.sequence_utils import NumericKeypad, DarkConfirmDialog
+    from ui.dialogs.sequence_utils import NumericKeypad, DarkConfirmDialog, TimerReorderDialog
 except ImportError:
     NumericKeypad = None
     DarkConfirmDialog = None
+    TimerReorderDialog = None
 
 
 # ==========================================================
@@ -240,6 +241,29 @@ class PageTimer(GlassCard):
         self.grid.setSpacing(10)
         self.grid.setAlignment(Qt.AlignTop)
 
+        # 상단 버튼 행
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 4)
+        btn_row.addStretch(1)
+
+        self.btn_reorder = QPushButton("⇄ 순서 변경")
+        self.btn_reorder.setFixedHeight(36)
+        self.btn_reorder.setStyleSheet("""
+            QPushButton {
+                background: rgba(70,140,255,0.15);
+                border: 1px solid rgba(70,140,255,0.5);
+                border-radius: 8px;
+                color: #7EB8FF;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0 16px;
+            }
+            QPushButton:pressed { background: rgba(70,140,255,0.35); }
+        """)
+        self.btn_reorder.clicked.connect(self._on_reorder_clicked)
+        btn_row.addWidget(self.btn_reorder)
+
+        self.body.addLayout(btn_row)
         self.body.addWidget(scroll, 1)
         self._last_width = 0
         QTimer.singleShot(0, self.refresh_grid)
@@ -436,3 +460,22 @@ class PageTimer(GlassCard):
         else:
             val, ok = QInputDialog.getDouble(self, "시간 입력", "시간(초):", 1.0, 0, 999, 1)
             return val if ok else None
+
+    def _on_reorder_clicked(self):
+        """타이머 순서 변경 다이얼로그 열기"""
+        if not self.timer_library:
+            return
+        if not TimerReorderDialog:
+            return
+
+        dlg = TimerReorderDialog(list(self.timer_library.keys()), parent=self)
+        from PySide6.QtWidgets import QDialog as _QDialog
+        if dlg.exec() != _QDialog.Accepted:
+            return
+
+        new_order = dlg.get_ordered_names()
+        # timer_library in-place 재정렬 (main_window 참조 공유 유지)
+        reordered = {name: self.timer_library[name] for name in new_order if name in self.timer_library}
+        self.timer_library.clear()
+        self.timer_library.update(reordered)
+        self.refresh_grid()

@@ -1,7 +1,8 @@
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QLineEdit, QWidget, QGridLayout, QSizePolicy, QStackedWidget
+    QLineEdit, QWidget, QGridLayout, QSizePolicy, QStackedWidget, QFrame
 )
 
 # =========================================================
@@ -128,22 +129,39 @@ class TouchKeyboard(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.resize(850, 520) 
-        
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        # 배경 캡처 (dim overlay용)
+        self._bg_pixmap = parent.window().grab() if parent else None
+
         self.composer = HangulComposer()
         self.composer.completed_text = ""
-        self.is_korean = True 
-        
+        self.is_korean = True
+
         # 버튼 객체 참조 (상태 변경용)
-        self.eng_btns = []    
+        self.eng_btns = []
         self.kor_btns = []
         self.btn_shift_kor = None
         self.btn_shift_eng = None
 
-        # 스타일 정의
-        self.setStyleSheet("""
-            QDialog { background: rgba(30, 35, 45, 250); border: 2px solid rgba(70, 140, 255, 120); border-radius: 12px; }
+        # 외부 레이아웃 (전체화면, 중앙 정렬)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setAlignment(Qt.AlignCenter)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 내용 프레임
+        self.content_frame = QFrame()
+        self.content_frame.setObjectName("KBFrame")
+        self.content_frame.setFixedSize(860, 540)
+        self.content_frame.setStyleSheet("""
+            QFrame#KBFrame {
+                background: #1E232D;
+                border: 2px solid #468CFF;
+                border-radius: 12px;
+            }
             QLabel#Title { color: #468CFF; font-size: 22px; font-weight: bold; background: transparent; margin-bottom: 5px; }
             QLineEdit { background: rgba(255, 255, 255, 20); border: 1px solid rgba(255, 255, 255, 50); border-radius: 6px; color: white; font-size: 32px; padding: 10px; font-weight: bold; }
             QPushButton { background: rgba(255, 255, 255, 10); border: 1px solid rgba(255, 255, 255, 30); border-radius: 6px; color: white; font-size: 22px; font-weight: bold; }
@@ -152,8 +170,9 @@ class TouchKeyboard(QDialog):
             QPushButton#action { background: rgba(70, 140, 255, 50); border: 1px solid #468CFF; }
             QPushButton#close { background: rgba(255, 70, 70, 50); border: 1px solid #FF4646; }
         """)
+        outer_layout.addWidget(self.content_frame)
 
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout(self.content_frame)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
@@ -174,13 +193,13 @@ class TouchKeyboard(QDialog):
 
         # 2. 키패드 영역 (스택)
         self.key_stack = QStackedWidget()
-        
+
         self.page_kor = QWidget()
         self.layout_kor = QGridLayout(self.page_kor)
         self.layout_kor.setSpacing(5)
         self.layout_kor.setContentsMargins(0,0,0,0)
         self._init_kor_keys()
-        
+
         self.page_eng = QWidget()
         self.layout_eng = QGridLayout(self.page_eng)
         self.layout_eng.setSpacing(5)
@@ -193,21 +212,21 @@ class TouchKeyboard(QDialog):
 
         # 3. 하단 버튼
         bottom_layout = QHBoxLayout()
-        
+
         btn_close = QPushButton("취소")
         btn_close.setObjectName("close")
         btn_close.setFixedSize(120, 65)
         btn_close.clicked.connect(self.reject)
-        
+
         btn_clear = QPushButton("← Back")
         btn_clear.setFixedSize(120, 65)
         btn_clear.setAutoRepeat(True)
         btn_clear.clicked.connect(self._on_backspace)
-        
+
         self.btn_mode = QPushButton("한/영")
         self.btn_mode.setFixedSize(120, 65)
         self.btn_mode.clicked.connect(self._toggle_mode)
-        
+
         btn_space = QPushButton("Space")
         btn_space.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         btn_space.setFixedHeight(65)
@@ -217,14 +236,25 @@ class TouchKeyboard(QDialog):
         btn_ok.setObjectName("action")
         btn_ok.setFixedSize(150, 65)
         btn_ok.clicked.connect(self.accept)
-        
+
         bottom_layout.addWidget(self.btn_mode)
         bottom_layout.addWidget(btn_close)
         bottom_layout.addWidget(btn_space)
         bottom_layout.addWidget(btn_clear)
         bottom_layout.addWidget(btn_ok)
-        
+
         layout.addLayout(bottom_layout)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        if self._bg_pixmap:
+            painter.drawPixmap(0, 0, self._bg_pixmap)
+        else:
+            painter.fillRect(self.rect(), QColor(20, 25, 35, 255))
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+
+    def set_language(self, mode="KO"):
+        self.set_layout(mode)
 
     def set_text(self, text):
         if text is None: text = ""
