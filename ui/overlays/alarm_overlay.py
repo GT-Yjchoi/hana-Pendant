@@ -2,6 +2,7 @@ import json
 import os
 from PySide6.QtCore import Qt, Signal
 from utils.paths import get_settings_path
+from utils.json_utils import load_json, save_json
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGraphicsDropShadowEffect
 
 # ============================================================
@@ -55,13 +56,9 @@ def save_sequence_alarms(settings_path=None):
     """SEQUENCE_ALARMS를 settings.json에 저장합니다."""
     path = settings_path or _SETTINGS_PATH
     try:
-        settings = {}
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
+        settings = load_json(path) or {}
         settings["sequence_alarms"] = {str(k): v for k, v in sorted(SEQUENCE_ALARMS.items())}
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=4, ensure_ascii=False)
+        save_json(path, settings)
     except (OSError, json.JSONDecodeError) as e:
         print(f"[알람] 저장 실패: {e}")
 
@@ -118,13 +115,13 @@ class AlarmOverlay(QWidget):
         close_row.setContentsMargins(0, 0, 0, 0)
         close_row.addStretch()
         self.btn_close = QPushButton("X")
-        self.btn_close.setFixedSize(32, 32)
+        self.btn_close.setFixedSize(48, 48)
         self.btn_close.setCursor(Qt.PointingHandCursor)
         self.btn_close.setStyleSheet("""
             QPushButton {
                 background: transparent;
                 color: #FF4646;
-                font-size: 18px;
+                font-size: 27px;
                 font-weight: bold;
                 border: none;
             }
@@ -183,8 +180,48 @@ class AlarmOverlay(QWidget):
         self.hide()
         self.sig_dismissed.emit()
 
+    def _set_alarm_style(self):
+        """기본 알람 스타일(빨강)으로 복구"""
+        self.lbl_title.setText("[!] SYSTEM ALARM [!]")
+        self.lbl_title.setStyleSheet("color: #FF4646; font-size: 32px; font-weight: 900;")
+        self.box.setStyleSheet("""
+            QFrame {
+                background-color: #2D1A1A;
+                border: 4px solid #FF4646;
+                border-radius: 20px;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+        self.btn_reset.show()
+
+    def show_comm_error(self):
+        """PLC 통신 에러 팝업"""
+        self.lbl_title.setText("[!] COMM ERROR [!]")
+        self.lbl_title.setStyleSheet("color: #F39C12; font-size: 32px; font-weight: 900;")
+        self.box.setStyleSheet("""
+            QFrame {
+                background-color: #1A1500;
+                border: 4px solid #F39C12;
+                border-radius: 20px;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+        self.lbl_msg.setText("PLC와의 통신이 끊어졌습니다.\n자동으로 재연결을 시도합니다.")
+        self.btn_reset.hide()
+        self._comm_error = True
+        self.show()
+        self.raise_()
+
+    def hide_comm_error(self):
+        """통신 복구 시 COMM ERROR 팝업 닫기"""
+        if getattr(self, '_comm_error', False):
+            self._comm_error = False
+            self._set_alarm_style()
+            self.hide()
+
     def show_sequence_alarm(self, alarm_no):
         """시퀀스 알람 (IN 스텝 타임아웃 등)을 화면에 띄움"""
+        self._set_alarm_style()
         msg = SEQUENCE_ALARMS.get(alarm_no, f"시퀀스 알람 #{alarm_no}")
         self.lbl_msg.setText(f"A-{alarm_no:03d}: {msg}")
         self.show()
@@ -192,6 +229,7 @@ class AlarmOverlay(QWidget):
 
     def show_error(self, axis_list, error_codes=None):
         """축 알람 메시지를 설정하고 화면에 띄움"""
+        self._set_alarm_style()
         axis_names = {1: "X축", 2: "Y축", 3: "Z축", 4: "Y2축", 5: "Z2축", 6: "θ축", 7: "R1축", 8: "R2축", 9: "비상정지"}
         lines = []
         for a in axis_list:

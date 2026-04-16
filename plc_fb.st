@@ -6,16 +6,26 @@
        FB_Sub    : <이FB타입명>;   (* 슬롯 동적, b_Run = FB_Main.b_CallStart *)
        FB_SubSub : <이FB타입명>;   (* 슬롯 동적, b_Run = FB_Sub.b_CallStart  *)
 
-   PROGRAM 배선 (6줄):
+   PROGRAM 배선:
+       (* Main ↔ Sub *)
        FB_Sub.i_SlotNo      := FB_Main.i_CallSlotOut;
        FB_Sub.b_Run         := FB_Main.b_CallStart;
        FB_Main.b_SubDone    := FB_Sub.b_Step_End;
        FB_Main.b_SubError   := FB_Sub.b_Error;
+       FB_Main.b_SubBusy    := FB_Sub.b_IsBusy;        (* [NEW] 병렬 CALL 충돌 방지 *)
+       FB_Main.b_NoSubCall  := FALSE;
 
+       (* Sub ↔ SubSub *)
        FB_SubSub.i_SlotNo   := FB_Sub.i_CallSlotOut;
        FB_SubSub.b_Run      := FB_Sub.b_CallStart;
        FB_Sub.b_SubDone     := FB_SubSub.b_Step_End;
        FB_Sub.b_SubError    := FB_SubSub.b_Error;
+       FB_Sub.b_SubBusy     := FB_SubSub.b_IsBusy;     (* [NEW] *)
+       FB_Sub.b_NoSubCall   := FALSE;
+
+       (* SubSub는 최하위 - 서브 FB 없음 *)
+       FB_SubSub.b_SubBusy   := FALSE;
+       FB_SubSub.b_NoSubCall := TRUE;                   (* [NEW] CALL 스텝 만나면 에러 94 *)
 
    스텝 데이터 메모리 레이아웃 (DT20000~, 슬롯당 1000 Words):
        Word +0  : iCommand  (WORD)
@@ -32,6 +42,8 @@
 
        b_SubDone       : BOOL;   (* 서브 완료 - PROGRAM에서 연결 *)
        b_SubError      : BOOL;   (* 서브 에러  - PROGRAM에서 연결 *)
+       b_SubBusy       : BOOL;   (* [NEW] 서브 실행중 - Sub.b_IsBusy에 연결, 없으면 FALSE *)
+       b_NoSubCall     : BOOL;   (* [NEW] 이 인스턴스는 CALL 불가(최하위). SubSub 인스턴스에 TRUE 배선 *)
        w_ServoBusy     : WORD;
        w_ServoDone     : WORD;
        w_Input0        : WORD;
@@ -53,13 +65,25 @@
    ── VAR_OUTPUT ──
        b_Error         : BOOL;
        i_ErrorID       : INT;
-       b_StepDone      : BOOL;
+       b_StepDone      : BOOL;   (* 스텝 완료 펄스(다음 스텝 읽기 진입 시 자동 클리어) *)
        b_Step_End      : BOOL;   (* 시퀀스 END 도달 - PROGRAM에서 b_SubDone에 연결 *)
+       b_IsBusy        : BOOL;   (* [NEW] 실행중(i_SeqState<>0). 상위 FB의 b_SubBusy에 연결 *)
        w_SeqPopup      : WORD;
        i_CurrentStep   : INT;
        i_CallSlotOut   : INT;    (* 호출할 슬롯 번호 *)
        b_CallStart     : BOOL;   (* 서브 기동 트리거 - PROGRAM에서 b_Run에 연결 *)
        b_CallParallelOut : BOOL; (* 병렬 호출 여부 *)
+
+   ── 에러 ID ──
+       21 : POS 축 이동 확인 실패
+       50 : 서브 시퀀스 에러
+       93 : 병렬 CALL 실패 - 서브 FB가 이미 실행중
+       94 : CALL 사용 불가 - 이 인스턴스는 최하위(b_NoSubCall=TRUE)
+       95 : JMP 타겟 스텝 번호 범위 초과(0~99)
+       96 : CALL 슬롯 번호 범위 초과(0~39)
+       97 : 실행 슬롯 번호 범위 초과(0~39)
+       98 : OUT 지연 타이머 슬롯 없음(2개 모두 사용중)
+       99 : 알 수 없는 커맨드
 
    ── VAR (내부) ──
        (* 슬롯/스텝 *)
@@ -124,6 +148,7 @@
        i_JmpPort       : INT;
        i_JmpBit        : INT;
        b_JmpCond       : BOOL;
+       b_JmpDoJump     : BOOL;   (* [NEW] 실제 점프 여부(조건/옵션 반영 후) *)
        (* CALL *)
        i_CallSlot      : INT;
        b_CallParallel  : BOOL;
@@ -161,6 +186,7 @@ IF b_Reset THEN
     i_ErrorID        := 0;
     b_StepDone       := FALSE;
     b_Step_End       := FALSE;
+    b_IsBusy         := FALSE;
     b_TimerStart     := FALSE;
     b_DelayStart     := FALSE;
     b_InputWaitStart := FALSE;
@@ -173,6 +199,11 @@ IF b_Reset THEN
     i_CallSlotOut     := 0;
     i_CallSlot        := 0;
     b_CallParallelOut := FALSE;
+    (* 에지 감지 플래그 초기화 - 리셋 직후 스퓨리어스 상승엣지 방지 *)
+    b_RunPrev        := FALSE;
+    b_CheckRunPrev   := FALSE;
+    b_RunRising      := FALSE;
+    b_CheckRunRising := FALSE;
     FOR i_LoopAxis := 1 TO 5 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
     w_system_Output  := 0;
     w_Valve_Output   := 0;
@@ -210,21 +241,33 @@ CASE i_SeqState OF
         b_DelayStart     := FALSE;
         b_Step_End       := FALSE;
         IF i_ControlCmd = 1 AND b_Run THEN
-            i_ActiveSlotNo := i_SlotNo;   (* 슬롯 번호 래치 *)
-            IF i_CurrentStep < 0 OR i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
-            i_SeqState := 10;
+            IF i_SlotNo < 0 OR i_SlotNo > 39 THEN
+                i_ErrorID  := 97;
+                i_SeqState := 900;
+            ELSE
+                i_ActiveSlotNo := i_SlotNo;   (* 슬롯 번호 래치 *)
+                IF i_CurrentStep < 0 OR i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
+                i_SeqState := 10;
+            END_IF;
         ELSIF i_ControlCmd = 2 AND b_CheckRunRising THEN
-            i_ActiveSlotNo := i_SlotNo;
-            IF i_CurrentStep < 0 OR i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
-            i_SeqState := 10;
+            IF i_SlotNo < 0 OR i_SlotNo > 39 THEN
+                i_ErrorID  := 97;
+                i_SeqState := 900;
+            ELSE
+                i_ActiveSlotNo := i_SlotNo;
+                IF i_CurrentStep < 0 OR i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
+                i_SeqState := 10;
+            END_IF;
         END_IF;
 
-    1: (* 확인운전 - 스텝 완료 후 다음 스텝 진행 대기 *)
-        IF i_CheckRunState = 1 THEN
+    1: (* 확인운전 - 스텝 완료 후 다음 상승엣지까지 대기 *)
+        (* 레벨이 아닌 엣지로 대기하여 버튼을 계속 눌러도 1스텝씩만 진행 *)
+        IF b_CheckRunRising THEN
             i_SeqState := 10;
         END_IF;
 
     10: (* 스텝 데이터 읽기 + 커맨드 해석 *)
+        b_StepDone  := FALSE;  (* 새 스텝 진입 시 이전 완료 펄스 클리어 *)
         (* 전역변수: g_SeqData AT DT20000 : ARRAY[0..3999] OF DUT_STEP_DATA *)
         (* 인덱스 = 슬롯 × 100 + 스텝  (최대 39×100+99 = 3999)             *)
         di_StepBase := INT_TO_DINT(i_ActiveSlotNo) * 100 + INT_TO_DINT(i_CurrentStep);
@@ -408,12 +451,25 @@ CASE i_SeqState OF
 
     (* ──── [CALL - 서브 시퀀스 호출] ──── *)
     80: (* CALL 기동 *)
-        i_CallSlot        := DINT_TO_INT(di_StepP1);
-        b_CallParallel    := (w_StepOpt = 1);
-        i_CallSlotOut     := i_CallSlot;
-        b_CallParallelOut := b_CallParallel;
-        b_CallStart       := TRUE;
-        i_SeqState        := 82;
+        i_CallSlot := DINT_TO_INT(di_StepP1);
+        IF b_NoSubCall THEN
+            (* 최하위 인스턴스(SubSub 등) - 서브 FB 없음 *)
+            i_ErrorID  := 94;
+            i_SeqState := 900;
+        ELSIF b_SubBusy THEN
+            (* 서브가 아직 이전 CALL 실행중 - 병렬/동기 모두 거절 *)
+            i_ErrorID  := 93;
+            i_SeqState := 900;
+        ELSIF i_CallSlot < 0 OR i_CallSlot > 39 THEN
+            i_ErrorID  := 96;
+            i_SeqState := 900;
+        ELSE
+            b_CallParallel    := (w_StepOpt = 1);
+            i_CallSlotOut     := i_CallSlot;
+            b_CallParallelOut := b_CallParallel;
+            b_CallStart       := TRUE;
+            i_SeqState        := 82;
+        END_IF;
 
     82: (* b_CallStart 하강 후 분기 *)
         b_CallStart := FALSE;
@@ -433,9 +489,9 @@ CASE i_SeqState OF
 
     (* ──── [점프 JMP] ──── *)
     70:
+        (* ─ 조건식 평가 ─ *)
         IF w_StepOpt = 0 THEN
-            i_CurrentStep := DINT_TO_INT(di_StepP1);
-            i_SeqState := 10;
+            b_JmpCond := TRUE;   (* 무조건 점프 *)
         ELSE
             i_JmpPort := DINT_TO_INT(di_StepP3);
             IF DINT_TO_INT(di_StepP2) = 2 THEN
@@ -470,15 +526,28 @@ CASE i_SeqState OF
                     b_JmpCond := FALSE;
                 END_IF;
             END_IF;
-            IF DINT_TO_INT(di_StepP4) = 1 THEN
-                IF b_JmpCond THEN i_CurrentStep := DINT_TO_INT(di_StepP1); i_SeqState := 10;
-                ELSE              i_SeqState := 99;
-                END_IF;
+        END_IF;
+
+        (* ─ 실제 점프 여부 결정 (P4=1: 조건참 점프, 그외: 조건거짓 점프) ─ *)
+        IF w_StepOpt = 0 THEN
+            b_JmpDoJump := TRUE;
+        ELSIF DINT_TO_INT(di_StepP4) = 1 THEN
+            b_JmpDoJump := b_JmpCond;
+        ELSE
+            b_JmpDoJump := NOT b_JmpCond;
+        END_IF;
+
+        (* ─ 타겟 스텝 범위 검사 후 분기 ─ *)
+        IF b_JmpDoJump THEN
+            IF DINT_TO_INT(di_StepP1) < 0 OR DINT_TO_INT(di_StepP1) > 99 THEN
+                i_ErrorID  := 95;
+                i_SeqState := 900;
             ELSE
-                IF NOT b_JmpCond THEN i_CurrentStep := DINT_TO_INT(di_StepP1); i_SeqState := 10;
-                ELSE                  i_SeqState := 99;
-                END_IF;
+                i_CurrentStep := DINT_TO_INT(di_StepP1);
+                i_SeqState    := 10;
             END_IF;
+        ELSE
+            i_SeqState := 99;
         END_IF;
 
 
@@ -532,20 +601,34 @@ CASE i_SeqState OF
         i_CurrentStep := i_CurrentStep + 1;
         IF i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
         IF i_ControlCmd = 2 THEN
-            i_SeqState := 1;    (* 확인운전: 다음 스텝 전 일시정지 *)
+            (* 확인운전: CheckRunState를 0으로 내려 다음 상승엣지까지 정지 *)
+            i_CheckRunState := 0;
+            i_SeqState      := 1;
         ELSE
             i_SeqState := 10;   (* 자동운전: 즉시 다음 스텝 *)
         END_IF;
 
     900: (* 에러 *)
-        b_Error      := TRUE;
-        b_TimerStart := FALSE;
-        b_DelayStart := FALSE;
+        b_Error          := TRUE;
+        b_TimerStart     := FALSE;
+        b_DelayStart     := FALSE;
+        b_InputWaitStart := FALSE;
+        b_HoldTimerStart := FALSE;
+        (* 지연 출력 - 미발사분 취소 (타이머/펜딩 동시 클리어) *)
+        b_OutDelayStart[0]   := FALSE; b_OutDelayPending[0] := FALSE;
+        b_OutDelayStart[1]   := FALSE; b_OutDelayPending[1] := FALSE;
+        (* 서보 기동 플래그 취소 *)
+        FOR i_LoopAxis := 1 TO 5 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
 
 END_CASE;
 
 
-(* ── 3. 타이머 호출 (매 스캔) ── *)
+(* ── 3. Busy 상태 출력 갱신 ── *)
+(* 상위 FB의 b_SubBusy 배선용. 대기(0)는 FALSE, 그 외 모든 실행/에러 상태는 TRUE *)
+b_IsBusy := (i_SeqState <> 0);
+
+
+(* ── 4. 타이머 호출 (매 스캔) ── *)
 tmr_StartWait (IN := b_TimerStart,     PT := t_WaitTime,      Q => b_WaitDone);
 tmr_StepDelay (IN := b_DelayStart,     PT := t_DelaySetting,  Q => b_DelayDone);
 tmr_InputWait (IN := b_InputWaitStart, PT := t_InputTimeout,  Q => b_InputWaitDone);

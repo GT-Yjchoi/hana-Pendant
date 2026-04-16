@@ -3,6 +3,7 @@ import os
 import sys
 from datetime import datetime
 from utils.paths import get_settings_path, get_recipes_dir
+from utils.json_utils import load_json, save_json
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, 
@@ -89,7 +90,7 @@ class MainWindow(QWidget):
 
         # 메인 레이아웃
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 4)
+        root.setContentsMargins(16, 14, 16, 10)
         root.setSpacing(12)
 
         # ===== 1. Top Bar =====
@@ -185,7 +186,7 @@ class MainWindow(QWidget):
 
         # ===== 3. Pages =====
         self.stack = QStackedWidget()
-        root.addWidget(self.stack)
+        root.addWidget(self.stack, 1)
 
         self.pages = {}
         self.page_keys = ["manual", "auto", "mode", "position", "timer", "packing", "data", "settings"]
@@ -350,10 +351,13 @@ class MainWindow(QWidget):
         self.plc_client.connect_to_plc(target_ip, target_port)
 
     def _on_plc_connected(self, connected: bool):
-        """PLC 연결 시 현재 모드 설정을 PLC로 전송"""
-        if not connected:
-            return
-        QTimer.singleShot(200, self._send_mode_to_plc)
+        """PLC 연결/해제 시 처리"""
+        if connected:
+            self.alarm_overlay.hide_comm_error()
+            QTimer.singleShot(200, self._send_mode_to_plc)
+        else:
+            if not self._alarm_resetting and not self._seq_alarm_showing:
+                self.alarm_overlay.show_comm_error()
 
     def _send_mode_to_plc(self):
         """master_mode_data → DT206~208 전송 (재부팅 후 PLC 동기화)"""
@@ -425,15 +429,9 @@ class MainWindow(QWidget):
             print(f"[Mode] 레시피 '{filename}' 모드 → DT206~208 전송")
         
         try:
-            data = {}
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-            
+            data = load_json(self.settings_file) or {}
             data["last_recipe"] = filename
-            
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+            save_json(self.settings_file, data)
         except Exception as e:
             print(f"[Main] Save settings error: {e}")
 
@@ -448,13 +446,9 @@ class MainWindow(QWidget):
 
     def _save_io_names_to_settings(self):
         try:
-            data = {}
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+            data = load_json(self.settings_file) or {}
             data["io_names"] = IOManager.instance().to_dict() if IOManager else {}
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
+            save_json(self.settings_file, data)
         except Exception as e:
             print(f"[Main] IO names save error: {e}")
 

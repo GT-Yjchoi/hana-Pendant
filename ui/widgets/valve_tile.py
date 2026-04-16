@@ -85,17 +85,17 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
             if os.path.exists(path):
                 current_mtime = os.path.getmtime(path)
                 return current_mtime > self._last_config_mtime
-        except:
+        except OSError:
             pass
         return False
-    
+
     def _update_config_mtime(self):
         """settings.json 수정 시간 업데이트"""
         try:
             path = get_settings_path()
             if os.path.exists(path):
                 self._last_config_mtime = os.path.getmtime(path)
-        except:
+        except OSError:
             pass
 
     def _load_and_create_valves(self):

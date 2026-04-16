@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime
 from utils.paths import get_recipes_dir
+from utils.json_utils import save_json
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
@@ -10,7 +11,10 @@ from PySide6.QtWidgets import (
 )
 
 from widgets.glass_card import GlassCard
-from widgets.touch_keyboard import TouchKeyboard
+try:
+    from widgets.touch_keyboard import TouchKeyboard
+except ImportError:
+    TouchKeyboard = None
 
 # 매니저 모듈 임포트
 try:
@@ -298,11 +302,16 @@ class PageData(GlassCard):
             self.preview_list.clear()
             icons = {"POS": "[P]", "OUT": "[Y]", "IN": "[X]", "TMR": "[T]", "JMP": "[J]", "CALL": "[C]"}
             if steps:
-                for i, step in enumerate(steps):
+                step_num = 0
+                for step in steps:
                     stype = step.get("type", "")
+                    if stype == "COMMENT":
+                        self.preview_list.addItem(f"// {step.get('text', '')}")
+                        continue
+                    step_num += 1
                     icon = icons.get(stype, "?")
                     name = step.get("name", "Unknown")
-                    self.preview_list.addItem(f"[{i+1:02d}]  {icon}  {name}")
+                    self.preview_list.addItem(f"[{step_num:02d}]  {icon}  {name}")
             else:
                 self.preview_list.addItem("i (Empty or No Main Sequence)")
         except Exception as e:
@@ -321,6 +330,8 @@ class PageData(GlassCard):
         confirm = GlassConfirmDialog(t_title, t_msg, parent=self)
         
         if confirm.exec() == QDialog.Accepted:
+            if not TouchKeyboard:
+                return
             dlg = TouchKeyboard("새 파일 이름 입력", parent=self)
             if hasattr(dlg, "set_language"): dlg.set_language("EN")
             elif hasattr(dlg, "set_layout"): dlg.set_layout("EN")
@@ -397,8 +408,7 @@ class PageData(GlassCard):
         lm = LanguageManager.instance() if LanguageManager else None
 
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(save_data, f, indent=4, ensure_ascii=False)
+            save_json(filepath, save_data)
             
             if not is_auto:
                 self._refresh_file_list()

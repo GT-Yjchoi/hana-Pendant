@@ -41,7 +41,7 @@ class JogControlDialog(QWidget):
             QPushButton { background-color: rgba(255, 255, 255, 0.05); border: 2px solid #005f73; border-radius: 8px; color: white; font-size: 14px; font-weight: bold; font-family: 'Malgun Gothic', sans-serif; }
             QPushButton:pressed { background-color: rgba(0, 229, 255, 0.3); border: 2px solid #00E5FF; color: #00E5FF; }
             QLabel { color: #00E5FF; font-weight: bold; font-size: 18px; background-color: transparent; border: none; }
-            QPushButton#btnClose { background-color: transparent; border: none; color: #888; font-size: 20px; font-weight: 900; }
+            QPushButton#btnClose { background-color: transparent; border: none; color: #888; font-size: 30px; font-weight: 900; }
             QPushButton#btnClose:pressed { color: #FF4646; border: none; background-color: transparent; }
         """)
         
@@ -56,7 +56,7 @@ class JogControlDialog(QWidget):
         header_layout.addStretch(1)
         btn_close = QPushButton("X")
         btn_close.setObjectName("btnClose")
-        btn_close.setFixedSize(35, 35)
+        btn_close.setFixedSize(53, 53)
         btn_close.clicked.connect(self.close_overlay)
         header_layout.addWidget(btn_close)
         layout.addLayout(header_layout)

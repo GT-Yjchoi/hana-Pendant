@@ -3,6 +3,7 @@ import os
 import struct
 import sys
 from utils.paths import get_settings_path as _get_settings_path
+from utils.json_utils import load_json, save_json
 from PySide6.QtCore import Qt, Signal, QEventLoop
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
@@ -14,9 +15,15 @@ from widgets.glass_card import GlassCard
 
 # 커스텀 위젯 임포트
 try:
-    from ui.widgets.custom_inputs import TouchComboBox
+    from ui.widgets.custom_inputs import TouchComboBox, ClickableLineEdit
 except ImportError:
-    TouchComboBox = QComboBox  # fallback
+    TouchComboBox = QComboBox
+    ClickableLineEdit = QLineEdit
+
+try:
+    from widgets.touch_keyboard import TouchKeyboard
+except ImportError:
+    TouchKeyboard = None
 
 # 매니저 모듈 임포트
 try:
@@ -28,14 +35,6 @@ try:
     from utils.languages import LanguageManager
 except ImportError:
     LanguageManager = None
-
-# [커스텀 위젯] 클릭 가능한 라인에디터
-class ClickableLineEdit(QLineEdit):
-    clicked = Signal()
-    def __init__(self, text="", parent=None):
-        super().__init__(text, parent)
-    def mousePressEvent(self, event):
-        self.clicked.emit()
 
 # =========================================================
 # [NEW] 숫자/IP 입력 전용 오버레이 키패드
@@ -409,6 +408,7 @@ class PageSettings(GlassCard):
         self._init_interlock_tab()
         self.tabs.addTab(self.tab_interlock, "인터록 설정")
 
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         self.body.addWidget(self.tabs)
 
         if IOManager:
@@ -422,17 +422,28 @@ class PageSettings(GlassCard):
             main_window = self.window()
             if hasattr(main_window, 'plc_client'):
                 self.set_plc_client(main_window.plc_client)
-        
+
         if self.plc_client:
             self._on_plc_status_changed(self.plc_client.is_connected)
-            
+
+        # 설정 페이지 진입 시 현재 탭이 파라미터 탭이면 자동 로드
+        if self.tabs.currentIndex() == 2:
+            self._load_params()
+
         super().showEvent(event)
+
+    def _on_tab_changed(self, index):
+        """탭 전환 시 파라미터 탭이면 자동으로 불러오기"""
+        if index == 2:
+            self._load_params()
 
     def set_plc_client(self, client):
         self.plc_client = client
         if self.plc_client:
-            try: self.plc_client.sig_connected.disconnect(self._on_plc_status_changed)
-            except: pass
+            try:
+                self.plc_client.sig_connected.disconnect(self._on_plc_status_changed)
+            except RuntimeError:
+                pass  # 연결되지 않은 시그널 disconnect는 무시
             self.plc_client.sig_connected.connect(self._on_plc_status_changed)
             self._on_plc_status_changed(self.plc_client.is_connected)
 
@@ -733,7 +744,6 @@ class PageSettings(GlassCard):
     def _edit_valve_name(self, idx):
         """터치 키보드로 밸브 이름 편집"""
         try:
-            from widgets.touch_keyboard import TouchKeyboard
             current_name = self.valve_name_edits[idx].text()
             
             dlg = TouchKeyboard("밸브 이름 입력", current_name, self)
@@ -843,13 +853,9 @@ class PageSettings(GlassCard):
         """팝업 없이 밸브 설정을 settings.json에 저장"""
         try:
             path = _get_settings_path()
-            settings = {}
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
+            settings = load_json(path) or {}
             settings["valve_config"] = self._build_valve_config()
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
+            save_json(path, settings)
             self.sig_valve_config_changed.emit()
             print("[Settings] 밸브 설정 자동 저장 완료")
         except Exception as e:
@@ -859,19 +865,9 @@ class PageSettings(GlassCard):
         """밸브 설정을 settings.json에 저장"""
         try:
             path = _get_settings_path()
-            settings = {}
-
-            # 기존 설정 로드
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-
+            settings = load_json(path) or {}
             settings["valve_config"] = self._build_valve_config()
-
-            # 파일에 저장
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
-
+            save_json(path, settings)
             print(f"[Settings] 밸브 설정 저장 완료")
 
             # ★ 밸브 설정 변경 시그널 발생
@@ -1126,12 +1122,6 @@ class PageSettings(GlassCard):
         self.input_edits = []
         self.output_edits = []
         
-        # IO 이름 변경은 텍스트 입력이 필요하므로, 기존 터치 키보드를 계속 사용
-        try:
-            from widgets.touch_keyboard import TouchKeyboard
-        except:
-            TouchKeyboard = None
-
         mgr = IOManager.instance() if IOManager else None
         count = 32
         
@@ -1322,11 +1312,6 @@ class PageSettings(GlassCard):
 
     def _add_alarm(self):
         from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
-        try:
-            from widgets.touch_keyboard import TouchKeyboard
-        except ImportError:
-            TouchKeyboard = None
-
         no = self._alarm_next_no()
         msg = ""
         if TouchKeyboard:
@@ -1348,11 +1333,6 @@ class PageSettings(GlassCard):
 
     def _edit_alarm(self, no):
         from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
-        try:
-            from widgets.touch_keyboard import TouchKeyboard
-        except ImportError:
-            TouchKeyboard = None
-
         current = SEQUENCE_ALARMS.get(no, "")
         if TouchKeyboard:
             kb = TouchKeyboard(f"A-{no:03d} 알람 메시지 수정", current, self)
@@ -1397,17 +1377,11 @@ class PageSettings(GlassCard):
         toolbar = QHBoxLayout()
         toolbar.addStretch(1)
         
-        btn_refresh = QPushButton("불러오기")
-        btn_refresh.setFixedSize(120, 40)
-        btn_refresh.setStyleSheet("QPushButton { background: rgba(255,255,255,0.1); border: 1px solid #777; color: white; border-radius: 6px; font-weight: bold; font-size: 13px; } QPushButton:hover { background: rgba(255,255,255,0.2); }")
-        btn_refresh.clicked.connect(self._load_params)
-        
         self.btn_apply_param = QPushButton("파라미터 적용")
         self.btn_apply_param.setFixedSize(140, 40)
         self.btn_apply_param.setStyleSheet("QPushButton { background: #C0392B; border: 1px solid #E74C3C; color: white; border-radius: 6px; font-weight: bold; font-size: 13px; } QPushButton:hover { background: #E74C3C; }")
         self.btn_apply_param.clicked.connect(self._save_params)
-        
-        toolbar.addWidget(btn_refresh)
+
         toolbar.addWidget(self.btn_apply_param)
         main_layout.addLayout(toolbar)
         
@@ -1574,8 +1548,8 @@ class PageSettings(GlassCard):
             try:
                 val = float(dlg.result_val)
                 line_edit.setText(f"{val:.3f} mm")
-            except:
-                pass
+            except ValueError:
+                pass  # 숫자 변환 실패 시 무시
 
     # [수정] 일반 숫자 키패드 (포트, 가감속 등)
     def _open_keypad(self, line_edit, is_ip=False):
@@ -1585,13 +1559,11 @@ class PageSettings(GlassCard):
 
     # [수정] 텍스트 키보드 (IO 이름용)
     def _open_keyboard(self, line_edit, title):
-        try:
-            from widgets.touch_keyboard import TouchKeyboard
-            dlg = TouchKeyboard(title, parent=self)
-            if dlg.exec() == QDialog.Accepted:
-                line_edit.setText(dlg.get_text())
-        except:
-            pass
+        if not TouchKeyboard:
+            return
+        dlg = TouchKeyboard(title, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            line_edit.setText(dlg.get_text())
 
     def _on_home_toggle_clicked(self):
         is_on = self.btn_home_toggle.isChecked()
@@ -1719,13 +1691,9 @@ class PageSettings(GlassCard):
         # 입력 이름을 settings.json에 저장
         try:
             path = _get_settings_path()
-            settings = {}
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
+            settings = load_json(path) or {}
             settings["io_input_names"] = new_inputs
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
+            save_json(path, settings)
             print("[Settings] IO 입력 이름 저장 완료")
         except Exception as e:
             print(f"[Settings] IO 입력 이름 저장 실패: {e}")
@@ -1825,22 +1793,21 @@ class PageSettings(GlassCard):
 
     def _save_plc_settings(self, ip, port):
         try:
-            settings = {}; path = _get_settings_path()
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f: settings = json.load(f)
-            settings["plc_ip"] = ip; settings["plc_port"] = port
-            with open(path, 'w', encoding='utf-8') as f: json.dump(settings, f, indent=4)
-        except Exception as e: print(f"Settings Save Error: {e}")
+            path = _get_settings_path()
+            settings = load_json(path) or {}
+            settings["plc_ip"] = ip
+            settings["plc_port"] = port
+            save_json(path, settings)
+        except Exception as e:
+            print(f"Settings Save Error: {e}")
 
     def _load_plc_settings(self):
         try:
-            path = _get_settings_path()
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-                    self.edit_ip.setText(settings.get("plc_ip", "192.168.0.10"))
-                    self.edit_port.setText(settings.get("plc_port", "9094"))
-        except: pass
+            settings = load_json(_get_settings_path()) or {}
+            self.edit_ip.setText(settings.get("plc_ip", "192.168.0.10"))
+            self.edit_port.setText(settings.get("plc_port", "9094"))
+        except Exception as e:
+            print(f"[Settings] PLC 설정 로드 실패: {e}")
     
     # =========================================================
     # ★ [신규] 축 설정 저장/로드 (settings.json)
@@ -1853,20 +1820,9 @@ class PageSettings(GlassCard):
         """
         try:
             path = _get_settings_path()
-            settings = {}
-            
-            # 기존 설정 로드
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-            
-            # 축 설정 저장
+            settings = load_json(path) or {}
             settings["axis_uses"] = axis_uses_list
-            
-            # 파일에 저장
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
-            
+            save_json(path, settings)
             print(f"[Settings] 축 설정 저장 완료: {axis_uses_list}")
             
         except Exception as e:
@@ -1973,13 +1929,9 @@ class PageSettings(GlassCard):
         groups, mandatory, exclusive = _load()
         dlg = InterlockDialog(groups, mandatory, exclusive, _get_mode_name, _GROUP_COLORS, parent=self)
         if dlg.exec() == QDialog.Accepted:
-            try:
-                with open(_get_settings_path(), "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                data = {}
+            path = _get_settings_path()
+            data = load_json(path) or {}
             data["interlock_groups"] = dlg.get_groups()
             data["interlock_mandatory"] = dlg.get_mandatory()
             data["interlock_exclusive"] = dlg.get_exclusive()
-            with open(_get_settings_path(), "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            save_json(path, data)

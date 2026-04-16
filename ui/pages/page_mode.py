@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from utils.json_utils import load_json, save_json
 from PySide6.QtCore import Qt, QTimer, Signal
 from utils.paths import get_settings_path as _get_settings_path
 from PySide6.QtWidgets import (
@@ -340,16 +341,11 @@ class PageMode(GlassCard):
 
     def _save_interlock_groups(self):
         try:
-            try:
-                with open(self._SETTINGS_PATH, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                data = {}
+            data = load_json(self._SETTINGS_PATH) or {}
             data["interlock_groups"] = self.interlock_groups
             data["interlock_mandatory"] = self.interlock_mandatory
             data["interlock_exclusive"] = self.interlock_exclusive
-            with open(self._SETTINGS_PATH, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            save_json(self._SETTINGS_PATH, data)
         except Exception as e:
             print(f"[인터록] 저장 실패: {e}")
 

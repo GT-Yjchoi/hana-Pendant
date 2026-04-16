@@ -382,7 +382,8 @@ class PagePosition(GlassCard):
                     is_used = bool((use_mask >> i) & 1)
                     for w in widgets:
                         w.setVisible(is_used)
-        except: pass
+        except Exception as e:
+            print(f"[Position] 축 표시 갱신 실패: {e}")
 
     def _refresh_ui(self):
         self.seq_selector.blockSignals(True)
@@ -455,18 +456,30 @@ class PagePosition(GlassCard):
             self._highlight_step(-1)
 
     def _highlight_step(self, step_idx):
-        """preview_list에서 현재 실행 중인 스텝을 하이라이트"""
-        if getattr(self, '_last_highlighted_step', None) == step_idx:
-            return
-        self._last_highlighted_step = step_idx
+        """preview_list에서 현재 실행 중인 스텝을 하이라이트.
+        step_idx는 PLC 기준(COMMENT 제외) 인덱스이므로 리스트 행으로 변환한다."""
+        list_row = -1
+        if step_idx >= 0:
+            n = 0
+            for i, s in enumerate(self.sequences.get(self.current_seq_key, [])):
+                if s.get("type") == "COMMENT":
+                    continue
+                if n == step_idx:
+                    list_row = i
+                    break
+                n += 1
 
-        self._step_delegate.highlighted_row = step_idx
+        if getattr(self, '_last_highlighted_step', None) == list_row:
+            return
+        self._last_highlighted_step = list_row
+
+        self._step_delegate.highlighted_row = list_row
         self.preview_list.viewport().update()
 
         # 자동 스크롤: 현재 스텝이 보이도록
-        if 0 <= step_idx < self.preview_list.count():
+        if 0 <= list_row < self.preview_list.count():
             self.preview_list.scrollToItem(
-                self.preview_list.item(step_idx),
+                self.preview_list.item(list_row),
                 QListWidget.PositionAtCenter
             )
 
@@ -554,8 +567,15 @@ class PagePosition(GlassCard):
         self._last_highlighted_step = None  # 리스트 갱신 시 하이라이트 초기화
         self.preview_list.clear()
         current_steps = self.sequences.get(self.current_seq_key, [])
-        for i, step in enumerate(current_steps):
+        step_num = 0
+        for step in current_steps:
             stype = step.get("type", "")
+            if stype == "COMMENT":
+                item = QListWidgetItem(f"// {step.get('text', '')}")
+                item.setForeground(QBrush(QColor("#FFD700")))
+                self.preview_list.addItem(item)
+                continue
+            step_num += 1
             name = step.get("name", "Unknown")
             if stype == "POS":
                 p_name = step.get("point_name", "")
@@ -563,7 +583,7 @@ class PagePosition(GlassCard):
             elif stype == "CALL":
                 tgt = step.get("target_seq", "")
                 name = f"{name} -> {tgt}"
-            self.preview_list.addItem(f"[{i+1:02d}] {name}")
+            self.preview_list.addItem(f"[{step_num:02d}] {name}")
 
     def _on_prev_point(self):
         idx = self.point_combo.currentIndex()
@@ -637,7 +657,8 @@ class PagePosition(GlassCard):
                     target_addr = base_addr + 18 + row_idx
                     send_val = int(new_val)
                     self.plc_client.write_words(0x09, target_addr, [send_val])
-            except: pass
+            except Exception as e:
+                print(f"[Position] PLC 시퀀스 값 전송 실패: {e}")
 
         self._on_combo_changed(self.point_combo.currentIndex())
         self.sig_sequence_changed.emit()
@@ -674,7 +695,8 @@ class PagePosition(GlassCard):
                     target_addr = base_addr + 2 + (i * 2)
                     send_val = int(val * 1000)
                     self.plc_client.write_dint(0x09, target_addr, send_val)
-            except: pass
+            except Exception as e:
+                print(f"[Position] PLC 포지션 값 전송 실패: {e}")
 
         self._on_combo_changed(self.point_combo.currentIndex())
         self.sig_sequence_changed.emit()

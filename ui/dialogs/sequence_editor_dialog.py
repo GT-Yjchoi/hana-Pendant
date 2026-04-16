@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QWidget, QListWidget, QListWidgetItem, QStackedWidget,
     QTabWidget, QApplication, QMessageBox, QScroller, QScrollerProperties
 )
-from PySide6.QtGui import QScreen
+from PySide6.QtGui import QScreen, QColor
 
 try:
     from ui.widgets.custom_inputs import ClickableLineEdit, TouchComboBox
@@ -286,6 +286,11 @@ class SequenceEditorDialog(QDialog):
             btn.setStyleSheet(f"border: 2px solid {col}; color: {col}; font-weight: bold;")
             btn.clicked.connect(lambda _, c=cmd: self._add_new_step(c))
             add_box.addWidget(btn)
+        btn_comment = QPushButton("CMT")
+        btn_comment.setMinimumHeight(45)
+        btn_comment.setStyleSheet("border: 2px solid #FFD700; color: #FFD700; font-weight: bold;")
+        btn_comment.clicked.connect(self._add_comment)
+        add_box.addWidget(btn_comment)
         left_box.addLayout(add_box)
         
         edit_box = QHBoxLayout()
@@ -333,6 +338,31 @@ class SequenceEditorDialog(QDialog):
         else:
             self.stack.addWidget(QLabel("UI 로드 실패 (Import Error)"))
 
+        # 코멘트 편집 패널 (index 6)
+        comment_widget = QWidget()
+        comment_widget.setStyleSheet("background: transparent;")
+        comment_layout = QVBoxLayout(comment_widget)
+        comment_layout.setContentsMargins(0, 0, 0, 0)
+        comment_layout.setSpacing(12)
+        lbl_comment_title = QLabel("// 코멘트")
+        lbl_comment_title.setStyleSheet("color: #FFD700; font-size: 16px; font-weight: bold;")
+        comment_layout.addWidget(lbl_comment_title)
+        self.lbl_comment_text = QLabel("")
+        self.lbl_comment_text.setWordWrap(True)
+        self.lbl_comment_text.setStyleSheet(
+            "color: #FFD700; font-size: 15px; "
+            "background: rgba(255,215,0,0.08); "
+            "border: 1px solid #FFD700; border-radius: 6px; padding: 10px;"
+        )
+        comment_layout.addWidget(self.lbl_comment_text)
+        btn_edit_comment = QPushButton("코멘트 편집")
+        btn_edit_comment.setMinimumHeight(45)
+        btn_edit_comment.setStyleSheet("border: 1px solid #FFD700; color: #FFD700;")
+        btn_edit_comment.clicked.connect(self._edit_comment_text)
+        comment_layout.addWidget(btn_edit_comment)
+        comment_layout.addStretch()
+        self.stack.addWidget(comment_widget)
+
         right_box.addWidget(self.stack)
         content.addWidget(right_widget, 6)
         
@@ -368,7 +398,12 @@ class SequenceEditorDialog(QDialog):
         
         type_code = data.get("type", "")
         # self.edit_step_name.setText(data.get("name", "")) # <-- 삭제됨
-        
+
+        if type_code == "COMMENT":
+            self.lbl_comment_text.setText(data.get("text", ""))
+            self.stack.setCurrentIndex(6)
+            return
+
         idx_map = {"POS": 1, "OUT": 2, "IN": 2, "TMR": 3, "JMP": 4, "CALL": 5}
         self.stack.setCurrentIndex(idx_map.get(type_code, 0))
 
@@ -537,7 +572,15 @@ class SequenceEditorDialog(QDialog):
         elif type_code == "JMP":
             self.jmp_target_combo.blockSignals(True)
             self.jmp_target_combo.clear()
-            self.jmp_target_combo.addItems([f"[{i+1:02d}] {s['name']}" for i, s in enumerate(self.sequences[self.current_seq_key])])
+            jmp_items = []
+            _jmp_step_num = 0
+            for _s in self.sequences[self.current_seq_key]:
+                if _s.get("type") == "COMMENT":
+                    jmp_items.append(f"// {_s.get('text', '')}")
+                else:
+                    _jmp_step_num += 1
+                    jmp_items.append(f"[{_jmp_step_num:02d}] {_s.get('name', '')}")
+            self.jmp_target_combo.addItems(jmp_items)
             target_idx = data.get("target_idx", 0)
             self.jmp_target_combo.setCurrentIndex(target_idx)
             self.jmp_target_combo.blockSignals(False)
@@ -646,7 +689,7 @@ class SequenceEditorDialog(QDialog):
                 p_name = self.active_step_data.get("point_name", "")
                 if p_name:
                     label = f"{text}  ({p_name})"
-            item.setText(f"[{self.step_list.row(item)+1:02d}] {label}")
+            item.setText(f"[{self._step_num_for_row(self.step_list.row(item)):02d}] {label}")
 
     def _on_point_combo_changed(self, idx):
         pass 
@@ -733,7 +776,7 @@ class SequenceEditorDialog(QDialog):
             item = self.step_list.currentItem()
             if item:
                 row = self.step_list.row(item)
-                item.setText(f"[{row+1:02d}] {selected}")
+                item.setText(f"[{self._step_num_for_row(row):02d}] {selected}")
 
     def _add_timer_to_library(self):
         """타이머 라이브러리에 새 타이머를 추가하고 현재 스텝에 적용"""
@@ -786,7 +829,7 @@ class SequenceEditorDialog(QDialog):
             item = self.step_list.currentItem()
             if item:
                 row = self.step_list.row(item)
-                item.setText(f"[{row+1:02d}] {timer_name}")
+                item.setText(f"[{self._step_num_for_row(row):02d}] {timer_name}")
 
     def _on_tmr_simple_time_clicked(self):
         """단순 대기 모드 - 타이머 시간 편집"""
@@ -935,7 +978,14 @@ class SequenceEditorDialog(QDialog):
     def _init_tabs(self): pass
     def _on_seq_tab_changed(self, index): pass
 
-    def _make_step_label(self, i, step):
+    def _step_num_for_row(self, row):
+        """COMMENT 제외 스텝 번호(1-based). COMMENT 행이면 직전 번호 반환."""
+        steps = self.sequences.get(self.current_seq_key, [])
+        return sum(1 for s in steps[:row+1] if s.get("type") != "COMMENT")
+
+    def _make_step_label(self, step_num, step):
+        if step.get("type") == "COMMENT":
+            return f"// {step.get('text', '')}"
         label = step.get('name', '')
         if step.get("type") == "POS":
             p_name = step.get("point_name", "")
@@ -945,11 +995,16 @@ class SequenceEditorDialog(QDialog):
             t_seq = step.get("target_seq", "")
             if t_seq:
                 label = f"{label}  ({t_seq})"
-        return f"[{i+1:02d}] {label}"
+        return f"[{step_num:02d}] {label}"
 
     def _load_step_list_from_memory(self):
         current_list = self.sequences.get(self.current_seq_key, [])
-        new_labels = [self._make_step_label(i, s) for i, s in enumerate(current_list)]
+        new_labels = []
+        step_num = 0
+        for s in current_list:
+            if s.get("type") != "COMMENT":
+                step_num += 1
+            new_labels.append(self._make_step_label(step_num, s))
         cur_count = self.step_list.count()
         new_count = len(new_labels)
 
@@ -960,7 +1015,11 @@ class SequenceEditorDialog(QDialog):
         if not same:
             self.step_list.blockSignals(True)
             self.step_list.clear()
-            self.step_list.addItems(new_labels)
+            for label, step in zip(new_labels, current_list):
+                item = QListWidgetItem(label)
+                if step.get("type") == "COMMENT":
+                    item.setForeground(QColor("#FFD700"))
+                self.step_list.addItem(item)
             self.step_list.blockSignals(False)
 
         self.active_step_data = None
@@ -985,6 +1044,55 @@ class SequenceEditorDialog(QDialog):
         while n in used:
             n += 1
         return f"{base_name}_{n}"
+
+    def _add_comment(self):
+        text = self._prompt_comment_text("")
+        if text is None:
+            return
+        data = {"type": "COMMENT", "text": text}
+        current_row = self.step_list.currentRow()
+        if current_row >= 0:
+            insert_pos = current_row + 1
+            self._fix_jmp_targets("insert", insert_pos)
+            self.sequences[self.current_seq_key].insert(insert_pos, data)
+            new_row = insert_pos
+        else:
+            self.sequences[self.current_seq_key].append(data)
+            new_row = self.step_list.count()
+        self._load_step_list_from_memory()
+        self.step_list.setCurrentRow(new_row)
+        self._on_item_clicked(self.step_list.item(new_row))
+
+    def _edit_comment_text(self):
+        if self.active_step_data is None or self.active_step_data.get("type") != "COMMENT":
+            return
+        current = self.active_step_data.get("text", "")
+        text = self._prompt_comment_text(current)
+        if text is None:
+            return
+        self.active_step_data["text"] = text
+        self.lbl_comment_text.setText(text)
+        item = self.step_list.currentItem()
+        if item:
+            item.setText(f"// {text}")
+
+    def _prompt_comment_text(self, current=""):
+        """코멘트 텍스트 입력 팝업. 취소 시 None 반환."""
+        if TouchKeyboard:
+            kb = TouchKeyboard("코멘트 입력", parent=self)
+            if hasattr(kb, 'set_text'):
+                kb.set_text(current)
+            if hasattr(kb, 'set_language'):
+                kb.set_language("KO")
+            if kb.exec() == QDialog.Accepted:
+                return kb.get_text().strip()
+            return None
+        elif RenameDialog:
+            dlg = RenameDialog(current, [], self)
+            if dlg.exec() == QDialog.Accepted:
+                return dlg.get_new_name()
+            return None
+        return ""
 
     def _add_new_step(self, type_code):
         final_name = self._next_step_name(type_code)
@@ -1110,15 +1218,26 @@ class SequenceEditorDialog(QDialog):
         success = True
         for seq_name, slot_id in seq_map.items():
             raw_steps = self.sequences.get(seq_name, [])
+
+            # COMMENT 제외 인덱스 재매핑 (list_idx → plc_step_idx)
+            plc_idx_map = {}
+            plc_idx = 0
+            for orig_idx, step in enumerate(raw_steps):
+                if step.get("type") != "COMMENT":
+                    plc_idx_map[orig_idx] = plc_idx
+                    plc_idx += 1
+
             plc_steps = []
-            for step in raw_steps:
+            for orig_idx, step in enumerate(raw_steps):
+                if step.get("type") == "COMMENT":
+                    continue  # 전송 제외
                 s_data = copy.deepcopy(step)
                 if s_data.get("type") == "POS":
                     s_data["point_index"] = point_map.get(s_data.get("point_name"), 0)
                 elif s_data.get("type") == "CALL":
                     s_data["sequence_id"] = seq_map.get(s_data.get("target_seq"), 0)
                 elif s_data.get("type") == "JMP":
-                    s_data["target_step"] = s_data.get("target_idx", 0)
+                    s_data["target_step"] = plc_idx_map.get(s_data.get("target_idx", 0), 0)
                 plc_steps.append(s_data)
             if not self.plc_client.send_sequence_to_slot(slot_id, plc_steps): success = False
         if not self.plc_client.send_all_points(self.points_library, sorted_p_names): success = False
@@ -1137,13 +1256,16 @@ class SequenceEditorDialog(QDialog):
     def _open_step_name_keyboard(self):
         if self.active_step_data is None: return
         if RenameDialog:
-            all_names = [s['name'] for s in self.sequences[self.current_seq_key]]
+            all_names = [s.get('name', '') for s in self.sequences[self.current_seq_key] if s.get('type') != 'COMMENT']
             dlg = RenameDialog(self.active_step_data["name"], all_names, self)
             if dlg.exec() == QDialog.Accepted:
                 self._on_step_name_changed(dlg.get_new_name())
     
     def _on_item_double_clicked(self, item):
-        self._open_step_name_keyboard()
+        if self.active_step_data and self.active_step_data.get("type") == "COMMENT":
+            self._edit_comment_text()
+        else:
+            self._open_step_name_keyboard()
     
     def _on_new_point_clicked(self):
         if NewPointDialog:
@@ -1291,7 +1413,7 @@ class SequenceEditorDialog(QDialog):
                     if item:
                         name = self.active_step_data.get("name", "")
                         row = self.step_list.row(item)
-                        item.setText(f"[{row+1:02d}] {name}  ({selected})")
+                        item.setText(f"[{self._step_num_for_row(row):02d}] {name}  ({selected})")
 
                     coords = self.points_library.get(selected, {}).get("coords", [0.0]*8)
                     for i in range(8):
@@ -1584,28 +1706,87 @@ class SequenceEditorDialog(QDialog):
                 print(f"[시퀀스 편집기] JMP 모드 선택: {selected} (mode_idx={mode_idx})")
     
     def _open_jmp_target_selector(self):
-        """JMP 타겟 스텝 선택 팝업"""
+        """JMP 타겟 스텝 선택 팝업 (리스트형, COMMENT 제외, 터치 스크롤)"""
         if not hasattr(self, 'jmp_target_combo'): return
-        
-        # 현재 시퀀스의 스텝 리스트
+
         steps = self.sequences.get(self.current_seq_key, [])
-        items = [f"[{i+1:02d}] {s.get('name', 'Unnamed')}" for i, s in enumerate(steps)]
-        
-        if not items:
-            items = ["(스텝 없음)"]
-        
-        from ui.dialogs.sequence_utils import CardListDialog
-        current = self.jmp_target_combo.currentText() if self.jmp_target_combo.currentIndex() >= 0 else None
-        
-        dlg = CardListDialog(items, current, " 점프할 스텝을 선택하세요", columns=3, parent=self)
+
+        # COMMENT 제외 (list_idx, label) 수집
+        entries = []
+        step_num = 0
+        for i, s in enumerate(steps):
+            if s.get("type") == "COMMENT":
+                continue
+            step_num += 1
+            name = s.get('name', 'Unnamed')
+            stype = s.get("type")
+            if stype == "POS":
+                p_name = s.get('point_name', '')
+                label = f"[{step_num:02d}] {name}  ({p_name})" if p_name else f"[{step_num:02d}] {name}"
+            elif stype == "CALL":
+                t_seq = s.get('target_seq', '')
+                label = f"[{step_num:02d}] {name}  ({t_seq})" if t_seq else f"[{step_num:02d}] {name}"
+            else:
+                label = f"[{step_num:02d}] {name}"
+            entries.append((i, label))
+
+        from ui.dialogs.sequence_utils import OverlayDialog
+        current_list_idx = self.jmp_target_combo.currentIndex()
+
+        dlg = OverlayDialog(self)
+        dlg.setFixedContentSize(500, 600)
+        dlg.layout.addWidget(QLabel(" 점프할 스텝을 선택하세요"))
+
+        list_widget = QListWidget()
+        list_widget.setStyleSheet(
+            "QListWidget { background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15);"
+            " border-radius: 8px; color: #EEE; font-size: 18px; padding: 6px; outline: none; }"
+            " QListWidget::item { height: 50px; padding-left: 12px;"
+            " border-bottom: 1px solid rgba(255,255,255,0.05); }"
+            " QListWidget::item:selected { background: rgba(70, 140, 255, 0.4);"
+            " border: 1px solid #468CFF; color: white; }"
+        )
+        list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        list_widget.setFocusPolicy(Qt.NoFocus)
+
+        if not entries:
+            empty = QListWidgetItem("(스텝 없음)")
+            empty.setFlags(empty.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEnabled)
+            list_widget.addItem(empty)
+        else:
+            for list_idx, label in entries:
+                item = QListWidgetItem(label)
+                item.setData(Qt.UserRole, list_idx)
+                list_widget.addItem(item)
+                if list_idx == current_list_idx:
+                    list_widget.setCurrentItem(item)
+
+        QScroller.grabGesture(list_widget.viewport(), QScroller.TouchGesture)
+        QScroller.grabGesture(list_widget.viewport(), QScroller.LeftMouseButtonGesture)
+        dlg.layout.addWidget(list_widget, 1)
+
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton("취소")
+        btn_ok = QPushButton("선택")
+        btn_cancel.setFixedHeight(50); btn_ok.setFixedHeight(50)
+        btn_cancel.setStyleSheet("QPushButton { background: rgba(255,255,255,0.1); border: 1px solid #888;"
+                                 " color: white; border-radius: 8px; font-size: 16px; }")
+        btn_ok.setStyleSheet("QPushButton { background: rgba(70,140,255,0.4); border: 1px solid #468CFF;"
+                             " color: white; border-radius: 8px; font-size: 16px; font-weight: bold; }")
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_ok.clicked.connect(dlg.accept)
+        list_widget.itemDoubleClicked.connect(lambda _: dlg.accept())
+        btn_row.addWidget(btn_cancel); btn_row.addWidget(btn_ok)
+        dlg.layout.addLayout(btn_row)
+
         if dlg.exec() == QDialog.Accepted:
-            selected = dlg.get_selected()
-            if selected and selected != "(스텝 없음)":
-                idx = items.index(selected)
-                self.jmp_target_combo.setCurrentIndex(idx)
-                # 버튼 텍스트도 업데이트
-                if hasattr(self, 'jmp_target_btn'):
-                    self.jmp_target_btn.setText(selected)
+            item = list_widget.currentItem()
+            if item is None: return
+            list_idx = item.data(Qt.UserRole)
+            if list_idx is None: return
+            self.jmp_target_combo.setCurrentIndex(list_idx)
+            if hasattr(self, 'jmp_target_btn'):
+                self.jmp_target_btn.setText(self.jmp_target_combo.currentText())
     
     def _open_timeout_alarm_selector(self):
         """IN 타임아웃 알람 번호 선택 팝업"""
@@ -1860,8 +2041,8 @@ class SequenceEditorDialog(QDialog):
                     for cfg in valve_config:
                         if cfg.get("index", -1) == bit_index and cfg.get("enabled", True):
                             return cfg.get("name", f"밸브 {bit_index+1}")
-        except:
-            pass
+        except Exception as e:
+            print(f"[SequenceEditor] 밸브 이름 조회 실패: {e}")
         
         # 기본값
         return f"밸브 {bit_index+1}"
@@ -1917,7 +2098,8 @@ class SequenceEditorDialog(QDialog):
                 return f"[{mode_index:02d}] {default_names[mode_index]}"
             else:
                 return f"[{mode_index:02d}] User Mode {mode_index - 34 + 1}"
-        except:
+        except Exception as e:
+            print(f"[SequenceEditor] 모드 이름 조회 실패: {e}")
             if mode_index < len(default_names):
                 return f"[{mode_index:02d}] {default_names[mode_index]}"
             else:

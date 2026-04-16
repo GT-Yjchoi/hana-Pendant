@@ -87,7 +87,7 @@ class PLCClient(QObject):
         if self.sock:
             try:
                 self.sock.close()
-            except:
+            except OSError:
                 pass
         self.sock = None
         self.is_connected = False
@@ -115,7 +115,7 @@ class PLCClient(QObject):
                 data_part = struct.pack('<H', self.heartbeat_value)
                 self._send_packet_raw(body + data_part)
                 # print(f"[하트비트] DT214 = {self.heartbeat_value}")  # 필요시 주석 해제
-            except:
+            except OSError:
                 pass  # 하트비트 전송 실패는 무시
             finally:
                 self._heartbeat_skip = False  # 플래그 해제
@@ -140,7 +140,7 @@ class PLCClient(QObject):
             if len(response) > 12: 
                 return response[12:]
             return response
-        except:
+        except OSError:
             return None
 
     def send_packet(self, body):
@@ -197,7 +197,7 @@ class PLCClient(QObject):
         for val in values:
             try:
                 clean_values.append(int(val) & 0xFFFF)
-            except:
+            except (TypeError, ValueError):
                 clean_values.append(0)
         
         header_part = struct.pack('<BBBHH', 0x80, 0x50, area_code, start_addr, len(clean_values))
@@ -372,8 +372,10 @@ class PLCClient(QObject):
                 break
             try:
                 if self.sock:
-                    try: self.sock.close()
-                    except: pass
+                    try:
+                        self.sock.close()
+                    except OSError:
+                        pass
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.settimeout(5.0)
                 self.sock.connect((self._last_ip, int(self._last_port)))

@@ -1,16 +1,20 @@
 {
     "version": 1.5,
-    "saved_at": "2026-04-16 13:25:40.413960",
+    "saved_at": "2026-04-16 22:53:36.045495",
     "sequence": {
         "Main": [
             {
                 "type": "JMP",
                 "name": "자동조건",
-                "target_idx": 3,
+                "target_idx": 4,
                 "condition": true,
                 "cond_type": "BIT",
                 "cond_value": 131,
                 "cond_on": true
+            },
+            {
+                "type": "COMMENT",
+                "text": "코멘트"
             },
             {
                 "type": "CALL",
@@ -1955,10 +1959,6 @@
                 100.0,
                 100.0,
                 100.0
-            ],
-            "visible_mode": [
-                4,
-                5
             ]
         },
         "2포인트 개방 상승위치": {
