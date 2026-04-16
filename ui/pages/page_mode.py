@@ -1,6 +1,8 @@
 import json
 import os
+import sys
 from PySide6.QtCore import Qt, QTimer, Signal
+from utils.paths import get_settings_path as _get_settings_path
 from PySide6.QtWidgets import (
     QGridLayout, QPushButton, QSizePolicy,
     QScrollArea, QWidget, QVBoxLayout, QScroller, QLabel,
@@ -304,7 +306,7 @@ class PageMode(GlassCard):
     # =========================================================
     # 인터록 설정
     # =========================================================
-    _SETTINGS_PATH = "settings.json"
+    _SETTINGS_PATH = _get_settings_path()
     # 그룹별 색상 (그룹 1~8)
     _GROUP_COLORS = [
         None,               # 0 = 없음

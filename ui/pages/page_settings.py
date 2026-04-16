@@ -1,6 +1,8 @@
 import json
 import os
 import struct
+import sys
+from utils.paths import get_settings_path as _get_settings_path
 from PySide6.QtCore import Qt, Signal, QEventLoop
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
@@ -840,7 +842,7 @@ class PageSettings(GlassCard):
     def _save_valve_config_silent(self):
         """팝업 없이 밸브 설정을 settings.json에 저장"""
         try:
-            path = "settings.json"
+            path = _get_settings_path()
             settings = {}
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
@@ -856,7 +858,7 @@ class PageSettings(GlassCard):
     def _save_valve_config(self):
         """밸브 설정을 settings.json에 저장"""
         try:
-            path = "settings.json"
+            path = _get_settings_path()
             settings = {}
 
             # 기존 설정 로드
@@ -889,7 +891,7 @@ class PageSettings(GlassCard):
     def _load_valve_config(self):
         """settings.json에서 밸브 설정 로드"""
         try:
-            path = "settings.json"
+            path = _get_settings_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
@@ -1716,7 +1718,7 @@ class PageSettings(GlassCard):
 
         # 입력 이름을 settings.json에 저장
         try:
-            path = "settings.json"
+            path = _get_settings_path()
             settings = {}
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
@@ -1737,7 +1739,7 @@ class PageSettings(GlassCard):
         from utils.io_manager import DEFAULT_INPUTS
         try:
             saved = []
-            path = "settings.json"
+            path = _get_settings_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
@@ -1823,7 +1825,7 @@ class PageSettings(GlassCard):
 
     def _save_plc_settings(self, ip, port):
         try:
-            settings = {}; path = "settings.json"
+            settings = {}; path = _get_settings_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f: settings = json.load(f)
             settings["plc_ip"] = ip; settings["plc_port"] = port
@@ -1832,7 +1834,7 @@ class PageSettings(GlassCard):
 
     def _load_plc_settings(self):
         try:
-            path = "settings.json"
+            path = _get_settings_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
@@ -1850,7 +1852,7 @@ class PageSettings(GlassCard):
         axis_uses_list: [True, True, True, False, False, ...] (8개)
         """
         try:
-            path = "settings.json"
+            path = _get_settings_path()
             settings = {}
             
             # 기존 설정 로드
@@ -1876,7 +1878,7 @@ class PageSettings(GlassCard):
         반환: [True, True, True, False, ...] 또는 None
         """
         try:
-            path = "settings.json"
+            path = _get_settings_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
@@ -1939,7 +1941,7 @@ class PageSettings(GlassCard):
 
         def _load():
             try:
-                with open("settings.json", "r", encoding="utf-8") as f:
+                with open(_get_settings_path(), "r", encoding="utf-8") as f:
                     d = json.load(f)
                 g = d.get("interlock_groups", [0]*TOTAL_SLOTS)
                 m = d.get("interlock_mandatory", [False]*9)
@@ -1972,12 +1974,12 @@ class PageSettings(GlassCard):
         dlg = InterlockDialog(groups, mandatory, exclusive, _get_mode_name, _GROUP_COLORS, parent=self)
         if dlg.exec() == QDialog.Accepted:
             try:
-                with open("settings.json", "r", encoding="utf-8") as f:
+                with open(_get_settings_path(), "r", encoding="utf-8") as f:
                     data = json.load(f)
             except Exception:
                 data = {}
             data["interlock_groups"] = dlg.get_groups()
             data["interlock_mandatory"] = dlg.get_mandatory()
             data["interlock_exclusive"] = dlg.get_exclusive()
-            with open("settings.json", "w", encoding="utf-8") as f:
+            with open(_get_settings_path(), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

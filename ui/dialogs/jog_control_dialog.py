@@ -1,5 +1,6 @@
 import os, json
 from PySide6.QtCore import Qt, Signal, QEventLoop
+from utils.paths import get_settings_path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFrame, QGridLayout, QLabel, QButtonGroup, QScrollArea, QScroller
@@ -181,7 +182,7 @@ class JogControlDialog(QWidget):
     def _load_jog_valves(self):
         """settings.json에서 jog_valve=True인 밸브를 jog_order 순으로 최대 6개 반환"""
         try:
-            path = "settings.json"
+            path = get_settings_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     s = json.load(f)
@@ -280,8 +281,9 @@ class JogControlDialog(QWidget):
         """PLC 연결 전 settings.json으로 초기 활성화 여부 결정"""
         import os, json
         try:
-            if os.path.exists("settings.json"):
-                with open("settings.json", "r", encoding="utf-8") as f:
+            path = get_settings_path()
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
                     s = json.load(f)
                 axis_uses = s.get("axis_uses", [True] * 8)
                 use_y2 = axis_uses[3] if len(axis_uses) > 3 else True

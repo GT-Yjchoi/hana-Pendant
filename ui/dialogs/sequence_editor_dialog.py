@@ -1,6 +1,9 @@
 import copy
 import traceback
+import os
+import json
 from PySide6.QtCore import Qt, QPoint
+from utils.paths import get_settings_path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QWidget, QListWidget, QListWidgetItem, QStackedWidget,
@@ -1847,10 +1850,7 @@ class SequenceEditorDialog(QDialog):
             return f" M{bit_index-100:02d} (내부비트)"
         
         try:
-            import os
-            import json
-            
-            path = "settings.json"
+            path = get_settings_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
@@ -1946,10 +1946,8 @@ class SequenceEditorDialog(QDialog):
         반환: [True, True, True, False, ...] (8개)
         """
         try:
-            import os
-            path = "settings.json"
+            path = get_settings_path()
             if os.path.exists(path):
-                import json
                 with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
                     axis_uses = settings.get("axis_uses", None)

@@ -1,6 +1,7 @@
 import json
 import os
 from PySide6.QtCore import Qt, Signal
+from utils.paths import get_settings_path
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGraphicsDropShadowEffect
 
 # ============================================================
@@ -33,7 +34,7 @@ SEQUENCE_ALARMS = {
     # 예시: 6: "리프터 상승 타임아웃",
 }
 
-_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "settings.json")
+_SETTINGS_PATH = get_settings_path()
 
 
 def load_sequence_alarms(settings_path=None):

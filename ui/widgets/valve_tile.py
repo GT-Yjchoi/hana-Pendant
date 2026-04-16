@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 )
 import json
 import os
+from utils.paths import get_settings_path
 
 # [스타일] 스크롤바 디자인 (터치 친화적)
 SCROLLBAR_STYLE = """
@@ -80,7 +81,7 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
     def _check_config_changed(self):
         """settings.json 파일이 변경되었는지 확인"""
         try:
-            path = "settings.json"
+            path = get_settings_path()
             if os.path.exists(path):
                 current_mtime = os.path.getmtime(path)
                 return current_mtime > self._last_config_mtime
@@ -91,7 +92,7 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
     def _update_config_mtime(self):
         """settings.json 수정 시간 업데이트"""
         try:
-            path = "settings.json"
+            path = get_settings_path()
             if os.path.exists(path):
                 self._last_config_mtime = os.path.getmtime(path)
         except:
@@ -100,7 +101,7 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
     def _load_and_create_valves(self):
         """settings.json에서 밸브 설정을 로드하고 버튼 생성"""
         try:
-            path = "settings.json"
+            path = get_settings_path()
             valve_config = []
             
             if os.path.exists(path):

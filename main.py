@@ -6,6 +6,10 @@ os.environ.setdefault("QT_IM_MODULE", "ibus")
 os.environ.setdefault("GTK_IM_MODULE", "ibus")
 os.environ.setdefault("XMODIFIERS", "@im=ibus")
 
+# 빌드 환경에서 DPI 자동 스케일링으로 인해 하단이 잘리는 것을 방지
+os.environ.setdefault("QT_SCALE_FACTOR", "1")
+os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from ui.main_window import MainWindow
@@ -28,6 +32,13 @@ def main():
     # 5. [MODIFIED] 윈도우 생성 시 PLC 클라이언트 전달
     # (ui/main_window.py의 __init__도 이에 맞춰 수정되어 있어야 합니다)
     window = MainWindow(plc_client)
+
+    # 시스템 패널/태스크바가 앱 위를 가리지 않도록 항상 최상단 유지
+    window.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+
+    # 빌드 환경에서 화면 geometry를 명시적으로 지정해 하단 잘림 방지
+    screen = app.primaryScreen()
+    window.setGeometry(screen.geometry())
     window.showFullScreen()
     
     # 6. [NEW] 프로그램 종료 시 연결 해제

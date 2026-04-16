@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from utils.paths import get_settings_path, get_recipes_dir
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, 
@@ -51,13 +52,6 @@ except ImportError:
     ModeManager = None
 
 
-def get_base_path():
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    else:
-        return os.path.dirname(os.path.abspath(__file__))
-
-
 # ============================================================
 # 시퀀스 팝업 메시지 테이블 (w_SeqPopup 코드 → 제목, 메시지)
 # PLC에서 w_SeqPopup에 아래 코드를 넣으면 해당 팝업이 표시됩니다.
@@ -90,16 +84,12 @@ class MainWindow(QWidget):
         else:
             self.plc_client = PLCClient() 
 
-        self.base_path = get_base_path()
-        if os.path.basename(self.base_path) == 'ui':
-            self.base_path = os.path.dirname(self.base_path)
-            
-        self.settings_file = os.path.join(self.base_path, "settings.json")
-        self.recipes_dir = os.path.join(self.base_path, "recipes")
+        self.settings_file = get_settings_path()
+        self.recipes_dir = get_recipes_dir()
 
         # 메인 레이아웃
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
+        root.setContentsMargins(16, 14, 16, 4)
         root.setSpacing(12)
 
         # ===== 1. Top Bar =====
@@ -247,7 +237,7 @@ class MainWindow(QWidget):
         bottom.setMinimumHeight(70)
         
         b_lay = QHBoxLayout(bottom)
-        b_lay.setContentsMargins(14, 4, 14, 16)
+        b_lay.setContentsMargins(14, 4, 14, 4)
         b_lay.setSpacing(10)
 
         self.nav_buttons = {}

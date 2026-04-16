@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime
+from utils.paths import get_recipes_dir
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
@@ -116,7 +117,7 @@ class PageData(GlassCard):
         self.mode_data = mode_data if mode_data is not None else []
         self.view_order_data = view_order_data if view_order_data is not None else []
         
-        self.save_dir = "recipes"
+        self.save_dir = get_recipes_dir()
         self.current_filename = None
         
         if not os.path.exists(self.save_dir):
