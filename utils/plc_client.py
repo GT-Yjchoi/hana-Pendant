@@ -14,6 +14,7 @@ class PLCClient(QObject):
         self.sock = None
         self.is_connected = False
         self._monitor_running = False
+        self._monitor_thread = None
         self.lock = threading.Lock()
         self._last_ip = None
         self._last_port = None
@@ -91,6 +92,11 @@ class PLCClient(QObject):
                 pass
         self.sock = None
         self.is_connected = False
+        # 모니터링 스레드가 완전히 종료될 때까지 대기 (최대 200ms)
+        # → 스레드가 소멸된 Qt 객체에 시그널을 emit해 segfault 발생하는 것을 방지
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            self._monitor_thread.join(timeout=0.2)
+        self._monitor_thread = None
         self.sig_connected.emit(False)
         print("[PLC] 연결 해제")
 
@@ -393,7 +399,9 @@ class PLCClient(QObject):
             return
         self._monitor_running = True
         print("[PLC] 모니터링 시작 (DT100~DT140, 0.05초 주기)")
-        threading.Thread(target=self._mon_loop, daemon=True).start()
+        t = threading.Thread(target=self._mon_loop, daemon=True)
+        self._monitor_thread = t
+        t.start()
 
     def _mon_loop(self):
         """모니터링 루프 (0.1초 주기)"""
@@ -413,7 +421,7 @@ class PLCClient(QObject):
     def _parse_monitor_data(self, raw):
         """
         모니터링 데이터 파싱
-        raw: DT100~DT141의 Word 배열 (42개)
+        raw: DT100~DT162의 Word 배열 (63개)
         """
         res = {}
         
@@ -451,36 +459,35 @@ class PLCClient(QObject):
         # INT: 현재 실행 중인 스텝 번호
         res['current_step'] = raw[31] if len(raw) > 31 else 0  # DT131
         
-        # ===== 9. 총 취출 횟수 (DT132~133) =====
+        # ===== 9. 서브시퀀스 현재 스텝 (DT132~133) =====
+        # DT132: 서브시퀀스 인덱스 (0=없음, 1~N=sorted 서브시퀀스 순번)
+        # DT133: 해당 서브시퀀스 내 현재 스텝 번호
+        res['sub_seq_idx']  = raw[32] if len(raw) > 32 else 0  # DT132
+        res['sub_step']     = raw[33] if len(raw) > 33 else 0  # DT133
+
+        # ===== 10. 총 취출 횟수 (DT134~135) =====
         # DINT: 완료된 사이클 수
-        if len(raw) > 33:
-            res['total_count'] = raw[32] | (raw[33] << 16)  # DT132-133
+        if len(raw) > 35:
+            res['total_count'] = raw[34] | (raw[35] << 16)  # DT134-135
         else:
             res['total_count'] = 0
-        
-        # ===== 10. 현재 성형 시간 (DT134~135) =====
+
+        # ===== 11. 현재 성형 시간 (DT136~137) =====
         # DINT: 사이클 타임 (0.1초 단위)
-        if len(raw) > 35:
-            v = raw[34] | (raw[35] << 16)
+        if len(raw) > 37:
+            v = raw[36] | (raw[37] << 16)
             res['mold_time'] = v / 10.0  # 0.1초 → 초 변환
         else:
             res['mold_time'] = 0.0
-        
-        # ===== 11. 현재 취출 시간 (DT136~137) =====
+
+        # ===== 12. 현재 취출 시간 (DT138~139) =====
         # DINT: 로봇 동작 타임 (0.1초 단위)
-        if len(raw) > 37:
-            v = raw[36] | (raw[37] << 16)
+        if len(raw) > 39:
+            v = raw[38] | (raw[39] << 16)
             res['takeout_time'] = v / 10.0  # 0.1초 → 초 변환
         else:
             res['takeout_time'] = 0.0
-        
-        # ===== 12. 패킹 현재 횟수 (DT138~140) =====
-        # INT * 3: X, Y, Z축 적재 카운트
-        if len(raw) > 40:
-            res['packing_counts'] = [raw[38], raw[39], raw[40]]  # DT138, 139, 140
-        else:
-            res['packing_counts'] = [0, 0, 0]
-        
+
         # ===== 13. 축 알람 상태 (DT141) + 축별 에러코드 (DT143~DT158) =====
         # DT141: 비트0=1축, 비트1=2축, ... 비트7=8축
         # DT143~158: 축별 에러코드 (DINT, 2워드씩)
@@ -498,11 +505,11 @@ class PLCClient(QObject):
             if len(raw) > idx + 1:
                 res['axis_error_codes'][i] = raw[idx] | (raw[idx + 1] << 16)
 
-        # ===== 14. 시퀀스 팝업 요청 (DT159) =====
+        # ===== 15. 시퀀스 팝업 요청 (DT159) =====
         # 0=없음, 1=입력대기 타임아웃 팝업
         res['seq_popup'] = raw[59] if len(raw) > 59 else 0
 
-        # ===== 15. 작업자 응답 (DT160) =====
+        # ===== 16. 작업자 응답 (DT160) =====
         # 0=대기, 1=계속, 2=정지
         res['popup_response'] = raw[60] if len(raw) > 60 else 0
 

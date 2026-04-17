@@ -59,15 +59,6 @@ except ImportError:
 # 키: 팝업 코드 (WORD, 1~65535)
 # 값: (제목, 메시지) 튜플
 # ============================================================
-SEQ_POPUP_MESSAGES = {
-    1: ("입력 대기 타임아웃",  "입력 신호를 받지 못했습니다.\n계속 대기하시겠습니까?"),
-    2: ("도어 열림 경고",      "도어가 열려 있습니다.\n확인 후 계속하시겠습니까?"),
-    3: ("공압 이상",           "공압이 낮습니다.\n계속하시겠습니까?"),
-    # 여기에 코드와 메시지를 계속 추가하세요.
-    # 예시: 4: ("온도 이상", "온도가 허용 범위를 초과했습니다.\n계속하시겠습니까?"),
-}
-# 딕셔너리에 없는 코드가 오면 표시될 기본 메시지
-SEQ_POPUP_DEFAULT = ("시퀀스 팝업", "작업자 확인이 필요합니다.\n계속하시겠습니까?")
 
 
 class MainWindow(QWidget):
@@ -175,6 +166,9 @@ class MainWindow(QWidget):
             except Exception as e:
                 print(f"[Init] Load error: {e}")
 
+        # settings.json의 point_visibility로 레시피 visible_mode 오버라이드
+        self._apply_point_visibility_from_settings()
+
         if not self.master_sequence_data["Main"]:
              self.master_sequence_data["Main"].append(
                  {"type": "POS", "name": "원점 복귀 (Default)", "point_name": "Home", "coords": [0.0]*8, "speeds": [100]*8, "axes": [True]*8}
@@ -186,6 +180,7 @@ class MainWindow(QWidget):
 
         # ===== 3. Pages =====
         self.stack = QStackedWidget()
+        self.stack.setMinimumHeight(0)
         root.addWidget(self.stack, 1)
 
         self.pages = {}
@@ -417,6 +412,9 @@ class MainWindow(QWidget):
         self.current_recipe_name = filename
         self.top_bar.set_mold_data(filename)
 
+        # 새 레시피 로드 후 settings.json의 point_visibility 오버라이드 적용
+        self._apply_point_visibility_from_settings()
+
         if "mode" in self.pages:
             self.pages["mode"].refresh_ui()
         if "position" in self.pages:
@@ -438,11 +436,36 @@ class MainWindow(QWidget):
     def _on_sequence_updated(self):
         if "timer" in self.pages:
             self.pages["timer"].refresh_grid()
+        self._save_point_visibility_to_settings()
         self._auto_save_data()
 
     def _auto_save_data(self):
         if "data" in self.pages:
             self.pages["data"].auto_save()
+
+    def _apply_point_visibility_from_settings(self):
+        """settings.json의 point_visibility를 master_position_points에 적용 (settings 우선)"""
+        try:
+            data = load_json(self.settings_file) or {}
+            pv = data.get("point_visibility", {})
+            for pt_name, vm in pv.items():
+                if pt_name in self.master_position_points:
+                    self.master_position_points[pt_name]["visible_mode"] = vm
+        except Exception as e:
+            print(f"[Main] point_visibility load error: {e}")
+
+    def _save_point_visibility_to_settings(self):
+        """master_position_points의 visible_mode를 settings.json에 저장"""
+        try:
+            data = load_json(self.settings_file) or {}
+            data["point_visibility"] = {
+                name: pt["visible_mode"]
+                for name, pt in self.master_position_points.items()
+                if "visible_mode" in pt
+            }
+            save_json(self.settings_file, data)
+        except Exception as e:
+            print(f"[Main] point_visibility save error: {e}")
 
     def _save_io_names_to_settings(self):
         try:

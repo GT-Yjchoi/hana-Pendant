@@ -1,5 +1,9 @@
 import sys
 import os
+import faulthandler
+
+# segfault 발생 시 C-level 스택 추적 로그 활성화
+faulthandler.enable()
 
 # Qt ibus 한글 입력 - QApplication 생성 전에 설정해야 적용됨
 os.environ.setdefault("QT_IM_MODULE", "ibus")

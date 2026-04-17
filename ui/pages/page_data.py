@@ -151,7 +151,6 @@ class PageData(GlassCard):
             QListWidget { background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; font-size: 16px; color: #EEE; outline: none; }
             QListWidget::item { height: 45px; padding-left: 15px; border-bottom: 1px solid rgba(255,255,255,0.05); }
             QListWidget::item:selected { background: rgba(70, 140, 255, 0.25); border: 1px solid rgba(70, 140, 255, 0.6); border-radius: 6px; color: white; font-weight: bold; }
-            QListWidget::item:hover { background: rgba(255, 255, 255, 0.05); }
         """)
         self.file_list.itemClicked.connect(self._on_file_selected)
         # 스크롤바 스타일링 (얇게)

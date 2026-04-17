@@ -60,10 +60,6 @@ QWidget {
     border-radius: 10px;
     min-height: 44px;
 }
-.NavBtn:hover {
-    background: rgba(255, 255, 255, 10);
-    color: rgba(233, 238, 243, 230);
-}
 .NavBtn[active="true"] {
     background: rgba(90, 160, 255, 22);
     color: rgba(233, 238, 243, 240);
@@ -81,9 +77,6 @@ QScrollBar::handle:vertical {
     background: rgba(255, 255, 255, 28);
     min-height: 40px;
     border-radius: 6px;
-}
-QScrollBar::handle:vertical:hover {
-    background: rgba(255, 255, 255, 40);
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
@@ -105,10 +98,6 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     font-weight: 800;
     color: rgba(233, 238, 243, 210);
 }
-.ModeTileBtn:hover {
-    background: rgba(255, 255, 255, 18);
-    border: 1px solid rgba(255, 255, 255, 45);
-}
 .ModeTileBtn:pressed {
     background: rgba(90, 160, 255, 18);
     border: 1px solid rgba(90, 160, 255, 70);
@@ -117,10 +106,6 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     background: rgba(90, 160, 255, 24);
     border: 2px solid rgba(90, 160, 255, 140);
     color: rgba(233, 238, 243, 245);
-}
-.ModeTileBtn:checked:hover {
-    background: rgba(90, 160, 255, 30);
-    border: 2px solid rgba(90, 160, 255, 170);
 }
 
 /* ========================================================
@@ -134,10 +119,6 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     color: rgba(233, 238, 243, 210);
     font-weight: 900;
     font-size: 14px;
-}
-.ValveTileBtn:hover {
-    background: rgba(255, 255, 255, 16);
-    border: 1px solid rgba(255, 255, 255, 40);
 }
 .ValveTileBtn:pressed {
     background: rgba(90, 160, 255, 18);
@@ -157,10 +138,6 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     padding: 10px 12px;
     font-weight: 900;
     color: rgba(233, 238, 243, 210);
-}
-.ArmSelectBtn:hover {
-    background: rgba(255, 255, 255, 16);
-    border: 1px solid rgba(255, 255, 255, 40);
 }
 .ArmSelectBtn:checked {
     background: rgba(90, 160, 255, 24);
@@ -195,10 +172,6 @@ QFrame#IOLampOut[on="true"] {
     font-size: 18px;
     color: rgba(233, 238, 243, 245);
 }
-.AutoControlBtn:hover {
-    background: rgba(70, 140, 255, 28);
-    border: 2px solid rgba(70, 140, 255, 120);
-}
 .AutoControlBtn:pressed {
     background: rgba(70, 140, 255, 38);
     border: 2px solid rgba(70, 140, 255, 150);
@@ -206,10 +179,6 @@ QFrame#IOLampOut[on="true"] {
 .AutoControlBtn[variant="stop"] {
     background: rgba(255, 70, 70, 18);
     border: 2px solid rgba(255, 70, 70, 80);
-}
-.AutoControlBtn[variant="stop"]:hover {
-    background: rgba(255, 70, 70, 28);
-    border: 2px solid rgba(255, 70, 70, 120);
 }
 .AutoControlBtn[variant="stop"]:pressed {
     background: rgba(255, 70, 70, 38);
@@ -375,9 +344,6 @@ QDialog#SequenceEditor QRadioButton::indicator {
     border-radius: 13px;
     border: 2px solid #999;
     background: #111;
-}
-QDialog#SequenceEditor QRadioButton::indicator:hover {
-    border-color: #CCC;
 }
 QDialog#SequenceEditor QRadioButton::indicator:checked {
     background-color: #00FF00;

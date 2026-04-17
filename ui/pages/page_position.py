@@ -333,7 +333,15 @@ class PagePosition(GlassCard):
             # [NEW] 숨김 제어를 위해 행별 위젯 저장
             self.axis_rows.append([lbl_axis, box_cur, box_sav, box_spd])
 
-        left_layout.addWidget(data_frame, 1)
+        data_scroll = QScrollArea()
+        data_scroll.setWidget(data_frame)
+        data_scroll.setWidgetResizable(True)
+        data_scroll.setFrameShape(QFrame.NoFrame)
+        data_scroll.setStyleSheet("background: transparent;")
+        data_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        data_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        QScroller.grabGesture(data_scroll.viewport(), QScroller.TouchGesture)
+        left_layout.addWidget(data_scroll, 1)
         self.btn_teach = QPushButton("현재 위치 기억 (TEACH)"); self.btn_teach.setProperty("class", "AutoControlBtn"); self.btn_teach.setProperty("variant", "start"); self.btn_teach.setMinimumHeight(55); self.btn_teach.setCursor(Qt.PointingHandCursor); self.btn_teach.clicked.connect(self._on_teach_clicked)
         left_layout.addWidget(self.btn_teach)
 
@@ -346,7 +354,7 @@ class PagePosition(GlassCard):
         seq_select_layout.addWidget(self.seq_selector); mid_layout.addLayout(seq_select_layout)
         
         self.preview_list = ClickableListWidget(); self.preview_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.preview_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.preview_list.setStyleSheet("QListWidget { background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 8px; outline: none; } QListWidget::item { height: 40px; padding-left: 8px; color: #BBB; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.05); } QListWidget::item:hover { background: rgba(255,255,255,0.05); }")
+        self.preview_list.setStyleSheet("QListWidget { background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 8px; outline: none; } QListWidget::item { height: 40px; padding-left: 8px; color: #BBB; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.05); }")
         self._step_delegate = StepHighlightDelegate(self.preview_list)
         self.preview_list.setItemDelegate(self._step_delegate)
         QScroller.grabGesture(self.preview_list.viewport(), QScroller.TouchGesture); QScroller.grabGesture(self.preview_list.viewport(), QScroller.LeftMouseButtonGesture)

@@ -2,7 +2,7 @@ import copy
 import traceback
 import os
 import json
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import Qt, QPoint, QTimer
 from utils.paths import get_settings_path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -53,24 +53,54 @@ MONITOR_SEQ_KEY = "Monitor"
 
 class TouchScrollListWidget(QListWidget):
     """드래그로 스크롤되는 리스트 위젯 (터치스크린 대응)"""
-    SCROLL_THRESHOLD = 8  # 이 픽셀 이상 수직 이동 시 스크롤 모드 진입
+    SCROLL_THRESHOLD = 15  # 손가락 떨림 허용: 15px 이상 이동 시 스크롤 모드
+    DOUBLE_TAP_MS    = 400 # 더블탭 판정 시간 (ms)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._press_pos = None
         self._is_scrolling = False
+        self._pressed_item = None
+        self._last_tap_item = None
+        self._double_tap_timer = QTimer(self)
+        self._double_tap_timer.setSingleShot(True)
+        self._double_tap_timer.timeout.connect(self._commit_single_tap)
         self.setVerticalScrollMode(QListWidget.ScrollPerPixel)
 
     def mousePressEvent(self, event):
         self._press_pos = event.pos()
         self._is_scrolling = False
-        super().mousePressEvent(event)
+        item = self.itemAt(event.pos())
+        self._pressed_item = item
+
+        if item is None:
+            self._double_tap_timer.stop()
+            self._last_tap_item = None
+            return
+
+        if self._double_tap_timer.isActive() and item is self._last_tap_item:
+            # 더블탭: 타이머 취소 후 더블클릭 신호 발생
+            self._double_tap_timer.stop()
+            self._last_tap_item = None
+            self.itemDoubleClicked.emit(item)
+        else:
+            # 첫 번째 탭: 즉시 선택 (딜레이 없음) + 더블탭 감지 타이머 시작
+            self.setCurrentItem(item)
+            self.itemClicked.emit(item)
+            self._last_tap_item = item
+            self._double_tap_timer.start(self.DOUBLE_TAP_MS)
+
+    def _commit_single_tap(self):
+        """더블탭 시간 초과 — 아무것도 안 함 (이미 첫 탭에서 선택 완료)"""
+        self._last_tap_item = None
 
     def mouseMoveEvent(self, event):
         if self._press_pos is not None:
             dy = event.pos().y() - self._press_pos.y()
             if not self._is_scrolling and abs(dy) > self.SCROLL_THRESHOLD:
                 self._is_scrolling = True
+                self._double_tap_timer.stop()
+                self._last_tap_item = None
                 self.clearSelection()
             if self._is_scrolling:
                 self.verticalScrollBar().setValue(
@@ -81,12 +111,9 @@ class TouchScrollListWidget(QListWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        was_scrolling = self._is_scrolling
         self._press_pos = None
         self._is_scrolling = False
-        if was_scrolling:
-            return  # 스크롤 중이었으면 아이템 선택 이벤트 무시
-        super().mouseReleaseEvent(event)
+        self._pressed_item = None
 
 
 class SequenceEditorDialog(QDialog):
@@ -246,9 +273,6 @@ class SequenceEditorDialog(QDialog):
             QListWidget::item:selected {
                 background: rgba(70, 140, 255, 0.4);
                 border-left: 3px solid #468CFF;
-            }
-            QListWidget::item:hover {
-                background: rgba(255, 255, 255, 0.1);
             }
             QScrollBar:vertical {
                 border: none;
@@ -1737,7 +1761,7 @@ class SequenceEditorDialog(QDialog):
         dlg.setFixedContentSize(500, 600)
         dlg.layout.addWidget(QLabel(" 점프할 스텝을 선택하세요"))
 
-        list_widget = QListWidget()
+        list_widget = TouchScrollListWidget()
         list_widget.setStyleSheet(
             "QListWidget { background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15);"
             " border-radius: 8px; color: #EEE; font-size: 18px; padding: 6px; outline: none; }"
@@ -1746,7 +1770,6 @@ class SequenceEditorDialog(QDialog):
             " QListWidget::item:selected { background: rgba(70, 140, 255, 0.4);"
             " border: 1px solid #468CFF; color: white; }"
         )
-        list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         list_widget.setFocusPolicy(Qt.NoFocus)
 
         if not entries:
@@ -1760,9 +1783,6 @@ class SequenceEditorDialog(QDialog):
                 list_widget.addItem(item)
                 if list_idx == current_list_idx:
                     list_widget.setCurrentItem(item)
-
-        QScroller.grabGesture(list_widget.viewport(), QScroller.TouchGesture)
-        QScroller.grabGesture(list_widget.viewport(), QScroller.LeftMouseButtonGesture)
         dlg.layout.addWidget(list_widget, 1)
 
         btn_row = QHBoxLayout()

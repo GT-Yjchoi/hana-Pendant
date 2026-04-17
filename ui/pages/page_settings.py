@@ -1310,23 +1310,22 @@ class PageSettings(GlassCard):
         from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
         return max(SEQUENCE_ALARMS.keys(), default=0) + 1
 
+    def _alarm_input(self, title, current=""):
+        """알람 메시지 입력: 터치키보드 → QInputDialog 순으로 시도"""
+        if TouchKeyboard:
+            kb = TouchKeyboard(title, current, self)
+            if kb.exec() != QDialog.Accepted:
+                return None
+            return kb.get_text().strip() or None
+        from PySide6.QtWidgets import QInputDialog
+        msg, ok = QInputDialog.getText(self, title, "메시지:", text=current)
+        return msg.strip() if ok and msg.strip() else None
+
     def _add_alarm(self):
         from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
         no = self._alarm_next_no()
-        msg = ""
-        if TouchKeyboard:
-            kb = TouchKeyboard(f"A-{no:03d} 알람 메시지 입력", "", self)
-            if kb.exec() != QDialog.Accepted:
-                return
-            msg = kb.get_text().strip()
-        else:
-            from ui.dialogs.sequence_utils import RenameDialog
-            dlg = RenameDialog("", [], self, confirm_text="추가")
-            if dlg.exec() != QDialog.Accepted:
-                return
-            msg = dlg.get_new_name()
-
-        if not msg:
+        msg = self._alarm_input(f"A-{no:03d} 알람 메시지 입력")
+        if msg is None:
             return
         SEQUENCE_ALARMS[no] = msg
         self._refresh_alarm_list()
@@ -1334,20 +1333,8 @@ class PageSettings(GlassCard):
     def _edit_alarm(self, no):
         from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
         current = SEQUENCE_ALARMS.get(no, "")
-        if TouchKeyboard:
-            kb = TouchKeyboard(f"A-{no:03d} 알람 메시지 수정", current, self)
-            if kb.exec() != QDialog.Accepted:
-                return
-            msg = kb.get_text().strip()
-        else:
-            from ui.dialogs.sequence_utils import RenameDialog
-            others = [v for k, v in SEQUENCE_ALARMS.items() if k != no]
-            dlg = RenameDialog(current, others, self, confirm_text="수정")
-            if dlg.exec() != QDialog.Accepted:
-                return
-            msg = dlg.get_new_name()
-
-        if not msg:
+        msg = self._alarm_input(f"A-{no:03d} 알람 메시지 수정", current)
+        if msg is None:
             return
         SEQUENCE_ALARMS[no] = msg
         self._refresh_alarm_list()

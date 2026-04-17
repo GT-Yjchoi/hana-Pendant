@@ -266,6 +266,18 @@ class PageTimer(GlassCard):
         self.body.addLayout(btn_row)
         self.body.addWidget(scroll, 1)
         self._last_width = 0
+
+        # 기동 중 카드 하이라이트
+        self._timer_cards = {}
+        self._active_timer_name = None
+        self._blink_state = False
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(500)
+        self._blink_timer.timeout.connect(self._on_blink)
+
+        if self.plc_client:
+            self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
+
         QTimer.singleShot(0, self.refresh_grid)
 
     def refresh_grid(self):
@@ -273,6 +285,8 @@ class PageTimer(GlassCard):
             item = self.grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+        self._timer_cards = {}
 
         COLS = 6
         spacing = 10
@@ -295,7 +309,10 @@ class PageTimer(GlassCard):
             r = i // COLS
             c = i % COLS
             card = self._create_timer_card(name, float(time_sec), card_w, card_h)
+            self._timer_cards[name] = card
             self.grid.addWidget(card, r, c)
+
+        self._update_card_styles()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -352,20 +369,37 @@ class PageTimer(GlassCard):
         btn_time.clicked.connect(lambda _, n=name, t=time_sec, b=btn_time: self._on_card_clicked(n, t, b))
         layout.addWidget(btn_time)
 
+        # 하단 행: SEC 단위 + 기동중 인디케이터
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.setSpacing(4)
+
         lbl_unit = QLabel("SEC")
         lbl_unit.setFixedHeight(16)
-        lbl_unit.setAlignment(Qt.AlignCenter)
+        lbl_unit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         lbl_unit.setStyleSheet("color: #888; font-size: 11px; border: none; background: transparent;")
-        layout.addWidget(lbl_unit)
+        bottom_row.addWidget(lbl_unit)
 
-        # 시간 버튼 참조 저장
+        bottom_row.addStretch(1)
+
+        lbl_run = QLabel("▶ 기동중")
+        lbl_run.setFixedHeight(16)
+        lbl_run.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        lbl_run.setStyleSheet("color: #00FF7F; font-size: 11px; font-weight: bold; border: none; background: transparent;")
+        lbl_run.setVisible(False)
+        bottom_row.addWidget(lbl_run)
+
+        layout.addLayout(bottom_row)
+
+        # 참조 저장
         frame._btn_time_ref = btn_time
         frame._name_ref = name
+        frame._lbl_run = lbl_run
 
         return frame
 
     def _on_card_clicked(self, name, time_sec, btn_widget):
-        current_ms = int(time_sec * 100)
+        current_ms = int(self.timer_library.get(name, time_sec) * 100)
         dlg = TimerEditDialog(name, current_ms, self)
         if dlg.exec() == TimerEditDialog.Accepted:
             new_ms = dlg.get_value_ms()
@@ -392,12 +426,16 @@ class PageTimer(GlassCard):
             if not isinstance(steps, list):
                 continue
             slot_id = seq_map.get(seq_name)
-            for step_idx, step in enumerate(steps):
+            plc_idx = 0
+            for step in steps:
+                if step.get("type") == "COMMENT":
+                    continue
                 if step.get("type") == "TMR" and step.get("timer_ref") == timer_name:
                     step["time"] = new_sec
                     if plc and getattr(plc, 'is_connected', False) and slot_id is not None:
-                        plc.patch_tmr_step_time(slot_id, step_idx, new_sec)
+                        plc.patch_tmr_step_time(slot_id, plc_idx, new_sec)
                     patch_count += 1
+                plc_idx += 1
 
         if patch_count:
             print(f"[Timer Library] Synced+Patched {patch_count} step(s) referencing '{timer_name}'")
@@ -460,6 +498,77 @@ class PageTimer(GlassCard):
         else:
             val, ok = QInputDialog.getDouble(self, "시간 입력", "시간(초):", 1.0, 0, 999, 1)
             return val if ok else None
+
+    def _on_monitor_data(self, data):
+        if not isinstance(data, dict):
+            return
+        op_status   = data.get('op_status', 0)
+        sub_seq_idx = data.get('sub_seq_idx', 0)
+        sub_step    = data.get('sub_step', 0)
+
+        if op_status in (1, 2) and sub_seq_idx > 0:
+            active = self._find_active_timer(sub_seq_idx, sub_step)
+        else:
+            active = None
+
+        if active != self._active_timer_name:
+            self._active_timer_name = active
+            if active:
+                self._blink_state = True
+                self._blink_timer.start()
+            else:
+                self._blink_timer.stop()
+                self._blink_state = False
+            self._update_card_styles()
+
+    def _find_active_timer(self, sub_seq_idx, step_idx):
+        """서브시퀀스 인덱스와 스텝 번호로 실행 중인 TMR의 timer_ref 반환"""
+        reserved = {"Main", "Monitor"}
+        subs = sorted([k for k in self.sequence_data.keys() if k not in reserved])
+        if sub_seq_idx < 1 or sub_seq_idx > len(subs):
+            return None
+        seq_name = subs[sub_seq_idx - 1]
+        steps = self.sequence_data.get(seq_name, [])
+        n = 0
+        for step in steps:
+            if step.get("type") == "COMMENT":
+                continue
+            if n == step_idx:
+                if step.get("type") == "TMR":
+                    return step.get("timer_ref")
+                return None
+            n += 1
+        return None
+
+    def _on_blink(self):
+        self._blink_state = not self._blink_state
+        self._update_card_styles()
+
+    def _update_card_styles(self):
+        for name, frame in self._timer_cards.items():
+            is_active = (name == self._active_timer_name)
+            if is_active:
+                border_color = "#00FF7F" if self._blink_state else "#007A40"
+                bg_color     = "#162A1E" if self._blink_state else "#111E16"
+                frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: {bg_color};
+                        border: 2px solid {border_color};
+                        border-radius: 12px;
+                    }}
+                """)
+                if hasattr(frame, '_lbl_run'):
+                    frame._lbl_run.setVisible(self._blink_state)
+            else:
+                frame.setStyleSheet("""
+                    QFrame {
+                        background-color: #1A222C;
+                        border: 1px solid #3E4A59;
+                        border-radius: 12px;
+                    }
+                """)
+                if hasattr(frame, '_lbl_run'):
+                    frame._lbl_run.setVisible(False)
 
     def _on_reorder_clicked(self):
         """타이머 순서 변경 다이얼로그 열기"""
