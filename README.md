@@ -15,8 +15,8 @@
 | 프로젝트 경로 | `/home/yjchoi/Pendant/` |
 | 가상환경 | `/home/yjchoi/Pendant/.venv` |
 | Qt 플랫폼 | `linuxfb` (프레임버퍼 직접 렌더) |
-| 해상도 | 1024 × 600 (풀스크린) |
-| 터치 입력 | SiS HID Touch (USB, evdev `/dev/input/event5`) |
+| 디스플레이 | **Waveshare 10.1" DSI v2** (1280×800 IPS, DSI1 포트) |
+| 터치 입력 | Waveshare DSI 패널 내장 정전식 멀티터치 (오버레이 자동 로드) |
 | WiFi 스캔 권한 | polkit 규칙 `/etc/polkit-1/rules.d/50-netdev-wifi.rules` |
 
 ---
@@ -29,13 +29,17 @@ Pendant/
 ├── main.spec                      # PyInstaller 빌드 스펙
 ├── settings.json                  # 사용자 설정 (PLC IP/Port, 밸브, IO 이름, 축 등)
 ├── style.qss                      # 전역 스타일시트 (Fusion 기반)
-├── new_plc_fb.st                  # PLC 펑션블록 (현재 사용, 2-instance + 콜스택)
+├── new_plc_fb.st                  # PLC 펑션블록 (현재 사용, 2-instance + 콜스택 + 파렛타이징 통합)
 ├── plc_fb.st                      # 구버전 FB (3-tier, 미사용 - 참고용)
-├── fb_WriteMotionTable.st         # RTEX 모션 테이블 일괄 쓰기 FB
+├── fb_WriteMotionTable.st         # RTEX 모션 테이블 일괄 쓰기 FB (포인트 60개 분량)
 ├── fb_MainAxis.st                 # 메인 축 제어 FB
 ├── fb_RTEX_Amp_Param.st           # RTEX 앰프 파라미터 FB
-├── alarm_history.json             # 알람 발생 이력 (최근 30일, 자동 관리)
-├── op_history.json                # 사용자 조작 이력 (최근 7일, 자동 관리)
+├── fb_Packing.st                  # [deprecated] 파렛타이징 독립 FB (현재 new_plc_fb 에 통합됨, 참고용)
+├── fb_Packing_README.md           # 파렛타이징 PLC 통합 가이드 (DT 맵, FB 수정 내역)
+├── new_plc_fb_README.md           # new_plc_fb.st 상세 문서
+├── plc_Readme.md                  # PLC 공통 노트 (TON 배열 패턴, 메모리 맵 등)
+├── alarm_history.json             # 알람 발생 이력 (최근 30일, .gitignore 대상)
+├── op_history.json                # 사용자 조작 이력 (최근 7일, .gitignore 대상)
 │
 ├── ui/                            # UI 레이어
 │   ├── main_window.py             # 메인 윈도우 (페이지 스택, 네비게이션, 알람 오버레이)
@@ -50,7 +54,7 @@ Pendant/
 │   │   ├── page_mode.py           # 모드 설정 페이지 (40개 모드 On/Off)
 │   │   ├── page_position.py       # 포인트 관리 + 시퀀스 미리보기 + 자동 중 미세조정
 │   │   ├── page_timer.py          # 타이머 설정 페이지 (TMR 스텝 시간 편집)
-│   │   ├── page_packing.py        # 패킹 페이지 (X/Y/Z축 적재 카운터)
+│   │   ├── page_packing.py        # 패킹(팔레타이징) 페이지 — X/Y/Z축 설정, 사용 토글, 스택 순서, 시뮬레이션
 │   │   ├── page_data.py           # 레시피 관리 (저장/로드/새로만들기/삭제)
 │   │   └── page_settings.py       # 설정 페이지 (PLC/IO/축/밸브/알람/네트워크)
 │   ├── dialogs/
@@ -101,7 +105,7 @@ Pendant/
 
 - **대상 PLC**: 파나소닉 FP 시리즈 (FPWIN Pro, ST 프로그래밍)
 - **프로토콜**: TCP, `DEST_UNIT=0x01`, 12바이트 헤더 프레임
-- **모니터링**: DT100~DT160 (61 Words) 를 50ms 주기로 폴링
+- **모니터링**: DT100~DT163 (64 Words) 를 50ms 주기로 폴링
 - **하트비트**: 통신 성공마다 DT214에 0~100 순환값 전송
 - **자동 재연결**: 통신 끊김 시 5초 간격으로 재연결 시도
 
@@ -127,7 +131,8 @@ Pendant/
 | | DT142 | 축 알람 비트맵 (bit0~7=1~8축, bit8=비상정지) |
 | | DT143~158 | 축별 에러코드 (DINT×8축) |
 | | DT159 | 사용자 알람 (`w_UserAlarm`, IN 스텝 P3=1/2 발동, 핸드셰이크: HMI 수신 후 0으로 클리어) |
-| | DT160 | 스텝 알람 ID (`i_StepAlarmID`, 0=정상, 21/50/93~99) |
+| | DT160 | 스텝 알람 ID (`i_StepAlarmID`, 0=정상, 21/22/50/93~99) |
+| | DT161~163 | **파렛타이징 현재 인덱스** (`gi_PackIdxX/Y/Z`, INT×3, 0-based, HMI 양방향 R/W) |
 | **제어 (HMI→PLC)** | DT200 | 운전 제어 (0=정지, 1=자동, 2=확인운전) |
 | | DT201 | 조작압 선택 (0=제품압, 1=티칭압) |
 | | DT202 | 확인운전 제어 (상승엣지로 1스텝 진행) |
@@ -139,7 +144,12 @@ Pendant/
 | | DT213 | 소프트 비상정지 (0=정상, 1=비상정지) |
 | | DT214 | 하트비트 (0~100 순환) |
 | | DT215 | 수동조작 모드 (0=앱솔루트, 1=JOG) |
-| | DT216 | 전체 속도 배율 (1~10 단계, 자동/확인운전 공통) |
+| | DT216 | 전체 속도 배율 (`gi_SpeedOverride`, 1~10 단계, 자동/확인운전 공통) |
+| **파렛타이징 설정** | DT217 | 패킹 마스터 ON/OFF (`gw_PackEnable`, 0=미사용, 1=사용) — **commit pattern**: 설정 변경 시 가장 나중에 씀 |
+| | DT218~223 | X/Y/Z 피치 (`gdi_PitchX/Y/Z`, DINT×3, 0.001mm 단위) |
+| | DT224~226 | X/Y/Z 방향 (`gi_DirX/Y/Z`, INT×3, +1 정방향 / −1 역방향. Z 는 기본 −1 = 위로 쌓기) |
+| | DT227~229 | X/Y/Z 적층 횟수 (`gi_CountX/Y/Z`, INT×3) |
+| | DT230 | 적층 순서 (`gi_StackOrder`, 0~5: XYZ/XZY/YXZ/YZX/ZXY/ZYX) |
 | **축 파라미터** | DT15000~15049 | 8축 공통 설정 블록 (50 Words) |
 | | DT15000 | 축 사용 비트마스크 (bit0~7 = 1~8축) → FB 의 `w_AxisEnable` |
 | | DT15001~15008 | 8축 운전 방향 (0=정방향, 1=역방향) |
@@ -147,11 +157,23 @@ Pendant/
 | | DT15025~15032 | 8축 가감속 시간 (WORD×8) |
 | | DT15033 | 축 데이터셋 전송 트리거 (버튼 누름 시 축 비트 ON) |
 | | DT15034~15049 | 8축 PPR — 서보 1회전당 지령펄스수 (DINT×8) |
-| **포인트 데이터** | DT16000~ | 포인트당 32 Words × 최대 100 포인트 (DT16000~DT19199) |
+| **포인트 데이터** | DT16000~DT17919 | 포인트당 32 Words × **최대 60 포인트** (`g_Dut_Point[0..59]`) |
 | **시퀀스 데이터** | DT20000~ | 슬롯당 1000 Words (100스텝 × 10Words) × 최대 40슬롯 (DT20000~DT59999) |
 
 > 포인트 인덱스 `i` 의 시작 주소 = `DT16000 + i × 32`
 > 슬롯 `s` 의 스텝 `k` 시작 주소 = `DT20000 + s × 1000 + k × 10`
+
+#### RTEX 모션 테이블 할당 정책 (64개)
+
+하드웨어 한계로 RTEX 테이블은 64개. 이 중 **파렛타이징 전용 스크래치** 1개를 예약:
+
+| 인덱스 | RTEX 테이블 번호 | 용도 |
+|---|---|---|
+| 0..59 | 10026~10085 | **일반 포인트 (60개)** — `fb_WriteMotionTable` 이 전체 사이클 완료 시 갱신 |
+| 60..62 | 10086~10088 | 예비 (미래 확장용) |
+| 63 | **10089** | **파렛타이징 스크래치** (`pack_base` 스텝 실행 시 `new_plc_fb.st` 가 좌표 계산·기록) |
+
+> HMI 의 포인트 추가 제한도 60개. 61개 이상 추가 시 UI 경고 + PLC 전송 시 스킵.
 
 #### 포인트 데이터 레이아웃 (32 Words/포인트)
 
@@ -168,13 +190,28 @@ Pendant/
 
 | CMD | 타입 | 설명 |
 |---|---|---|
-| 10 | POS | 포인트 이동 (OPT = 사용축 비트마스크, P1 = 포인트 인덱스) |
+| 10 | POS | 포인트 이동 (OPT = 사용축 비트마스크 bit0~7 + **bit8 = pack_base 플래그**, P1 = 포인트 인덱스 0..59) |
 | 20 | OUT | 출력/밸브 On/Off (P3>0 → 타이머 기동후출력) |
 | 21 | IN | 입력 대기 (P2 = 타임아웃, P3 = 동작, P4 = 알람번호) |
 | 30 | TMR | 타이머 대기 또는 신호유지 (0.01초 단위) |
 | 40 | JMP | 점프 (OPT=0 무조건, OPT=1 조건부) |
 | 50 | CALL | 서브 시퀀스 호출 (OPT=0 동기, OPT=1 병렬) |
-| 99 | END | 시퀀스 종료 |
+| 99 | END | 시퀀스 종료 (최상위 → `b_Step_End` 펄스 + pack_idx 증가 트리거) |
+
+##### wOption 비트 구조 (POS 스텝)
+
+```
+bit 0 : 1축 (X)      bit 4 : 5축 (Z2)    bit 8 : pack_base ★
+bit 1 : 2축 (Y)      bit 5 : 6축 (θ)     bit 9~15 : 예약
+bit 2 : 3축 (Z)      bit 6 : 7축 (R1)
+bit 3 : 4축 (Y2)     bit 7 : 8축 (R2)
+```
+
+**`pack_base` 비트가 1** 이면 `new_plc_fb.st` state 11 에서:
+- `gw_PackEnable <> 0` 이고 `NOT b_NoSubCall` (Monitor 아님) 일 때만 작동
+- `g_Dut_Point[P1]` 좌표 + `gi_PackIdx × gdi_Pitch × gi_Dir` 오프셋을 계산
+- 결과를 RTEX 테이블 63 (10089) 에 기록 후 그 테이블로 이동
+- 조건 미충족 시 일반 POS (`10026 + P1`) 로 이동 = **안전 폴백**
 
 > **주의**: 코멘트 스텝은 PLC 전송 시 제외되므로, PLC 관점의 스텝 번호와 HMI 리스트 행 번호가 다를 수 있습니다. `page_position._highlight_step` 에서 PLC step 인덱스를 UI 행으로 매핑합니다.
 
@@ -251,6 +288,7 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 | ID | 의미 |
 |---|---|
 | 21 | POS 축 이동 확인 실패 (BUSY 상승 미감지) — 타임아웃 후 INP 체크 백업까지 실패한 경우 |
+| 22 | **파렛타이징 베이스 인덱스 범위 오류** — `pack_base` 스텝의 `point_index` 가 0~59 를 벗어남 |
 | 50 | 예약 (미사용) |
 | 93 | 동기 CALL 스택 오버플로 (4레벨 초과) |
 | 94 | CALL 사용 불가 — 이 인스턴스는 `b_NoSubCall=TRUE` (Monitor 등) |
@@ -276,6 +314,72 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 3. **state 20**: 활성 축 기동 신호 ON
 4. **state 21**: BUSY 상승 래치 (어느 축이든 BUSY=TRUE 감지하면 통과). `t_WaitTime` 내 BUSY 미감지 시 **INP 백업 체크** — 모든 활성 축 INP=TRUE 면 "이미 제자리" 로 간주해 정상 통과, 아니면 에러 21
 5. **state 30**: 모든 활성 축 BUSY=FALSE 대기 → state 99 (다음 스텝)
+
+---
+
+### 파렛타이징 (Palletizing)
+
+베이스 포인트에서 X/Y/Z 오프셋을 자동으로 더해 팔레트 적재 위치로 이동시키는 기능. 로직은 **PLC (new_plc_fb.st) 안에 통합** 되어 있으며, HMI 는 설정 UI + pack_idx 관리만 담당.
+
+#### 시퀀스 스텝에서 pack_base 지정
+
+시퀀스 편집기의 POS 스텝 편집 패널에 **"파렛타이징 베이스 (X/Y/Z 스택 가감산)"** 체크박스. 체크된 스텝의 `wOption` bit 8 이 켜져 PLC 로 전달됨.
+
+- 같은 포인트를 **여러 스텝에서 다르게** 쓸 수 있음 — 어떤 스텝은 pack_base, 어떤 스텝은 일반 POS
+- `pack_base` 플래그는 **스텝 단위** (포인트 단위가 아님) → JMP 분기로 패킹/비패킹 경로 분리 가능
+
+#### 좌표 계산 (state 11)
+
+```
+target_X = g_Dut_Point[i].diPosX + (gi_PackIdxX × gdi_PitchX × gi_DirX)
+target_Y = g_Dut_Point[i].diPosY + (gi_PackIdxY × gdi_PitchY × gi_DirY)
+target_Z = g_Dut_Point[i].diPosZ + (gi_PackIdxZ × gdi_PitchZ × gi_DirZ)
+(Y2, Z2 는 원본 그대로)
+```
+
+계산된 좌표는 **RTEX 테이블 63(10089)** 에 기록되고 그 테이블로 이동. **원본 포인트 데이터는 절대 변경되지 않음** → HMI 의 기억 좌표 유지.
+
+#### pack_idx 증가 로직 (state 10 CMD=99)
+
+최상위 END 도달 시 (사이클 완료), `gi_StackOrder` (0~5) 에 따라 6 케이스 오도미터 방식으로 `gi_PackIdxX/Y/Z` 증가:
+
+| stack_order | 증가 순서 | 예 (X=3,Y=2,Z=2) |
+|---|---|---|
+| 0 | X → Y → Z | (0,0,0)→(1,0,0)→(2,0,0)→(0,1,0)→... |
+| 1 | X → Z → Y | X 내부, Z 중간, Y 외부 |
+| 2 | Y → X → Z | Y 내부 |
+| 3 | Y → Z → X | |
+| 4 | Z → X → Y | 높이부터 |
+| 5 | Z → Y → X | 기둥 먼저 |
+
+`gw_PackEnable=0` 이거나 `b_NoSubCall=TRUE` (Monitor) 또는 `gi_Count*` 중 하나가 0 이면 증가 안 함.
+
+#### HMI 측 기능 (`page_packing.py`)
+
+- **X 축 패널 상단 "● 패킹 사용" 토글** — DT217 을 ON/OFF
+- 축별 **현재위치(No.)·설정횟수·설정피치·방향** 편집 (Z 는 기본 −방향 = 위로 쌓기)
+- "X→Y→Z" 토글 버튼 — 6 순서 순환
+- 왼쪽 **시뮬레이션 뷰** (실시간 미리보기, 300ms 주기 애니메이션)
+- 현재위치 버튼 클릭 → 사용자 임의 인덱스 설정 (DT161~163 덮어쓰기)
+- 설정은 **레시피 JSON** 에 `packing_config` 키로 저장
+
+#### PLC 연결 시 전체 재전송
+
+HMI 가 PLC 에 새로 연결되거나 레시피가 교체될 때 **백그라운드 스레드** 로:
+1. 모드/전체속도/패킹설정 (즉시)
+2. 포인트 테이블 60개 (1,920 Words)
+3. 시퀀스 40 슬롯 (40,000 Words)
+
+모두 재송신 → PLC 휘발성 메모리여도 항상 최신 상태. UI 블로킹 없음.
+
+#### commit pattern (packing_config 전송 순서)
+
+`plc_client.send_packing_config()` 는 중간 통신 끊김 시 부분 활성화 상태를 방지:
+1. DT217 = 0 (먼저 비활성화)
+2. DT218~230 데이터 쓰기
+3. DT217 = 1 (활성화)
+
+→ 중간에 끊겨도 PLC 는 "비활성" 상태라 카운터 증가 안 함. 안전.
 
 ---
 
@@ -320,19 +424,32 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 ```json
 {
     "version": 1.5,
-    "saved_at": "2026-04-20 13:45:00",
+    "saved_at": "2026-04-23 13:45:00",
     "sequence": {
-        "Main": [...],
+        "Main": [
+            {"type": "POS", "name": "이동_1", "point_name": "Home",
+             "active_axes": [true,true,true,false,false,false,false,false]},
+            {"type": "POS", "name": "제품개방", "point_name": "제품개방위치",
+             "active_axes": [true,true,true,false,false,false,false,false],
+             "pack_base": true}
+        ],
         "Sub1": [...]
     },
     "position_points": {
         "Home":    {"coords": [0,0,0,0,0,0,0,0], "speeds": [100]*8, "visible_mode": []},
-        "Point_1": {"coords": [100.5, 200.0, ...], "speeds": [...]}
+        "제품개방위치": {"coords": [100.5, 200.0, 150.0, ...], "speeds": [...]}
     },
     "timer_library": {"CycleStart": 1.0, "취출전진대기": 0.5},
     "mode": [false, true, false, ...],
-    "view_order": ["Home", "Point_1", ...],
+    "view_order": ["Home", "제품개방위치", ...],
     "speed_level": 10,
+    "packing_config": {
+        "enabled": true,
+        "x_count": 3, "x_pitch": 50.0, "x_dir": 1,
+        "y_count": 2, "y_pitch": 40.0, "y_dir": 1,
+        "z_count": 2, "z_pitch": 10.0, "z_dir": -1,
+        "stack_order": 0
+    },
     "user_modes": {...}
 }
 ```
@@ -417,6 +534,9 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
   - CALL: `호출_1 (취출동작)`
   - COMMENT: `// 텍스트` (노란색)
 - **내부비트 선택 시 ✎ 아이콘으로 이름 지정** — `settings.json` `internal_bit_names` 에 저장되어 `M00 \n 감지비트` 두 줄로 표시
+- **POS 스텝 편집 패널에 "파렛타이징 베이스 (X/Y/Z 스택 가감산)" 체크박스** — 체크 시 step JSON 에 `"pack_base": true` 저장, PLC 전송 시 wOption bit 8 로 인코딩
+- **포인트 이름 변경 시** 모든 스텝의 `point_name` + `name` 필드 동기 갱신 → 시퀀스 재전송 시 인덱스 자동 재계산 (`sorted()` 기반)
+- **포인트 개수 60개 제한 가드** — 61번째 추가 시도 시 경고 팝업
 
 ### 타이머 페이지 (`page_timer`)
 
@@ -429,7 +549,7 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 - 통신: `통신: 정상 / 오류`
 - 모드: `모드: 자동운전 / 확인운전 / 정지`
 - 알람: `알람: 없음` (클릭 → 이력 팝업) / `[!] 알람 (N축)` / `[!] 비상정지`
-- 금형: 현재 레시피 이름
+- 데이터: 현재 레시피 이름 (하단 메뉴의 "데이터" 탭에서 변경)
 - JOG 버튼 (정지 상태에서만 활성)
 
 ---
@@ -611,4 +731,8 @@ HMI 폴링 주기(50ms)가 PLC 스캔(1~5ms)보다 느려 0초 TMR 스텝이 `i_
 | 페이지 추가 | `ui/pages/` 생성 후 `ui/main_window.py` 에 등록 |
 | 네비게이션 버튼 순서 | `ui/main_window.py` → `add_nav(...)` 호출 순서 |
 | 이력 보존 기간 | `utils/alarm_history.py` (RETENTION_DAYS=30) / `utils/op_history.py` (=7) |
-| 스타일 변경 | `style.qss` / 각 위젯 setStyleSheet |
+| 이력 팝업 페이지 크기 | `ui/overlays/alarm_history_overlay.py` → `PAGE_SIZE` (기본 100) |
+| 포인트 최대 개수 | `utils/plc_client.py` → `MAX_POINTS` (기본 60) + `fb_WriteMotionTable.st` + `new_plc_fb.st` |
+| 파렛타이징 DT 주소 | `utils/plc_client.py` → `ADDR_PACK_IDX` (DT161) / `ADDR_PACK_CFG` (DT217) |
+| 파렛타이징 알람 메시지 | `ui/overlays/alarm_overlay.py` → `STEP_ALARM_DESCRIPTIONS[22]` |
+| 스타일 변경 | `ui/theme.py` / 각 위젯 setStyleSheet |
