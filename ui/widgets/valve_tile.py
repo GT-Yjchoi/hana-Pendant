@@ -79,7 +79,7 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
             }
             QLabel {
                 color: white;
-                font-size: 22px;
+                font-size: 18px;
                 font-weight: bold;
                 background: transparent;
                 border: none;
@@ -87,8 +87,10 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
         """)
         _lock_lay = QVBoxLayout(self._lock_overlay)
         _lock_lay.setAlignment(Qt.AlignCenter)
-        _lock_lbl = QLabel("자동 중에는 사용할 수 없습니다")
+        _lock_lay.setContentsMargins(12, 8, 12, 8)
+        _lock_lbl = QLabel("자동 중에는\n사용할 수 없습니다")
         _lock_lbl.setAlignment(Qt.AlignCenter)
+        _lock_lbl.setWordWrap(True)
         _lock_lay.addWidget(_lock_lbl)
         self._lock_overlay.hide()
 

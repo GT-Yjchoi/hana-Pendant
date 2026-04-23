@@ -21,10 +21,10 @@ def is_available() -> bool:
 
 
 def get_status() -> Dict[str, str]:
-    """현재 WiFi 연결 상태 / IP 조회"""
+    """현재 WiFi 연결 상태 / IP 조회. 각 nmcli 호출 3초 타임아웃."""
     info = {"ssid": "", "ip": "", "signal": "", "iface": ""}
     try:
-        r = _run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"])
+        r = _run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"], timeout=3)
         for line in r.stdout.strip().splitlines():
             parts = line.split(":")
             if len(parts) >= 4 and parts[1] == "wifi":
@@ -34,7 +34,7 @@ def get_status() -> Dict[str, str]:
                 break
 
         if info["iface"]:
-            r2 = _run(["nmcli", "-t", "-f", "IP4.ADDRESS", "device", "show", info["iface"]])
+            r2 = _run(["nmcli", "-t", "-f", "IP4.ADDRESS", "device", "show", info["iface"]], timeout=3)
             for line in r2.stdout.strip().splitlines():
                 if line.startswith("IP4.ADDRESS"):
                     val = line.split(":", 1)[1].split("/")[0]
@@ -42,13 +42,13 @@ def get_status() -> Dict[str, str]:
                     break
 
         if info["ssid"]:
-            r3 = _run(["nmcli", "-t", "-f", "ACTIVE,SIGNAL,SSID", "device", "wifi", "list"])
+            r3 = _run(["nmcli", "-t", "-f", "ACTIVE,SIGNAL,SSID", "device", "wifi", "list"], timeout=3)
             for line in r3.stdout.strip().splitlines():
                 parts = line.split(":")
                 if len(parts) >= 3 and parts[0] == "yes":
                     info["signal"] = parts[1]
                     break
-    except Exception:
+    except (subprocess.TimeoutExpired, Exception):
         pass
     return info
 
@@ -121,30 +121,30 @@ def disconnect() -> Dict[str, str]:
 
 def _first_ethernet_device() -> str:
     try:
-        r = _run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"])
+        r = _run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"], timeout=3)
         for line in r.stdout.strip().splitlines():
             parts = line.split(":")
             if len(parts) >= 2 and parts[1] == "ethernet":
                 return parts[0]
-    except Exception:
+    except (subprocess.TimeoutExpired, Exception):
         pass
     return "eth0"
 
 
 def _active_connection_for(iface: str) -> str:
     try:
-        r = _run(["nmcli", "-t", "-f", "DEVICE,CONNECTION", "device"])
+        r = _run(["nmcli", "-t", "-f", "DEVICE,CONNECTION", "device"], timeout=3)
         for line in r.stdout.strip().splitlines():
             parts = line.split(":", 1)
             if len(parts) == 2 and parts[0] == iface and parts[1] and parts[1] != "--":
                 return parts[1]
-    except Exception:
+    except (subprocess.TimeoutExpired, Exception):
         pass
     return ""
 
 
 def get_ethernet_status() -> Dict[str, str]:
-    """이더넷 상태 조회"""
+    """이더넷 상태 조회. 각 nmcli 호출 3초 타임아웃(UI 블로킹 방지)."""
     info = {
         "iface": _first_ethernet_device(),
         "state": "",
@@ -154,7 +154,7 @@ def get_ethernet_status() -> Dict[str, str]:
         "method": "",
     }
     try:
-        r = _run(["nmcli", "-t", "-f", "DEVICE,STATE,CONNECTION", "device"])
+        r = _run(["nmcli", "-t", "-f", "DEVICE,STATE,CONNECTION", "device"], timeout=3)
         for line in r.stdout.strip().splitlines():
             parts = line.split(":", 2)
             if len(parts) >= 2 and parts[0] == info["iface"]:
@@ -163,7 +163,7 @@ def get_ethernet_status() -> Dict[str, str]:
                     info["connection"] = parts[2] if parts[2] and parts[2] != "--" else ""
                 break
 
-        r2 = _run(["nmcli", "-t", "-f", "IP4.ADDRESS,IP4.GATEWAY", "device", "show", info["iface"]])
+        r2 = _run(["nmcli", "-t", "-f", "IP4.ADDRESS,IP4.GATEWAY", "device", "show", info["iface"]], timeout=3)
         for line in r2.stdout.strip().splitlines():
             if line.startswith("IP4.ADDRESS"):
                 info["ip"] = line.split(":", 1)[1].split("/")[0]
@@ -171,12 +171,12 @@ def get_ethernet_status() -> Dict[str, str]:
                 info["gateway"] = line.split(":", 1)[1]
 
         if info["connection"]:
-            r3 = _run(["nmcli", "-t", "-f", "ipv4.method", "connection", "show", info["connection"]])
+            r3 = _run(["nmcli", "-t", "-f", "ipv4.method", "connection", "show", info["connection"]], timeout=3)
             for line in r3.stdout.strip().splitlines():
                 if line.startswith("ipv4.method"):
                     info["method"] = line.split(":", 1)[1]
                     break
-    except Exception:
+    except (subprocess.TimeoutExpired, Exception):
         pass
     return info
 

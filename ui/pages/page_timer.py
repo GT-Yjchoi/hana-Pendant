@@ -240,13 +240,13 @@ class PageTimer(GlassCard):
         scroll.setWidget(self.container)
 
         self.grid = QGridLayout(self.container)
-        self.grid.setContentsMargins(0, 10, 0, 10)
+        self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(10)
         self.grid.setAlignment(Qt.AlignTop)
 
-        # 상단 버튼 행
+        # 하단 버튼 행 (우측 정렬)
         btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(0, 0, 0, 4)
+        btn_row.setContentsMargins(0, 8, 0, 0)
         btn_row.addStretch(1)
 
         self.btn_reorder = QPushButton("⇄ 순서 변경")
@@ -266,8 +266,8 @@ class PageTimer(GlassCard):
         self.btn_reorder.clicked.connect(self._on_reorder_clicked)
         btn_row.addWidget(self.btn_reorder)
 
-        self.body.addLayout(btn_row)
         self.body.addWidget(scroll, 1)
+        self.body.addLayout(btn_row)
         self._last_width = 0
 
         # 기동 중 카드 하이라이트
@@ -360,14 +360,14 @@ class PageTimer(GlassCard):
         lbl_name = QLabel(name)
         lbl_name.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         lbl_name.setStyleSheet("color: #DDD; font-size: 17px; font-weight: bold; border: none; background: transparent;")
-        lbl_name.setWordWrap(True)
+        lbl_name.setWordWrap(False)
         top_row.addWidget(lbl_name, 1)
 
-        # 항상 표시하되 텍스트만 토글 (레이아웃 들썩임 방지 위해 고정폭)
+        # 기동중 인디케이터 — 카드 폭 확보를 위해 아이콘만(▶) 표시. 고정폭 유지(레이아웃 들썩임 방지).
         lbl_run = QLabel("")
-        lbl_run.setFixedSize(60, 16)
+        lbl_run.setFixedSize(20, 16)
         lbl_run.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        lbl_run.setStyleSheet("color: #00FF7F; font-size: 11px; font-weight: bold; border: none; background: transparent;")
+        lbl_run.setStyleSheet("color: #00FF7F; font-size: 14px; font-weight: bold; border: none; background: transparent;")
         top_row.addWidget(lbl_run, 0)
 
         layout.addLayout(top_row)
@@ -624,7 +624,7 @@ class PageTimer(GlassCard):
                     }}
                 """)
                 if hasattr(frame, '_lbl_run'):
-                    frame._lbl_run.setText("▶ 기동중")
+                    frame._lbl_run.setText("▶")
             else:
                 frame.setStyleSheet("""
                     QFrame {

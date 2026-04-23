@@ -10,14 +10,18 @@
 | 항목 | 값 |
 |---|---|
 | 플랫폼 | Raspberry Pi 5 (aarch64) |
-| OS | Raspberry Pi OS Lite (Debian Trixie) — 데스크탑 없음 |
-| Python | 3.x |
+| OS | Raspberry Pi OS **Lite** (Debian Trixie) — 데스크탑 없음 |
+| Python | 시스템 `python3` + `--system-site-packages` venv (pip 패키지 없음) |
 | 프로젝트 경로 | `/home/yjchoi/Pendant/` |
-| 가상환경 | `/home/yjchoi/Pendant/.venv` |
-| Qt 플랫폼 | `linuxfb` (프레임버퍼 직접 렌더) |
-| 디스플레이 | **Waveshare 10.1" DSI v2** (1280×800 IPS, DSI1 포트) |
-| 터치 입력 | Waveshare DSI 패널 내장 정전식 멀티터치 (오버레이 자동 로드) |
-| WiFi 스캔 권한 | polkit 규칙 `/etc/polkit-1/rules.d/50-netdev-wifi.rules` |
+| 가상환경 | `/home/yjchoi/Pendant/.venv` (apt 의 `python3-pyside6.*` 공유) |
+| Qt 플랫폼 | **`eglfs` + KMS/GBM** (`QT_QPA_EGLFS_INTEGRATION=eglfs_kms`, `KMS_ATOMIC=1`) — GPU 가속 렌더 + 회전 |
+| 디스플레이 | **Waveshare 10.1" DSI v2** (800×1280 IPS, `video=DSI-1:800x1280e,rotate=270` 으로 landscape 1280×800 사용) |
+| 터치 입력 | DSI 패널 정전식 멀티터치. evdev 좌표 회전: `QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS=/dev/input/event1:rotate=270` |
+| 자동 실행 | `pendant.service` (systemd, `Conflicts=getty@tty1`) — 부팅 시 tty1 점유하며 앱 기동 |
+| WiFi 스캔 권한 | polkit 규칙 `/etc/polkit-1/rules.d/50-netdev-wifi.rules` + `netdev` 그룹 |
+| 유선 이더넷 | NM 프로파일에 `ipv4.never-default=yes` — PLC 전용 LAN 이 디폴트 라우트로 승격되는 것 차단 |
+
+> **왜 eglfs KMS/GBM** 인가: Qt 6 부터 `linuxfb` 가 소프트웨어 회전을 제거. 회전·GPU 가속·부드러운 터치 스크롤을 한꺼번에 얻으려면 KMS/GBM 이 유일한 경로. 단, 시스템 `apt` 의 PySide6 (`python3-pyside6.*`) 에만 `libQt6EglFsKmsGbmSupport` 가 포함되므로 pip 설치는 쓰지 않는다 — `setup.sh` 가 venv 를 `--system-site-packages` 로 만들어 apt PySide6 를 공유.
 
 ---
 
@@ -25,8 +29,10 @@
 
 ```
 Pendant/
-├── main.py                        # 진입점 (QApplication, PLCClient, MainWindow)
+├── main.py                        # 진입점 (QApplication, PLCClient, MainWindow) + 스크린샷 핫키(F12) / 우상단 3초 롱프레스
 ├── main.spec                      # PyInstaller 빌드 스펙
+├── pendant.service                # systemd 서비스 파일 (eglfs KMS/GBM 환경변수 포함)
+├── setup.sh                       # 신규 Pi 일괄 세팅 (apt + venv + cmdline + polkit + NM + systemd)
 ├── settings.json                  # 사용자 설정 (PLC IP/Port, 밸브, IO 이름, 축 등)
 ├── style.qss                      # 전역 스타일시트 (Fusion 기반)
 ├── new_plc_fb.st                  # PLC 펑션블록 (현재 사용, 2-instance + 콜스택 + 파렛타이징 통합)
@@ -542,7 +548,21 @@ HMI 가 PLC 에 새로 연결되거나 레시피가 교체될 때 **백그라운
 
 - 타이머 카드 그리드, 클릭 시 시간 편집
 - 현재 실행 중인 TMR 카드 **초록색 점멸 하이라이트** (최소 500ms 유지 + 큐잉 방식으로 연속 타이머도 놓치지 않음)
-- 순서 변경 다이얼로그
+- 순서 변경 버튼은 **우측 하단**에 배치 (카드 영역을 최대한 위로 확보)
+
+### 스크린샷 (사용설명서 캡처용)
+
+- **F12** 키 또는 화면 **우상단 100×100 영역 3초 롱프레스** → `~/screenshots/pendant_YYYYMMDD_HHMMSS.png` 저장 + 하단 토스트 알림
+- 저장 함수는 `QWidget.grab()` 기반이라 eglfs 환경에서도 풀스크린 캡처 가능
+- 원격 SSH 로 가져오려면: `scp pi@pendant:/home/yjchoi/screenshots/* .`
+
+### UI 터치 최적화 (2026-04)
+
+- **TouchComboBox**: 드롭다운이 press 가 아닌 **release 에서 열림** — 손가락이 화면에서 떨어진 뒤 팝업이 나타나므로 터치 위치에 hover 하이라이트가 잘못 걸리던 문제 해결
+- **ValvePanel 자동 중 잠금 오버레이**: 메시지를 2줄(`자동 중에는\n사용할 수 없습니다`)로 word-wrap + 18px 로 축소 → 좁은 위치설정 페이지에서도 잘리지 않음
+- **패킹 페이지**: `● 패킹 사용/미사용` 토글을 X 패널 프레임 밖(위)으로 분리. Y/Z 도 동일 구조(상단 68px 투명 영역 + 프레임) 로 통일해 타이틀 정렬 유지. 시뮬레이션 타이머 300→500ms 로 완화, HEAD 타일 색상 시안 → 따뜻한 베이지(`#E8D5A9`), 축 타이틀은 모두 흰색
+- **위치설정 페이지**: 자동/확인운전 중 `현재 위치 기억 (TEACH)` 버튼 **비활성 + 흑백 처리** (`QGraphicsColorizeEffect`). 시퀀스 드롭다운 리스트는 글씨·항목 높이 확대(20px / 42px) + hover 하이라이트 제거해 "선택된 항목만" 파란색으로 표시
+- **순서 변경 다이얼로그** (`PositionOrderDialog`): 리스트에 `QScroller` 제스처 추가 — 드래그로 부드러운 터치 스크롤
 
 ### TopBar
 
@@ -614,18 +634,43 @@ g_StepAlarmPrev := g_StepAlarm;
 ```bash
 git clone git@github.com:GT-Yjchoi/Pendant.git
 cd Pendant
-./setup.sh        # 시스템 라이브러리 + venv + PySide6 + polkit(WiFi 스캔 권한)
+./setup.sh         # 6단계 — apt + venv + cmdline + polkit + never-default + systemd
+sudo reboot        # pendant.service 자동 실행
 ```
 
-SSH 키를 등록해 두지 않았다면 먼저:
+`setup.sh` 가 수행하는 일:
+1. apt 패키지 (`python3-pyside6.*`, libegl/libgl, network-manager)
+2. `python3 -m venv --system-site-packages .venv` — apt PySide6 공유
+3. `/boot/firmware/cmdline.txt` 에 콘솔 커서/로고 제거 + DSI 회전 플래그 (`rotate=270`) 추가
+4. polkit 규칙 + 현 사용자 `netdev` 그룹 추가 (WiFi nmcli 허용)
+5. 이더넷 프로파일에 `ipv4.never-default=yes` (LAN 전용 PLC 네트워크)
+6. `pendant.service` → `/etc/systemd/system/` 복사 + `systemctl enable`
+
+SSH 키 미등록 시:
 ```bash
 ssh-keygen -t ed25519 -C "<email>"
 cat ~/.ssh/id_ed25519.pub   # GitHub → Settings → SSH keys 에 등록
 ```
 
+> ⚠ **터치 디바이스 번호** — `pendant.service` 의 `/dev/input/event1` 이 하드코딩돼 있음. 다른 번호라면:
+> ```bash
+> for d in /dev/input/event*; do udevadm info --query=property --name="$d" | grep -q TOUCHSCREEN && echo "$d"; done
+> ```
+
 ---
 
-## 빌드 방법
+## 서비스 관리
+
+```bash
+sudo systemctl start pendant       # 시작
+sudo systemctl stop pendant        # 정지
+sudo systemctl restart pendant     # 재시작 (코드 변경 후)
+journalctl -u pendant -f           # 실시간 로그
+```
+
+---
+
+## 빌드 방법 (PyInstaller)
 
 ```bash
 cd /home/yjchoi/Pendant
@@ -637,15 +682,24 @@ pyinstaller --clean -y main.spec
 
 ---
 
-## 개발 실행
+## 개발 실행 (서비스 안 거치고 포그라운드 실행)
 
 ```bash
+sudo systemctl stop pendant   # tty1 점유 해제
 cd /home/yjchoi/Pendant
-QT_QPA_PLATFORM=linuxfb .venv/bin/python main.py
+# pendant.service 와 동일한 환경변수 세팅
+QT_QPA_PLATFORM=eglfs \
+QT_QPA_EGLFS_INTEGRATION=eglfs_kms \
+QT_QPA_EGLFS_KMS_ATOMIC=1 \
+QT_QPA_EGLFS_KMS_DEVICE=/dev/dri/card0 \
+QT_QPA_EGLFS_ROTATION=-90 \
+QT_QPA_EGLFS_HIDECURSOR=1 \
+QT_QPA_EGLFS_NO_LIBINPUT=1 \
+QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS=/dev/input/event1:rotate=270 \
+.venv/bin/python main.py
 ```
 
-> Lite OS 에는 데스크탑이 없으므로 `QT_QPA_PLATFORM=linuxfb` 가 필수.
-> 종료 후 프레임버퍼에 잔상이 남으면 `sudo dd if=/dev/zero of=/dev/fb0` 로 지울 수 있습니다.
+> SSH 세션에서 직접 실행하려면 `sudo` 권한이 필요할 수 있음 (DRM/KMS 장치 접근). 보통은 `journalctl -u pendant -f` 로 서비스 로그를 보면서 작업하는 것이 편하다.
 
 ---
 

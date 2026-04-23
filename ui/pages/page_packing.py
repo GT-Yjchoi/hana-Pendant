@@ -368,7 +368,7 @@ class PalletVisualizer(QWidget):
                 is_head = (row == target_row and col == target_col) and (self.sim_state != 2)
                 
                 if is_head:
-                    painter.setBrush(QColor("#00E5FF"))
+                    painter.setBrush(QColor("#E8D5A9"))
                     painter.setPen(Qt.NoPen)
                 elif self.sim_state == 2:
                     painter.setBrush(QColor(60, 65, 75))
@@ -391,17 +391,15 @@ class PalletVisualizer(QWidget):
 class AxisControlPanel(QFrame):
     config_changed = Signal()
     current_clicked = Signal(str)   # 사용자가 "현재위치(No.)" 클릭 → 축 이름 emit
-    enable_changed = Signal(bool)   # 패킹 사용 토글 (is_enable_host=True 인 패널만 발화)
 
-    def __init__(self, axis_name, color_theme, is_z_axis=False, is_enable_host=False):
+    def __init__(self, axis_name, color_theme, is_z_axis=False):
         super().__init__()
         self.axis_name = axis_name
         self.is_z_axis = is_z_axis
-        self.is_enable_host = is_enable_host
 
         self.val_count = 1
         self.val_pitch = 10.0
-        
+
         self.setStyleSheet(f"""
             QFrame {{
                 background: rgba(255, 255, 255, 0.05);
@@ -409,32 +407,14 @@ class AxisControlPanel(QFrame):
                 border-radius: 12px;
             }}
         """)
-        
+
         layout = QVBoxLayout(self)
         layout.setSpacing(5)
         layout.setContentsMargins(10, 8, 10, 8)
 
-        # 패킹 사용 토글 (X축 패널에만 표시).
-        # Y/Z 패널은 같은 높이의 투명 스페이서를 넣어 타이틀 수직 위치 정렬.
-        if is_enable_host:
-            self.btn_pack_enable = QPushButton()
-            self.btn_pack_enable.setCheckable(True)
-            self.btn_pack_enable.setChecked(False)
-            self.btn_pack_enable.setFixedHeight(68)
-            self.btn_pack_enable.setCursor(Qt.PointingHandCursor)
-            self.btn_pack_enable.clicked.connect(self._on_pack_enable_toggled)
-            self._update_pack_enable_style()
-            layout.addWidget(self.btn_pack_enable)
-        else:
-            self.btn_pack_enable = None
-            spacer = QWidget()
-            spacer.setFixedHeight(68)
-            spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            layout.addWidget(spacer)
-
         # 타이틀
         self.lbl_title = QLabel(f"{axis_name} 축 설정")
-        self.lbl_title.setStyleSheet(f"color: {color_theme}; font-size: 16px; font-weight: 900; background: transparent; border: none;")
+        self.lbl_title.setStyleSheet("color: white; font-size: 16px; font-weight: 900; background: transparent; border: none;")
         self.lbl_title.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_title)
 
@@ -598,40 +578,6 @@ class AxisControlPanel(QFrame):
     def set_current_display(self, val):
         self.disp_current.setText(str(val))
 
-    # ───── 패킹 사용 토글 (is_enable_host=True 인 패널에만 존재) ─────
-    def _on_pack_enable_toggled(self):
-        self._update_pack_enable_style()
-        # 스타일 적용을 스캔 큐에 예약만 하면 이후 느린 PLC 송신이 끝날 때까지 리페인트가 미뤄짐.
-        # repaint() 로 강제 동기 그리기 → 버튼 상태 전환이 즉각 보이도록.
-        self.btn_pack_enable.repaint()
-        self.enable_changed.emit(bool(self.btn_pack_enable.isChecked()))
-
-    def set_pack_enabled(self, enabled):
-        """외부에서 초기 상태 세팅 (레시피 로드 후). signal 발화 안 함."""
-        if self.btn_pack_enable is None:
-            return
-        self.btn_pack_enable.blockSignals(True)
-        self.btn_pack_enable.setChecked(bool(enabled))
-        self.btn_pack_enable.blockSignals(False)
-        self._update_pack_enable_style()
-
-    def _update_pack_enable_style(self):
-        if self.btn_pack_enable is None:
-            return
-        if self.btn_pack_enable.isChecked():
-            self.btn_pack_enable.setText("● 패킹 사용")
-            self.btn_pack_enable.setStyleSheet(
-                "QPushButton { background: rgba(0,255,127,0.2); border: 2px solid #00FF7F; "
-                "color: #00FF7F; border-radius: 8px; font-size: 24px; font-weight: bold; }"
-            )
-        else:
-            self.btn_pack_enable.setText("○ 패킹 미사용")
-            self.btn_pack_enable.setStyleSheet(
-                "QPushButton { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); "
-                "color: #888; border-radius: 8px; font-size: 24px; font-weight: bold; } "
-                "QPushButton:hover { background: rgba(255,255,255,0.1); border: 1px solid #00FF7F; color: #AAA; }"
-            )
-
 
 # =========================================================
 # [메인 페이지] PagePacking
@@ -714,7 +660,7 @@ class PagePacking(GlassCard):
         settings_layout.setContentsMargins(0, 0, 0, 0)
         settings_layout.setSpacing(10)
         
-        self.panel_x = AxisControlPanel("X", "#00E5FF", is_enable_host=True)
+        self.panel_x = AxisControlPanel("X", "#00E5FF")
         self.panel_y = AxisControlPanel("Y", "#FFD280")
         self.panel_z = AxisControlPanel("Z", "#64FFDA", is_z_axis=True)
 
@@ -726,11 +672,38 @@ class PagePacking(GlassCard):
         self.panel_y.current_clicked.connect(self._on_current_idx_clicked)
         self.panel_z.current_clicked.connect(self._on_current_idx_clicked)
 
-        self.panel_x.enable_changed.connect(self._on_pack_enable_toggled)
+        # 패킹 사용 토글 버튼 — X 컬럼 상단, 프레임 바깥쪽
+        self.btn_pack_enable = QPushButton()
+        self.btn_pack_enable.setCheckable(True)
+        self.btn_pack_enable.setChecked(False)
+        self.btn_pack_enable.setFixedHeight(68)
+        self.btn_pack_enable.setCursor(Qt.PointingHandCursor)
+        self.btn_pack_enable.clicked.connect(self._on_pack_enable_clicked)
+        self._update_pack_enable_style()
 
-        settings_layout.addWidget(self.panel_x)
-        settings_layout.addWidget(self.panel_y)
-        settings_layout.addWidget(self.panel_z)
+        def _make_column(header_widget, panel):
+            col = QWidget()
+            lay = QVBoxLayout(col)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(10)
+            lay.addWidget(header_widget)
+            lay.addWidget(panel)
+            return col
+
+        # Y/Z 컬럼의 상단 빈 공간 — X 컬럼의 버튼과 동일한 높이(68px)로 맞춰 타이틀 정렬
+        def _make_top_spacer():
+            s = QWidget()
+            s.setFixedHeight(68)
+            s.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            return s
+
+        x_column = _make_column(self.btn_pack_enable, self.panel_x)
+        y_column = _make_column(_make_top_spacer(), self.panel_y)
+        z_column = _make_column(_make_top_spacer(), self.panel_z)
+
+        settings_layout.addWidget(x_column)
+        settings_layout.addWidget(y_column)
+        settings_layout.addWidget(z_column)
 
         main_layout.addWidget(right_widget, 6)
 
@@ -738,7 +711,7 @@ class PagePacking(GlassCard):
 
         self.anim_x = 0; self.anim_y = 0; self.anim_z = 0
         self.sim_timer = QTimer(self)
-        self.sim_timer.setInterval(300)
+        self.sim_timer.setInterval(500)
         self.sim_timer.timeout.connect(self._update_animation)
 
         self.stack_order = 0
@@ -856,11 +829,36 @@ class PagePacking(GlassCard):
         if self.plc_client and self.plc_client.is_connected:
             self.plc_client.send_packing_config(self.packing_config)
 
-    def _on_pack_enable_toggled(self, enabled):
-        """패킹 사용 토글 (X축 패널 버튼) → packing_config['enabled'] 갱신.
-        PLC 송신·자동저장은 sig_packing_changed 로 main_window 가 일괄 처리 (중복 송신 방지)."""
-        self.packing_config["enabled"] = bool(enabled)
+    def _on_pack_enable_clicked(self):
+        """패킹 사용 토글 버튼 클릭. 스타일 즉시 갱신 + config 갱신 + 시그널.
+        PLC 송신·자동저장은 sig_packing_changed 로 main_window 가 일괄 처리."""
+        self._update_pack_enable_style()
+        # repaint() 로 즉각 반영 (이후 느린 PLC 송신으로 인한 지연 방지)
+        self.btn_pack_enable.repaint()
+        self.packing_config["enabled"] = bool(self.btn_pack_enable.isChecked())
         self.sig_packing_changed.emit()
+
+    def set_pack_enabled(self, enabled):
+        """외부(레시피 로드 등)에서 초기 상태 세팅. signal 발화 안 함."""
+        self.btn_pack_enable.blockSignals(True)
+        self.btn_pack_enable.setChecked(bool(enabled))
+        self.btn_pack_enable.blockSignals(False)
+        self._update_pack_enable_style()
+
+    def _update_pack_enable_style(self):
+        if self.btn_pack_enable.isChecked():
+            self.btn_pack_enable.setText("● 패킹 사용")
+            self.btn_pack_enable.setStyleSheet(
+                "QPushButton { background: rgba(0,255,127,0.2); border: 2px solid #00FF7F; "
+                "color: #00FF7F; border-radius: 8px; font-size: 24px; font-weight: bold; }"
+            )
+        else:
+            self.btn_pack_enable.setText("○ 패킹 미사용")
+            self.btn_pack_enable.setStyleSheet(
+                "QPushButton { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); "
+                "color: #888; border-radius: 8px; font-size: 24px; font-weight: bold; } "
+                "QPushButton:hover { background: rgba(255,255,255,0.1); border: 1px solid #00FF7F; color: #AAA; }"
+            )
 
     def _sync_to_packing_config(self):
         """AxisControlPanel 현재값 → self.packing_config dict"""
@@ -878,10 +876,7 @@ class PagePacking(GlassCard):
             "z_count": int(zc), "z_pitch": float(zp), "z_dir": int(zd),
             "stack_order": int(self.stack_order),
         }
-        if self.panel_x.btn_pack_enable is not None:
-            cfg["enabled"] = bool(self.panel_x.btn_pack_enable.isChecked())
-        else:
-            cfg["enabled"] = bool(self.packing_config.get("enabled", False))
+        cfg["enabled"] = bool(self.btn_pack_enable.isChecked())
         return cfg
 
     def refresh_ui(self):
@@ -903,7 +898,7 @@ class PagePacking(GlassCard):
         _apply(self.panel_z, cfg.get("z_count", 3), cfg.get("z_pitch", 10.0), cfg.get("z_dir", -1))
 
         # 패킹 사용 토글 상태 복원 (default False — 명시 플래그 없으면 미사용)
-        self.panel_x.set_pack_enabled(bool(cfg.get("enabled", False)))
+        self.set_pack_enabled(bool(cfg.get("enabled", False)))
 
         self.stack_order = int(cfg.get("stack_order", 0)) % len(self.STACK_ORDERS)
         self._update_order_btn_text()

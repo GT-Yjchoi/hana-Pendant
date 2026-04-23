@@ -1,6 +1,6 @@
 {
     "version": 1.5,
-    "saved_at": "2026-04-23 14:48:40.123595",
+    "saved_at": "2026-04-23 21:02:19.285111",
     "sequence": {
         "Main": [
             {
@@ -8,6 +8,46 @@
                 "name": "호출_2",
                 "target_seq": "1_취출동작",
                 "parallel": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 0,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 1,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 2,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 3,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_5",
+                "port": 5,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
             }
         ],
         "Monitor": [
@@ -1142,7 +1182,7 @@
             {
                 "type": "TMR",
                 "name": "제품 개방 상승대기",
-                "time": 0.0,
+                "time": 0.5,
                 "timer_ref": "제품 개방 상승대기"
             },
             {
@@ -1181,7 +1221,7 @@
             {
                 "type": "TMR",
                 "name": "제품 개방 상승대기",
-                "time": 0.0,
+                "time": 0.5,
                 "timer_ref": "제품 개방 상승대기"
             },
             {
@@ -1261,7 +1301,7 @@
             {
                 "type": "TMR",
                 "name": "제품 개방 상승대기",
-                "time": 0.0,
+                "time": 0.5,
                 "timer_ref": "제품 개방 상승대기"
             },
             {
@@ -2754,7 +2794,7 @@
             {
                 "type": "TMR",
                 "name": "제품 개방 상승대기",
-                "time": 0.0,
+                "time": 0.5,
                 "timer_ref": "제품 개방 상승대기"
             },
             {
@@ -3181,7 +3221,7 @@
         "제품개방대기": 0.0,
         "제품상승대기": 0.0,
         "제품흡착대기": 0.0,
-        "제품 개방 상승대기": 0.0,
+        "제품 개방 상승대기": 0.5,
         "CycleStart": 1.0,
         "런너개방 상승대기": 0.0,
         "런너개방 하강대기": 0.0,
@@ -3247,17 +3287,18 @@
         "미사용 회피위치",
         "주행대기위치"
     ],
-    "speed_level": 2,
+    "speed_level": 6,
     "packing_config": {
         "x_count": 2,
         "x_pitch": 20.0,
         "x_dir": -1,
-        "y_count": 2,
+        "y_count": 1,
         "y_pitch": 10.0,
         "y_dir": 1,
-        "z_count": 1,
+        "z_count": 2,
         "z_pitch": 10.0,
-        "stack_order": 4,
+        "z_dir": -1,
+        "stack_order": 0,
         "enabled": false
     },
     "user_modes": {

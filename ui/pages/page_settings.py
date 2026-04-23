@@ -56,6 +56,40 @@ class WifiScanWorker(QThread):
         self.sig_done.emit(networks)
 
 
+class EthernetStatusWorker(QThread):
+    """nmcli 이더넷 상태 조회를 백그라운드에서 실행 — UI 블로킹 방지."""
+    sig_done = Signal(dict)
+
+    def __init__(self, wifi_module, parent=None):
+        super().__init__(parent)
+        self._wifi = wifi_module
+
+    def run(self):
+        try:
+            info = self._wifi.get_ethernet_status()
+        except Exception as e:
+            print(f"[Ethernet] 상태 조회 에러: {e}")
+            info = {"iface": "", "state": "", "connection": "", "ip": "", "gateway": "", "method": ""}
+        self.sig_done.emit(info)
+
+
+class WifiStatusWorker(QThread):
+    """nmcli WiFi 상태 조회를 백그라운드에서 실행."""
+    sig_done = Signal(dict)
+
+    def __init__(self, wifi_module, parent=None):
+        super().__init__(parent)
+        self._wifi = wifi_module
+
+    def run(self):
+        try:
+            info = self._wifi.get_status()
+        except Exception as e:
+            print(f"[WiFi] 상태 조회 에러: {e}")
+            info = {"ssid": "", "ip": "", "signal": "", "iface": ""}
+        self.sig_done.emit(info)
+
+
 # =========================================================
 # [NEW] 숫자/IP 입력 전용 오버레이 키패드
 # =========================================================
@@ -1826,17 +1860,16 @@ class PageSettings(GlassCard):
 
     def _on_connect_clicked(self):
         if not self.plc_client: return
-        if self.plc_client.is_connected: self.plc_client.disconnect_plc()
+        if self.plc_client.is_connected:
+            self.plc_client.disconnect_plc()
         else:
             ip = self.edit_ip.text().strip(); port = self.edit_port.text().strip()
             if not ip or not port: return
             self._save_plc_settings(ip, port)
-            self.lbl_status.setText("● Connecting..."); self.lbl_status.setStyleSheet("color: orange; font-size: 14px; font-weight: bold; margin-left: 5px;")
-            QApplication.instance().processEvents()
-            ok, msg = self.plc_client.connect_to_plc(ip, port)
-            if not ok:
-                dlg = ConfirmOverlay("접속 실패", f"PLC에 접속할 수 없습니다.\n({msg})", btn_yes="확인", parent=self.window())
-                dlg.btn_cancel.hide(); dlg.exec()
+            self.lbl_status.setText("● Connecting...")
+            self.lbl_status.setStyleSheet("color: orange; font-size: 14px; font-weight: bold; margin-left: 5px;")
+            # 비차단 호출 — 실제 연결은 백그라운드 재연결 루프가 수행. 성공/실패는 sig_connected 로 반영.
+            self.plc_client.connect_to_plc(ip, port)
 
     def _on_plc_status_changed(self, connected):
         if connected:
@@ -2180,6 +2213,11 @@ class PageSettings(GlassCard):
         self._wifi_scan_timer.setInterval(15000)  # 15초
         self._wifi_scan_timer.timeout.connect(self._auto_scan_tick)
 
+        # 네트워크 상태 폴링(유·무선 연결 상태 즉시 반영) — 탭 볼 때만 동작
+        self._net_status_timer = QTimer(self)
+        self._net_status_timer.setInterval(3000)  # 3초
+        self._net_status_timer.timeout.connect(self._net_status_tick)
+
         # 최초 로드
         self._refresh_wifi_status()
         self._refresh_eth_status()
@@ -2193,7 +2231,20 @@ class PageSettings(GlassCard):
             self.lbl_wifi_signal_val.setText("-")
             self.lbl_wifi_iface_val.setText("-")
             return
-        info = self._wifi.get_status()
+        worker = getattr(self, "_wifi_status_worker", None)
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    return
+            except RuntimeError:
+                self._wifi_status_worker = None
+        self._wifi_status_worker = WifiStatusWorker(self._wifi, self)
+        self._wifi_status_worker.sig_done.connect(self._on_wifi_status_done)
+        self._wifi_status_worker.finished.connect(lambda: setattr(self, "_wifi_status_worker", None))
+        self._wifi_status_worker.finished.connect(self._wifi_status_worker.deleteLater)
+        self._wifi_status_worker.start()
+
+    def _on_wifi_status_done(self, info: dict):
         self.lbl_wifi_ssid_val.setText(info["ssid"] or "(미연결)")
         self.lbl_wifi_ip_val.setText(info["ip"] or "-")
         self.lbl_wifi_signal_val.setText(f"{info['signal']}%" if info["signal"] else "-")
@@ -2313,16 +2364,38 @@ class PageSettings(GlassCard):
     def _start_auto_scan(self):
         if getattr(self, "_wifi_scan_timer", None) and not self._wifi_scan_timer.isActive():
             self._wifi_scan_timer.start()
+        if getattr(self, "_net_status_timer", None) and not self._net_status_timer.isActive():
+            self._net_status_timer.start()
 
     def _stop_auto_scan(self):
         if getattr(self, "_wifi_scan_timer", None) and self._wifi_scan_timer.isActive():
             self._wifi_scan_timer.stop()
+        if getattr(self, "_net_status_timer", None) and self._net_status_timer.isActive():
+            self._net_status_timer.stop()
+
+    def _net_status_tick(self):
+        """3초마다 유·무선 상태 재조회(백그라운드) — 케이블 탈착 즉시 반영."""
+        self._refresh_wifi_status()
+        self._refresh_eth_status()
 
     # --- 유선 이더넷 ---
     def _refresh_eth_status(self):
         if not getattr(self, "_wifi", None):
             return
-        info = self._wifi.get_ethernet_status()
+        worker = getattr(self, "_eth_status_worker", None)
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    return
+            except RuntimeError:
+                self._eth_status_worker = None
+        self._eth_status_worker = EthernetStatusWorker(self._wifi, self)
+        self._eth_status_worker.sig_done.connect(self._on_eth_status_done)
+        self._eth_status_worker.finished.connect(lambda: setattr(self, "_eth_status_worker", None))
+        self._eth_status_worker.finished.connect(self._eth_status_worker.deleteLater)
+        self._eth_status_worker.start()
+
+    def _on_eth_status_done(self, info: dict):
         self.lbl_eth_iface_val.setText(info["iface"] or "-")
         state = info["state"] or "-"
         state_color = "#77FF88" if state == "connected" else "#FF7777"

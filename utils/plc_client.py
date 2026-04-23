@@ -19,6 +19,9 @@ class PLCClient(QObject):
         self._last_ip = None
         self._last_port = None
         self._reconnect_running = False
+        # 사용자가 "연결끊기"를 눌렀는지 구분.
+        # True 인 동안에는 재연결 루프를 자동으로 띄우지 않음(사용자 의도 존중).
+        self._manual_disconnect = False
 
         # --- PLC 통신 설정 ---
         self.USE_HEADER = True      
@@ -67,27 +70,20 @@ class PLCClient(QObject):
         self.ADDR_AXIS_DATASET = self.AXIS_PARAM_ADDR + 33  # 데이터셋 트리거
 
     def connect_to_plc(self, ip, port):
-        """PLC 연결"""
+        """PLC 연결 요청 — 비차단(즉시 반환).
+        실제 소켓 연결은 백그라운드 재연결 루프가 수행. 성공/실패는 sig_connected 로 통지.
+        실패 시 주기적으로 계속 재시도 (disconnect_plc() 로 수동 중지 가능)."""
         self._last_ip = ip
         self._last_port = port
-        try:
-            print(f"[PLC] 연결 시도: {ip}:{port}")
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.settimeout(10.0)  # 3초 → 10초로 증가 (대용량 전송 대응)
-            self.sock.connect((ip, int(port)))
-            self.is_connected = True
-            self.sig_connected.emit(True)
-            print("[PLC] 연결 성공!")
-            self.start_monitoring()
-            return True, "연결 성공"
-        except Exception as e:
-            self.is_connected = False
-            self.sig_connected.emit(False)
-            print(f"[PLC] 연결 실패: {e}")
-            return False, f"연결 실패: {e}"
+        self._manual_disconnect = False
+        if self.is_connected:
+            return True, "이미 연결됨"
+        self._start_reconnect(immediate=True)
+        return True, "연결 시도 중..."
 
     def disconnect_plc(self):
-        """PLC 연결 해제"""
+        """PLC 연결 해제 — 사용자가 명시적으로 요청한 수동 끊기."""
+        self._manual_disconnect = True
         self._monitor_running = False
         self._reconnect_running = False
         self.is_connected = True  # 재연결 루프 while 조건(not is_connected) 즉시 탈출
@@ -156,9 +152,12 @@ class PLCClient(QObject):
             return None
 
     def send_packet(self, body):
-        """패킷 전송 (헤더 포함)"""
+        """패킷 전송 (헤더 포함).
+        주의: _start_reconnect() 는 self.lock 을 다시 잡으므로 lock 해제 후에 호출해야 함(데드락 방지)."""
         if not self.sock or not self.is_connected:
             return None
+        result = None
+        error_happened = False
         with self.lock:
             try:
                 length = len(body)
@@ -180,14 +179,17 @@ class PLCClient(QObject):
 
                 # 헤더 제거하고 데이터 반환
                 if len(response) > 12:
-                    return response[12:]
-                return response
+                    result = response[12:]
+                else:
+                    result = response
             except Exception as e:
                 print(f"[PLC] 통신 에러: {e}")
                 self.is_connected = False
                 self.sig_connected.emit(False)
-                self._start_reconnect()
-                return None
+                error_happened = True
+        if error_happened:
+            self._start_reconnect()
+        return result
 
     def read_words(self, area_code, start_addr, count):
         """Word 읽기"""
@@ -468,23 +470,29 @@ class PLCClient(QObject):
     # 모니터링 (PLC → HMI) - DT100~141
     # =========================================================
     
-    def _start_reconnect(self):
+    def _start_reconnect(self, immediate: bool = False):
         """자동 재연결 시작 (이미 실행 중이면 무시).
-        [S-2] self.lock 으로 보호 → 동시 에러 이벤트에서 중복 스레드 생성 방지."""
+        immediate=True: 첫 시도를 대기 없이 즉시 수행.
+        사용자가 수동 끊기를 했다면 재연결 안 함."""
         with self.lock:
+            if self._manual_disconnect:
+                return
             if self._reconnect_running or not self._last_ip:
                 return
             self._reconnect_running = True
-        threading.Thread(target=self._reconnect_loop, daemon=True).start()
+        threading.Thread(target=self._reconnect_loop, args=(immediate,), daemon=True).start()
 
-    def _reconnect_loop(self):
-        """5초 간격으로 재연결 시도"""
+    def _reconnect_loop(self, immediate: bool = False):
+        """기본 5초 간격 재연결 시도. 수동 끊기(_manual_disconnect) 발생 시 즉시 종료."""
         interval = 5
+        first = True
         try:
-            while not self.is_connected:
-                print(f"[PLC] {interval}초 후 재연결 시도... ({self._last_ip}:{self._last_port})")
-                time.sleep(interval)
-                if self.is_connected:
+            while not self.is_connected and not self._manual_disconnect:
+                if not (first and immediate):
+                    print(f"[PLC] {interval}초 후 재연결 시도... ({self._last_ip}:{self._last_port})")
+                    time.sleep(interval)
+                first = False
+                if self.is_connected or self._manual_disconnect:
                     break
                 try:
                     if self.sock:
@@ -493,14 +501,23 @@ class PLCClient(QObject):
                         except OSError:
                             pass
                     self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.sock.settimeout(5.0)
+                    self.sock.settimeout(3.0)  # 전송/수신 기본 3초 — 실제 PLC 전송은 수십 ms 수준
+                    # TCP keepalive — 랜선 단절을 OS 레벨에서 4~5초 내 감지
+                    self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    try:
+                        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 2)
+                        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 1)
+                        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+                    except (AttributeError, OSError):
+                        pass  # 플랫폼이 TCP_KEEPIDLE 등을 지원 안 하면 기본값 사용
+                    print(f"[PLC] 연결 시도: {self._last_ip}:{self._last_port}")
                     self.sock.connect((self._last_ip, int(self._last_port)))
                     self.is_connected = True
                     self.sig_connected.emit(True)
-                    print("[PLC] 재연결 성공!")
+                    print("[PLC] 연결 성공!")
                     self.start_monitoring()
                 except Exception as e:
-                    print(f"[PLC] 재연결 실패: {e}")
+                    print(f"[PLC] 연결 실패: {e}")
         finally:
             # 예외가 루프를 끊어도 반드시 플래그 해제 → 다음 에러 이벤트에서 재시작 가능
             with self.lock:

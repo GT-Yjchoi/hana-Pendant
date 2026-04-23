@@ -14,13 +14,90 @@ os.environ.setdefault("XMODIFIERS", "@im=ibus")
 os.environ.setdefault("QT_SCALE_FACTOR", "1")
 os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QFontDatabase
+from datetime import datetime
+from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtCore import Qt, QTimer, QObject, QEvent
+from PySide6.QtGui import QFont, QFontDatabase, QShortcut, QKeySequence
 from ui.main_window import MainWindow
 from ui.theme import APP_STYLESHEET
 from utils.plc_client import PLCClient
 from utils.paths import get_base_dir
+
+
+_screenshot_toast = None
+
+
+def _show_toast(window, msg, ms=1800):
+    """화면 하단 중앙에 간단한 알림 라벨을 잠깐 표시."""
+    global _screenshot_toast
+    if _screenshot_toast is None or _screenshot_toast.parent() is not window:
+        lbl = QLabel(window)
+        lbl.setStyleSheet(
+            "QLabel {"
+            " background: rgba(0,0,0,210);"
+            " color: white;"
+            " font-size: 18px;"
+            " font-weight: bold;"
+            " padding: 14px 24px;"
+            " border-radius: 10px;"
+            " border: 2px solid #468CFF;"
+            "}"
+        )
+        lbl.hide()
+        _screenshot_toast = lbl
+    _screenshot_toast.setText(msg)
+    _screenshot_toast.adjustSize()
+    x = (window.width() - _screenshot_toast.width()) // 2
+    y = window.height() - _screenshot_toast.height() - 40
+    _screenshot_toast.move(x, y)
+    _screenshot_toast.raise_()
+    _screenshot_toast.show()
+    QTimer.singleShot(ms, _screenshot_toast.hide)
+
+
+def _save_screenshot(window):
+    """현재 화면을 PNG 로 저장 + 토스트 알림 (사용설명서 캡처용)."""
+    out_dir = os.path.join(os.path.expanduser("~"), "screenshots")
+    os.makedirs(out_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(out_dir, f"pendant_{ts}.png")
+    pix = window.grab()
+    if pix.save(path, "PNG"):
+        print(f"[Screenshot] 저장: {path}")
+        _show_toast(window, f"캡처 완료: {os.path.basename(path)}")
+    else:
+        print(f"[Screenshot] 저장 실패: {path}")
+        _show_toast(window, "캡처 실패")
+
+
+class _LongPressScreenshot(QObject):
+    """화면 우상단 코너를 일정 시간 롱프레스 하면 스크린샷 저장."""
+    CORNER_PX = 100       # 우상단 100x100 영역
+    DURATION_MS = 3000    # 3초
+
+    def __init__(self, window):
+        super().__init__(window)
+        self._window = window
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(self.DURATION_MS)
+        self._timer.timeout.connect(lambda: _save_screenshot(self._window))
+
+    def eventFilter(self, obj, event):
+        et = event.type()
+        if et == QEvent.MouseButtonPress:
+            try:
+                gp = event.globalPosition().toPoint()
+            except AttributeError:
+                gp = event.globalPos()
+            local = self._window.mapFromGlobal(gp)
+            w = self._window.width()
+            if local.x() >= w - self.CORNER_PX and 0 <= local.y() <= self.CORNER_PX:
+                self._timer.start()
+        elif et == QEvent.MouseButtonRelease:
+            if self._timer.isActive():
+                self._timer.stop()
+        return False
 
 
 def _load_bundled_fonts(app: QApplication) -> None:
@@ -65,7 +142,12 @@ def main():
     window.setGeometry(screen.geometry())
     window.showFullScreen()
 
-    
+    # 스크린샷 트리거 — F12 키 + 우상단 100×100 코너 3초 롱프레스
+    QShortcut(QKeySequence(Qt.Key_F12), window,
+              activated=lambda: _save_screenshot(window))
+    _long_press_filter = _LongPressScreenshot(window)
+    app.installEventFilter(_long_press_filter)
+
     # 6. [NEW] 프로그램 종료 시 연결 해제
     app.aboutToQuit.connect(plc_client.disconnect_plc)
     

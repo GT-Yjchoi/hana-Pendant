@@ -30,22 +30,42 @@ class TouchComboBox(QComboBox):
 
         # 공통 스타일 적용
         self.setStyleSheet("""
-            QComboBox { 
-                background: rgba(255,255,255,10); 
-                border: 2px solid rgba(70,140,255,90); 
-                border-radius: 6px; 
-                color: white; 
-                font-size: 16px; 
-                font-weight: bold; 
+            QComboBox {
+                background: rgba(255,255,255,10);
+                border: 2px solid rgba(70,140,255,90);
+                border-radius: 6px;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
                 padding-left: 10px;
             }
             QComboBox::drop-down { border: none; width: 30px; }
-            QComboBox QAbstractItemView { 
-                background: #141E28; 
-                color: white; 
-                selection-background-color: #468CFF; 
-                font-size: 16px; 
-                padding: 5px; 
+            QComboBox QAbstractItemView {
+                background: #141E28;
+                color: white;
+                selection-background-color: #468CFF;
+                font-size: 16px;
+                padding: 5px;
                 outline: none;
             }
         """)
+        self._press_inside = False
+
+    def mousePressEvent(self, event):
+        # 팝업을 "뗀 순간"에 열기 위해 press 는 흡수만 한다.
+        # (press 에서 열면 손가락이 아직 화면에 있어서 팝업의 해당 항목이 hover 로 잡혀 버림)
+        if event.button() == Qt.LeftButton:
+            self._press_inside = self.rect().contains(event.position().toPoint())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._press_inside:
+            self._press_inside = False
+            if self.rect().contains(event.position().toPoint()):
+                self.showPopup()
+            event.accept()
+            return
+        self._press_inside = False
+        super().mouseReleaseEvent(event)

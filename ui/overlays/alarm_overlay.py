@@ -113,6 +113,26 @@ class AlarmOverlay(QWidget):
         box_layout.setContentsMargins(30, 20, 30, 20)
         box_layout.setSpacing(14)
 
+        # 닫기(X) 버튼 — 박스 우상단에 고정 위치. comm 스타일 알람에만 노출.
+        self.btn_close = QPushButton("✕", self.box)
+        self.btn_close.setFixedSize(36, 36)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #DDD;
+                font-size: 20px;
+                font-weight: bold;
+                border: 2px solid #888;
+                border-radius: 18px;
+            }
+            QPushButton:hover { color: white; border-color: #CCC; }
+            QPushButton:pressed { color: #AAA; border-color: #666; }
+        """)
+        self.btn_close.move(500 - 36 - 10, 10)
+        self.btn_close.clicked.connect(self._on_close_current)
+        self.btn_close.hide()
+
         # 제목
         self.lbl_title = QLabel("[!] SYSTEM ALARM [!]")
         self.lbl_title.setAlignment(Qt.AlignCenter)
@@ -200,7 +220,7 @@ class AlarmOverlay(QWidget):
     # 공개 API - 알람 추가/제거
     # ================================================================
 
-    def add_alarm(self, alarm_id, title, message, style='alarm', show_reset=True):
+    def add_alarm(self, alarm_id, title, message, style='alarm', show_reset=True, show_close=False):
         """알람 추가 또는 업데이트. 새 알람이면 해당 페이지로 자동 이동."""
         is_new = alarm_id not in self._alarms
         self._alarms[alarm_id] = {
@@ -208,6 +228,7 @@ class AlarmOverlay(QWidget):
             'message': message,
             'style': style,
             'show_reset': show_reset,
+            'show_close': show_close,
         }
         if is_new:
             self._order.append(alarm_id)
@@ -294,7 +315,7 @@ class AlarmOverlay(QWidget):
     def show_comm_error(self):
         self.add_alarm('comm', '[!] COMM ERROR [!]',
                        'PLC와의 통신이 끊어졌습니다.\n자동으로 재연결을 시도합니다.',
-                       'comm', show_reset=False)
+                       'comm', show_reset=False, show_close=True)
 
     def hide_comm_error(self):
         self.remove_alarm('comm')
@@ -315,6 +336,9 @@ class AlarmOverlay(QWidget):
         self.lbl_msg.setText(a['message'])
         self._apply_style(a['style'])
         self.btn_reset.setVisible(a['show_reset'])
+        self.btn_close.setVisible(a.get('show_close', False))
+        if self.btn_close.isVisible():
+            self.btn_close.raise_()
 
         total = len(self._order)
         self.lbl_page.setText(f"{self._current_idx + 1}/{total}")
@@ -339,6 +363,12 @@ class AlarmOverlay(QWidget):
             }}
             QLabel {{ background: transparent; border: none; }}
         """)
+
+    def _on_close_current(self):
+        if not self._order:
+            return
+        aid = self._order[self._current_idx]
+        self.remove_alarm(aid)
 
     def _on_prev(self):
         if self._current_idx > 0:

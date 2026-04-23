@@ -371,18 +371,23 @@ class MainWindow(QWidget):
         self.plc_client.connect_to_plc(target_ip, target_port)
 
     def _on_plc_connected(self, connected: bool):
-        """PLC 연결/해제 시 처리"""
+        """PLC 연결/해제 시 처리. 수동 끊기일 때는 통신 에러 팝업 띄우지 않음."""
         if connected:
             self.alarm_overlay.hide_comm_error()
             QTimer.singleShot(200, self._send_mode_to_plc)
-        else:
-            self.alarm_overlay.show_comm_error()
-            # [NEW] 통신 오류 발생 이력 기록 (전이 시에만)
-            if not getattr(self, '_prev_comm_err_logged', False):
-                record_alarm("COMM", 0, "PLC 통신 끊김")
-                self._prev_comm_err_logged = True
-        if connected:
             self._prev_comm_err_logged = False
+        else:
+            manual = getattr(self.plc_client, "_manual_disconnect", False)
+            if manual:
+                # 사용자가 직접 연결 해제 — 팝업/로그 억제
+                self.alarm_overlay.hide_comm_error()
+                self._prev_comm_err_logged = False
+            else:
+                self.alarm_overlay.show_comm_error()
+                # [NEW] 통신 오류 발생 이력 기록 (전이 시에만)
+                if not getattr(self, '_prev_comm_err_logged', False):
+                    record_alarm("COMM", 0, "PLC 통신 끊김")
+                    self._prev_comm_err_logged = True
 
     def _send_mode_to_plc(self):
         """PLC 연결 후 현재 로딩된 레시피 전체를 PLC 에 동기화.

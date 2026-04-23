@@ -5,7 +5,8 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel,
     QListWidget, QListWidgetItem, QDialog, QFrame,
     QSizePolicy, QScrollArea, QScroller, QGridLayout,
-    QScrollerProperties, QStyledItemDelegate, QInputDialog, QMessageBox
+    QScrollerProperties, QStyledItemDelegate, QInputDialog, QMessageBox,
+    QGraphicsColorizeEffect
 )
 
 from widgets.glass_card import GlassCard
@@ -162,7 +163,11 @@ class PositionOrderDialog(QDialog):
         self.setStyleSheet("QDialog { background: rgba(20, 30, 40, 250); border: 2px solid rgba(70, 140, 255, 120); border-radius: 12px; } QLabel { color: white; font-size: 18px; font-weight: bold; } QListWidget { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; font-size: 18px; color: #EEE; } QListWidget::item { height: 50px; padding-left: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); } QListWidget::item:selected { background: rgba(70, 140, 255, 0.4); border: 1px solid #468CFF; color: white; } QPushButton { background: rgba(255,255,255,0.1); border: 1px solid gray; border-radius: 6px; color: white; height: 50px; font-size: 16px; font-weight: bold; } QPushButton:pressed { background: rgba(255,255,255,0.3); }")
         layout = QVBoxLayout(self); layout.setContentsMargins(20, 20, 20, 20)
         layout.addWidget(QLabel("위치 명칭 보기 순서 변경")); layout.addWidget(QLabel("※ 실제 동작 순서는 변경되지 않습니다. (화면 표시용)"))
-        self.list_widget = QListWidget(); layout.addWidget(self.list_widget); self._load_list()
+        self.list_widget = QListWidget()
+        self.list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        QScroller.grabGesture(self.list_widget.viewport(), QScroller.TouchGesture)
+        QScroller.grabGesture(self.list_widget.viewport(), QScroller.LeftMouseButtonGesture)
+        layout.addWidget(self.list_widget); self._load_list()
         btn_layout = QHBoxLayout(); btn_up = QPushButton("▲ 위로"); btn_down = QPushButton("▼ 아래로"); btn_ok = QPushButton("적용 (Apply)"); btn_ok.setStyleSheet("background: rgba(70,140,255,0.4); border: 1px solid #468CFF;"); btn_cancel = QPushButton("취소")
         btn_up.clicked.connect(self._move_up); btn_down.clicked.connect(self._move_down); btn_ok.clicked.connect(self.accept); btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_up); btn_layout.addWidget(btn_down); btn_layout.addWidget(btn_cancel); btn_layout.addWidget(btn_ok); layout.addLayout(btn_layout)
@@ -421,6 +426,11 @@ class PagePosition(GlassCard):
         QScroller.grabGesture(data_scroll.viewport(), QScroller.TouchGesture)
         left_layout.addWidget(data_scroll, 1)
         self.btn_teach = QPushButton("현재 위치 기억 (TEACH)"); self.btn_teach.setProperty("class", "AutoControlBtn"); self.btn_teach.setProperty("variant", "start"); self.btn_teach.setMinimumHeight(55); self.btn_teach.setCursor(Qt.PointingHandCursor); self.btn_teach.clicked.connect(self._on_teach_clicked)
+        self._teach_gray_effect = QGraphicsColorizeEffect(self.btn_teach)
+        self._teach_gray_effect.setColor(QColor(160, 160, 160))
+        self._teach_gray_effect.setStrength(1.0)
+        self._teach_gray_effect.setEnabled(False)
+        self.btn_teach.setGraphicsEffect(self._teach_gray_effect)
         left_layout.addWidget(self.btn_teach)
 
         left_widget = QWidget(); left_widget.setLayout(left_layout)
@@ -428,7 +438,17 @@ class PagePosition(GlassCard):
         # [MIDDLE Panel]
         mid_layout = QVBoxLayout(); mid_layout.setSpacing(10)
         seq_select_layout = QHBoxLayout(); mid_title = QLabel("동작 순서"); mid_title.setProperty("class", "PosPanelTitle"); seq_select_layout.addWidget(mid_title)
-        self.seq_selector = TouchComboBox(); self.seq_selector.setMinimumWidth(120); self.seq_selector.setFixedHeight(40); self.seq_selector.setStyleSheet("QComboBox { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; color: white; font-weight: bold; padding-left: 10px; font-size: 16px; }"); self.seq_selector.currentIndexChanged.connect(self._on_seq_selector_changed)
+        self.seq_selector = TouchComboBox(); self.seq_selector.setMinimumWidth(120); self.seq_selector.setFixedHeight(40)
+        self.seq_selector.setStyleSheet(
+            "QComboBox { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); "
+            "border-radius: 4px; color: white; font-weight: bold; padding-left: 10px; font-size: 16px; }"
+            "QComboBox QAbstractItemView { background: #141E28; color: white; "
+            "selection-background-color: #468CFF; font-size: 20px; font-weight: bold; padding: 5px; outline: none; }"
+            "QComboBox QAbstractItemView::item { min-height: 42px; padding-left: 12px; }"
+            "QComboBox QAbstractItemView::item:hover { background: transparent; color: white; }"
+            "QComboBox QAbstractItemView::item:selected { background: #468CFF; color: white; }"
+        )
+        self.seq_selector.currentIndexChanged.connect(self._on_seq_selector_changed)
         seq_select_layout.addWidget(self.seq_selector); mid_layout.addLayout(seq_select_layout)
         
         self.preview_list = ClickableListWidget(); self.preview_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.preview_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -538,6 +558,7 @@ class PagePosition(GlassCard):
 
         # 현재 운전 상태 추적 (기억위치 클릭 시 오버레이 분기용)
         self._current_op_status = op_status
+        self._update_teach_button_state()
 
         # op_status: 1=자동, 2=확인운전 → 시퀀스 실행 중
         if op_status in (1, 2):
@@ -973,7 +994,15 @@ class PagePosition(GlassCard):
         for i in range(8):
             self.lbl_saved_vals[i].setText("---"); self.lbl_speed_vals[i].setText("-")
 
+    def _update_teach_button_state(self):
+        is_auto = self._current_op_status in (1, 2)
+        if self.btn_teach.isEnabled() == (not is_auto):
+            return
+        self.btn_teach.setEnabled(not is_auto)
+        self._teach_gray_effect.setEnabled(is_auto)
+
     def _on_teach_clicked(self):
+        if self._current_op_status in (1, 2): return
         if not self.point_combo.isEnabled(): return
         target_point_name = self.point_combo.currentText()
         if target_point_name not in self.position_points: return
