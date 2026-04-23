@@ -257,7 +257,7 @@ class PalletVisualizer(QWidget):
         
         self.sim_state = 0 
 
-        self.txt_z_level = "Z-Lev"
+        self.txt_z_level = "Z"
         self.txt_mc = " Injection MC (사출기)"
         self.update_language()
 
@@ -277,10 +277,10 @@ class PalletVisualizer(QWidget):
         if LanguageManager:
             lm = LanguageManager.instance()
             t = lm.get_text("z_level")
-            self.txt_z_level = t if t != "z_level" else "Z-Lev"
+            self.txt_z_level = t if t != "z_level" else "Z"
             t = lm.get_text("sim_mc")
             self.txt_mc = t if t != "sim_mc" else " Injection MC (사출기)"
-        self.update() 
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -296,31 +296,37 @@ class PalletVisualizer(QWidget):
         margin = 15 
         
         # --- Z축 ---
-        z_bar_width = 30 
+        z_bar_width = 30
         z_area_x = w - margin - z_bar_width
-        z_area_h = h - 2 * margin
-        
+        z_label_h = 20                              # "높이" 라벨 영역
+        z_bar_y = margin + z_label_h                # Z바는 라벨 아래부터 시작
+        z_area_h = h - z_bar_y - margin
+
+        # "높이" 라벨 (Z바 위쪽 — 겹침 없음)
+        painter.setPen(QColor(200, 200, 200))
+        painter.setFont(QFont("Arial", 11, QFont.Bold))
+        painter.drawText(z_area_x - 4, margin, z_bar_width + 8, z_label_h,
+                         Qt.AlignCenter, self.txt_z_level)
+
+        # Z바 배경
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(50, 55, 65))
-        painter.drawRoundedRect(z_area_x, margin, z_bar_width, z_area_h, 5, 5)
-        
+        painter.drawRoundedRect(z_area_x, z_bar_y, z_bar_width, z_area_h, 5, 5)
+
+        # 현재 Z레벨 채움
         if self.z_count > 0:
             current_display_z = self.cur_z
-            if self.sim_state == 2: 
-                 current_display_z = self.z_count
+            if self.sim_state == 2:
+                current_display_z = self.z_count
             else:
-                 current_display_z += 1
+                current_display_z += 1
 
             fill_h = (z_area_h / self.z_count) * current_display_z
             fill_h = min(fill_h, z_area_h)
-            
+
             color = "#64FF64" if self.sim_state == 2 else "#FFD280"
             painter.setBrush(QColor(color))
-            painter.drawRoundedRect(z_area_x, margin + z_area_h - fill_h, z_bar_width, fill_h, 5, 5)
-            
-        painter.setPen(Qt.white)
-        painter.setFont(QFont("Arial", 9))
-        painter.drawText(z_area_x, margin - 2, z_bar_width, 15, Qt.AlignCenter, self.txt_z_level)
+            painter.drawRoundedRect(z_area_x, z_bar_y + z_area_h - fill_h, z_bar_width, fill_h, 5, 5)
         
         # --- 사출기 ---
         grid_area_w = z_area_x - 2 * margin 
@@ -384,12 +390,15 @@ class PalletVisualizer(QWidget):
 # =========================================================
 class AxisControlPanel(QFrame):
     config_changed = Signal()
+    current_clicked = Signal(str)   # 사용자가 "현재위치(No.)" 클릭 → 축 이름 emit
+    enable_changed = Signal(bool)   # 패킹 사용 토글 (is_enable_host=True 인 패널만 발화)
 
-    def __init__(self, axis_name, color_theme, is_z_axis=False):
+    def __init__(self, axis_name, color_theme, is_z_axis=False, is_enable_host=False):
         super().__init__()
-        self.axis_name = axis_name 
+        self.axis_name = axis_name
         self.is_z_axis = is_z_axis
-        
+        self.is_enable_host = is_enable_host
+
         self.val_count = 1
         self.val_pitch = 10.0
         
@@ -402,28 +411,54 @@ class AxisControlPanel(QFrame):
         """)
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
+        layout.setSpacing(5)
+        layout.setContentsMargins(10, 8, 10, 8)
+
+        # 패킹 사용 토글 (X축 패널에만 표시).
+        # Y/Z 패널은 같은 높이의 투명 스페이서를 넣어 타이틀 수직 위치 정렬.
+        if is_enable_host:
+            self.btn_pack_enable = QPushButton()
+            self.btn_pack_enable.setCheckable(True)
+            self.btn_pack_enable.setChecked(False)
+            self.btn_pack_enable.setFixedHeight(68)
+            self.btn_pack_enable.setCursor(Qt.PointingHandCursor)
+            self.btn_pack_enable.clicked.connect(self._on_pack_enable_toggled)
+            self._update_pack_enable_style()
+            layout.addWidget(self.btn_pack_enable)
+        else:
+            self.btn_pack_enable = None
+            spacer = QWidget()
+            spacer.setFixedHeight(68)
+            spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            layout.addWidget(spacer)
+
         # 타이틀
         self.lbl_title = QLabel(f"{axis_name} 축 설정")
-        self.lbl_title.setStyleSheet(f"color: {color_theme}; font-size: 18px; font-weight: 900; background: transparent; border: none;")
+        self.lbl_title.setStyleSheet(f"color: {color_theme}; font-size: 16px; font-weight: 900; background: transparent; border: none;")
         self.lbl_title.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_title)
-        
+
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setStyleSheet("background: rgba(255,255,255,0.2); border: none; max-height: 1px;")
         layout.addWidget(line)
 
-        # 1. 현재 위치
+        # 1. 현재 위치 (클릭 시 사용자 임의 변경 가능)
         row1 = QHBoxLayout()
         self.lbl_cur = QLabel("현재위치(No.)")
         self.lbl_cur.setStyleSheet("color: #AAA; font-size: 14px; background: transparent; border: none;")
-        self.disp_current = QLabel("0")
-        self.disp_current.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.disp_current.setStyleSheet(f"color: white; font-size: 22px; font-weight: bold; background: rgba(0,0,0,0.3); border-radius: 4px; padding-right: 10px; border: 1px solid {color_theme};")
-        self.disp_current.setFixedHeight(38)
+        self.disp_current = QPushButton("0")
+        self.disp_current.setCursor(Qt.PointingHandCursor)
+        self.disp_current.setStyleSheet(
+            f"QPushButton {{ color: white; font-size: 22px; font-weight: bold; "
+            f"background: rgba(0,0,0,0.3); border-radius: 4px; padding-right: 10px; "
+            f"border: 1px solid {color_theme}; text-align: right; }} "
+            f"QPushButton:pressed {{ background: rgba(70,140,255,0.3); border: 1px solid #468CFF; }}"
+        )
+        self.disp_current.setFixedHeight(34)
+        self.disp_current.clicked.connect(
+            lambda: self.current_clicked.emit(self.axis_name.lower())
+        )
         row1.addWidget(self.lbl_cur)
         row1.addWidget(self.disp_current)
         layout.addLayout(row1)
@@ -432,13 +467,13 @@ class AxisControlPanel(QFrame):
         row2 = QHBoxLayout()
         self.lbl_set = QLabel("설정횟수(EA)")
         self.lbl_set.setStyleSheet("color: #AAA; font-size: 14px; background: transparent; border: none;")
-        
+
         self.btn_count = QPushButton(str(self.val_count))
         self.btn_count.setCursor(Qt.PointingHandCursor)
-        self.btn_count.setFixedHeight(42)
+        self.btn_count.setFixedHeight(34)
         self.btn_count.setStyleSheet(self._input_btn_style())
         self.btn_count.clicked.connect(self._on_count_clicked)
-        
+
         row2.addWidget(self.lbl_set)
         row2.addWidget(self.btn_count)
         layout.addLayout(row2)
@@ -447,34 +482,32 @@ class AxisControlPanel(QFrame):
         row3 = QHBoxLayout()
         self.lbl_pitch = QLabel("설정피치(mm)")
         self.lbl_pitch.setStyleSheet("color: #AAA; font-size: 14px; background: transparent; border: none;")
-        
+
         self.btn_pitch = QPushButton(f"{self.val_pitch:.2f}")
         self.btn_pitch.setCursor(Qt.PointingHandCursor)
-        self.btn_pitch.setFixedHeight(42)
+        self.btn_pitch.setFixedHeight(34)
         self.btn_pitch.setStyleSheet(self._input_btn_style())
         self.btn_pitch.clicked.connect(self._on_pitch_clicked)
-        
+
         row3.addWidget(self.lbl_pitch)
         row3.addWidget(self.btn_pitch)
         layout.addLayout(row3)
 
-        # 4. 방향 설정
-        if not is_z_axis:
-            self.lbl_dir = QLabel("진행 방향")
-            self.lbl_dir.setStyleSheet("color: #AAA; font-size: 14px; background: transparent; border: none; margin-top: 5px;")
-            layout.addWidget(self.lbl_dir)
-            
-            self.btn_dir = QPushButton("+ 방향 (정방향)")
-            self.btn_dir.setCheckable(True)
-            self.btn_dir.setChecked(True)
-            self.btn_dir.setFixedHeight(45)
-            self.btn_dir.setCursor(Qt.PointingHandCursor)
-            self.btn_dir.clicked.connect(self._on_dir_toggle)
-            self._update_dir_style()
-            layout.addWidget(self.btn_dir)
-        else:
-            self.lbl_dir = None
-            self.btn_dir = None
+        # 4. 방향 설정 (Z축 포함 모든 축에 표시)
+        #    X/Y 기본: + 방향 (검사 ON)
+        #    Z    기본: - 방향 (위로 쌓기: 로봇 좌표계에서 Z- 가 위쪽)
+        self.lbl_dir = QLabel("진행 방향")
+        self.lbl_dir.setStyleSheet("color: #AAA; font-size: 13px; background: transparent; border: none; margin-top: 3px;")
+        layout.addWidget(self.lbl_dir)
+
+        self.btn_dir = QPushButton("+ 방향 (정방향)")
+        self.btn_dir.setCheckable(True)
+        self.btn_dir.setChecked(not is_z_axis)   # Z 는 기본 -방향
+        self.btn_dir.setFixedHeight(38)
+        self.btn_dir.setCursor(Qt.PointingHandCursor)
+        self.btn_dir.clicked.connect(self._on_dir_toggle)
+        self._update_dir_style()
+        layout.addWidget(self.btn_dir)
 
         layout.addStretch(1)
         self.update_language()
@@ -490,8 +523,8 @@ class AxisControlPanel(QFrame):
             self.lbl_cur.setText(lm.get_text("curr_pos"))
             self.lbl_set.setText(lm.get_text("set_cnt"))
             self.lbl_pitch.setText(lm.get_text("set_pitch"))
-            
-            if not self.is_z_axis:
+
+            if self.btn_dir:
                 self.lbl_dir.setText(lm.get_text("dir_label"))
                 self._update_dir_text()
 
@@ -565,14 +598,55 @@ class AxisControlPanel(QFrame):
     def set_current_display(self, val):
         self.disp_current.setText(str(val))
 
+    # ───── 패킹 사용 토글 (is_enable_host=True 인 패널에만 존재) ─────
+    def _on_pack_enable_toggled(self):
+        self._update_pack_enable_style()
+        # 스타일 적용을 스캔 큐에 예약만 하면 이후 느린 PLC 송신이 끝날 때까지 리페인트가 미뤄짐.
+        # repaint() 로 강제 동기 그리기 → 버튼 상태 전환이 즉각 보이도록.
+        self.btn_pack_enable.repaint()
+        self.enable_changed.emit(bool(self.btn_pack_enable.isChecked()))
+
+    def set_pack_enabled(self, enabled):
+        """외부에서 초기 상태 세팅 (레시피 로드 후). signal 발화 안 함."""
+        if self.btn_pack_enable is None:
+            return
+        self.btn_pack_enable.blockSignals(True)
+        self.btn_pack_enable.setChecked(bool(enabled))
+        self.btn_pack_enable.blockSignals(False)
+        self._update_pack_enable_style()
+
+    def _update_pack_enable_style(self):
+        if self.btn_pack_enable is None:
+            return
+        if self.btn_pack_enable.isChecked():
+            self.btn_pack_enable.setText("● 패킹 사용")
+            self.btn_pack_enable.setStyleSheet(
+                "QPushButton { background: rgba(0,255,127,0.2); border: 2px solid #00FF7F; "
+                "color: #00FF7F; border-radius: 8px; font-size: 24px; font-weight: bold; }"
+            )
+        else:
+            self.btn_pack_enable.setText("○ 패킹 미사용")
+            self.btn_pack_enable.setStyleSheet(
+                "QPushButton { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); "
+                "color: #888; border-radius: 8px; font-size: 24px; font-weight: bold; } "
+                "QPushButton:hover { background: rgba(255,255,255,0.1); border: 1px solid #00FF7F; color: #AAA; }"
+            )
+
 
 # =========================================================
 # [메인 페이지] PagePacking
 # =========================================================
 class PagePacking(GlassCard):
-    def __init__(self):
+    sig_packing_changed = Signal()
+
+    def __init__(self, position_points=None, sequence_data=None, plc_client=None, packing_config=None):
         super().__init__("")
-        
+
+        self.position_points = position_points if position_points is not None else {}
+        self.sequence_data = sequence_data if sequence_data is not None else {}
+        self.plc_client = plc_client
+        self.packing_config = packing_config if packing_config is not None else {}
+
         if hasattr(self, 'title_label'):
             self.title_label.hide()
             if self.title_label.parentWidget() and self.title_label.parentWidget() != self:
@@ -580,7 +654,7 @@ class PagePacking(GlassCard):
 
         if self.layout():
             self.layout().setContentsMargins(10, 5, 10, 10)
-        
+
         main_layout = QHBoxLayout()
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -596,6 +670,14 @@ class PagePacking(GlassCard):
         self.vis_title.setAlignment(Qt.AlignCenter)
         self.vis_title.setStyleSheet("color: #DDD; font-size: 16px; font-weight: bold; border:none; background: transparent; margin-bottom: 5px;")
         vis_layout.addWidget(self.vis_title)
+
+        self.lbl_base_points = QLabel()
+        self.lbl_base_points.setAlignment(Qt.AlignCenter)
+        self.lbl_base_points.setWordWrap(True)
+        self.lbl_base_points.setStyleSheet(
+            "color: #64FFDA; font-size: 13px; font-weight: bold; border:none; background: transparent;"
+        )
+        vis_layout.addWidget(self.lbl_base_points)
         
         sim_ctrl_layout = QHBoxLayout()
         sim_ctrl_layout.setSpacing(10)
@@ -632,34 +714,44 @@ class PagePacking(GlassCard):
         settings_layout.setContentsMargins(0, 0, 0, 0)
         settings_layout.setSpacing(10)
         
-        self.panel_x = AxisControlPanel("X", "#00E5FF")
+        self.panel_x = AxisControlPanel("X", "#00E5FF", is_enable_host=True)
         self.panel_y = AxisControlPanel("Y", "#FFD280")
         self.panel_z = AxisControlPanel("Z", "#64FFDA", is_z_axis=True)
-        
-        self.panel_x.config_changed.connect(self._reset_and_play)
-        self.panel_y.config_changed.connect(self._reset_and_play)
-        self.panel_z.config_changed.connect(self._reset_and_play)
-        
+
+        self.panel_x.config_changed.connect(self._on_config_changed_internal)
+        self.panel_y.config_changed.connect(self._on_config_changed_internal)
+        self.panel_z.config_changed.connect(self._on_config_changed_internal)
+
+        self.panel_x.current_clicked.connect(self._on_current_idx_clicked)
+        self.panel_y.current_clicked.connect(self._on_current_idx_clicked)
+        self.panel_z.current_clicked.connect(self._on_current_idx_clicked)
+
+        self.panel_x.enable_changed.connect(self._on_pack_enable_toggled)
+
         settings_layout.addWidget(self.panel_x)
         settings_layout.addWidget(self.panel_y)
         settings_layout.addWidget(self.panel_z)
-        
+
         main_layout.addWidget(right_widget, 6)
-        
+
         self.body.addLayout(main_layout)
-        
-        self.plc_x = 0; self.plc_y = 0; self.plc_z = 0
-        self.plc_timer = QTimer(self)
-        self.plc_timer.timeout.connect(self._update_plc_data)
-        self.plc_timer.start(1000)
 
         self.anim_x = 0; self.anim_y = 0; self.anim_z = 0
         self.sim_timer = QTimer(self)
-        self.sim_timer.setInterval(300) 
+        self.sim_timer.setInterval(300)
         self.sim_timer.timeout.connect(self._update_animation)
-        
-        self.stack_order = 0 
+
+        self.stack_order = 0
         self.update_language()
+        self._refresh_base_points_label()
+
+        # PLC 모니터링 시그널 구독 (pack_idx 수신 시 베이스 포인트 좌표 갱신)
+        if self.plc_client:
+            self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
+
+        # 초기 config 반영 (packing_config dict에 값이 있으면 UI에 로드)
+        if self.packing_config:
+            self.refresh_ui()
 
     def update_language(self, lang_code=None):
         if not LanguageManager: return
@@ -676,38 +768,47 @@ class PagePacking(GlassCard):
         self.panel_z.update_language()
 
     def showEvent(self, event):
-        self._reset_and_play()
+        self._refresh_base_points_label()
+        self._reset_and_play()   # sim_timer 시작
         super().showEvent(event)
 
+    def hideEvent(self, event):
+        # [S-4] 페이지 숨김 시 시뮬레이션 타이머 중단 — 백그라운드 300ms 주기 paint 방지
+        if hasattr(self, 'sim_timer') and self.sim_timer.isActive():
+            self.sim_timer.stop()
+        super().hideEvent(event)
+
+    # 6가지 적층 순서: 첫 축이 가장 내부 루프 (가장 빨리 증가)
+    STACK_ORDERS = [
+        ("x", "y", "z"),  # 0: X → Y → Z
+        ("x", "z", "y"),  # 1: X → Z → Y
+        ("y", "x", "z"),  # 2: Y → X → Z
+        ("y", "z", "x"),  # 3: Y → Z → X
+        ("z", "x", "y"),  # 4: Z → X → Y
+        ("z", "y", "x"),  # 5: Z → Y → X
+    ]
+    STACK_ORDER_STYLES = [
+        ("#468CFF", "rgba(70, 140, 255, 0.2)"),
+        ("#FF9F80", "rgba(255, 159, 128, 0.2)"),
+        ("#FFD280", "rgba(255, 210, 128, 0.2)"),
+        ("#C9FF80", "rgba(201, 255, 128, 0.2)"),
+        ("#64FFDA", "rgba(100, 255, 218, 0.2)"),
+        ("#E040FB", "rgba(224, 64, 251, 0.2)"),
+    ]
+
     def _on_order_toggle(self):
-        self.stack_order = (self.stack_order + 1) % 4
+        self.stack_order = (self.stack_order + 1) % len(self.STACK_ORDERS)
         self._update_order_btn_text()
-        self._reset_and_play()
+        self._on_config_changed_internal()
 
     def _update_order_btn_text(self):
-        if not LanguageManager: return
-        lm = LanguageManager.instance()
-        
-        if self.stack_order == 0: 
-            key = "btn_x_first"
-            style = "border: 2px solid #468CFF; color: #468CFF;"
-            bg = "rgba(70, 140, 255, 0.2)"
-        elif self.stack_order == 1: 
-            key = "btn_y_first"
-            style = "border: 2px solid #FFD280; color: #FFD280;"
-            bg = "rgba(255, 210, 128, 0.2)"
-        elif self.stack_order == 2: 
-            key = "btn_z_first_x"
-            style = "border: 2px solid #64FFDA; color: #64FFDA;"
-            bg = "rgba(100, 255, 218, 0.2)"
-        else: 
-            key = "btn_z_first_y"
-            style = "border: 2px solid #E040FB; color: #E040FB;" 
-            bg = "rgba(224, 64, 251, 0.2)"
-            
-        self.btn_order.setText(lm.get_text(key))
+        order = self.STACK_ORDERS[self.stack_order % len(self.STACK_ORDERS)]
+        color, bg = self.STACK_ORDER_STYLES[self.stack_order % len(self.STACK_ORDER_STYLES)]
+        label = "→".join(ax.upper() for ax in order)
+        self.btn_order.setText(label)
         self.btn_order.setStyleSheet(f"""
-            QPushButton {{ background: {bg}; {style} border-radius: 8px; font-weight: bold; font-size: 14px; }}
+            QPushButton {{ background: {bg}; border: 2px solid {color}; color: {color};
+                           border-radius: 8px; font-weight: bold; font-size: 14px; }}
             QPushButton:hover {{ background: rgba(255, 255, 255, 0.1); }}
         """)
 
@@ -746,67 +847,179 @@ class PagePacking(GlassCard):
         self.sim_timer.start()
         self._update_visualizer(state=1)
 
-    def _update_plc_data(self):
-        self.panel_x.set_current_display(self.plc_x)
-        self.panel_y.set_current_display(self.plc_y)
-        self.panel_z.set_current_display(self.plc_z)
+    def _on_config_changed_internal(self):
+        """설정값 변경 시 config dict 동기화 + 자동저장 트리거 + 시뮬 재시작
+        + PLC 로 패킹 설정 즉시 전송"""
+        self._sync_to_packing_config()
+        self.sig_packing_changed.emit()
+        self._reset_and_play()
+        if self.plc_client and self.plc_client.is_connected:
+            self.plc_client.send_packing_config(self.packing_config)
+
+    def _on_pack_enable_toggled(self, enabled):
+        """패킹 사용 토글 (X축 패널 버튼) → packing_config['enabled'] 갱신.
+        PLC 송신·자동저장은 sig_packing_changed 로 main_window 가 일괄 처리 (중복 송신 방지)."""
+        self.packing_config["enabled"] = bool(enabled)
+        self.sig_packing_changed.emit()
+
+    def _sync_to_packing_config(self):
+        """AxisControlPanel 현재값 → self.packing_config dict"""
+        cfg = self.get_packing_config()
+        self.packing_config.clear()
+        self.packing_config.update(cfg)
+
+    def get_packing_config(self):
+        xc, xp, xd = self.panel_x.get_values()
+        yc, yp, yd = self.panel_y.get_values()
+        zc, zp, zd = self.panel_z.get_values()
+        cfg = {
+            "x_count": int(xc), "x_pitch": float(xp), "x_dir": int(xd),
+            "y_count": int(yc), "y_pitch": float(yp), "y_dir": int(yd),
+            "z_count": int(zc), "z_pitch": float(zp), "z_dir": int(zd),
+            "stack_order": int(self.stack_order),
+        }
+        if self.panel_x.btn_pack_enable is not None:
+            cfg["enabled"] = bool(self.panel_x.btn_pack_enable.isChecked())
+        else:
+            cfg["enabled"] = bool(self.packing_config.get("enabled", False))
+        return cfg
+
+    def refresh_ui(self):
+        """packing_config dict → UI 복원 (레시피 로드 후 호출)"""
+        cfg = self.packing_config or {}
+
+        def _apply(panel, count, pitch, direction=None):
+            panel.val_count = max(1, int(count))
+            panel.val_pitch = float(pitch)
+            panel.btn_count.setText(str(panel.val_count))
+            panel.btn_pitch.setText(f"{panel.val_pitch:.2f}")
+            if direction is not None and panel.btn_dir is not None:
+                panel.btn_dir.setChecked(int(direction) > 0)
+                panel._update_dir_text()
+                panel._update_dir_style()
+
+        _apply(self.panel_x, cfg.get("x_count", 5), cfg.get("x_pitch", 10.0), cfg.get("x_dir", 1))
+        _apply(self.panel_y, cfg.get("y_count", 4), cfg.get("y_pitch", 10.0), cfg.get("y_dir", 1))
+        _apply(self.panel_z, cfg.get("z_count", 3), cfg.get("z_pitch", 10.0), cfg.get("z_dir", -1))
+
+        # 패킹 사용 토글 상태 복원 (default False — 명시 플래그 없으면 미사용)
+        self.panel_x.set_pack_enabled(bool(cfg.get("enabled", False)))
+
+        self.stack_order = int(cfg.get("stack_order", 0)) % len(self.STACK_ORDERS)
+        self._update_order_btn_text()
+        self._refresh_base_points_label()
+        self._reset_and_play()
+
+    def _collect_pack_base_point_names(self):
+        """모든 시퀀스의 POS 스텝 중 pack_base=True인 스텝의 point_name 집합 반환"""
+        names = []
+        seen = set()
+        sequences = self.sequence_data
+        if isinstance(sequences, list):
+            sequences = {"Main": sequences}
+        if not isinstance(sequences, dict):
+            return names
+        for steps in sequences.values():
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                if step.get("type") != "POS":
+                    continue
+                if not step.get("pack_base"):
+                    continue
+                p_name = step.get("point_name")
+                if not p_name or p_name in seen:
+                    continue
+                seen.add(p_name)
+                names.append(p_name)
+        return names
+
+    def _refresh_base_points_label(self):
+        """시퀀스 POS 스텝 중 pack_base=True인 스텝의 포인트들을 표시"""
+        if not hasattr(self, 'lbl_base_points'):
+            return
+        bases = self._collect_pack_base_point_names()
+        if bases:
+            self.lbl_base_points.setText("베이스: " + ", ".join(bases))
+        else:
+            self.lbl_base_points.setText(
+                "⚠ 시퀀스 편집기의 POS 스텝에서 '파렛타이징 베이스'를 체크하세요"
+            )
+
+    def _on_monitor_data(self, data):
+        """PLC monitor_data 수신 → 현재 pack_idx 표시만 (좌표 덮어쓰기는 PLC 내부 fb_Packing 담당)"""
+        pack_idx = list(data.get('pack_idx', [0, 0, 0]))
+        self.panel_x.set_current_display(pack_idx[0] + 1)
+        self.panel_y.set_current_display(pack_idx[1] + 1)
+        self.panel_z.set_current_display(pack_idx[2] + 1)
+
+    def _on_current_idx_clicked(self, axis):
+        """사용자가 현재위치(No.)를 클릭 → 임의 인덱스로 변경"""
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        counts = {
+            "x": self.panel_x.get_values()[0],
+            "y": self.panel_y.get_values()[0],
+            "z": self.panel_z.get_values()[0],
+        }
+        max_idx = max(1, int(counts.get(axis, 1)))
+        # 현재 표시값 (1-based) → 편집 후 0-based 로 PLC 에 기록
+        cur_disp = {
+            "x": self.panel_x.disp_current.text(),
+            "y": self.panel_y.disp_current.text(),
+            "z": self.panel_z.disp_current.text(),
+        }.get(axis, "1")
+        try:
+            cur_val = max(1, int(cur_disp))
+        except ValueError:
+            cur_val = 1
+
+        dlg = PackingInputOverlay(
+            f"{axis.upper()} 축 현재위치 (1 ~ {max_idx})",
+            cur_val,
+            is_float=False,
+            parent=self.window(),
+        )
+        if dlg.exec() == PackingInputOverlay.Accepted:
+            new_val = int(dlg.get_value())
+            new_val = max(1, min(max_idx, new_val))
+            # PLC 에는 0-based 로 기록
+            self.plc_client.write_pack_idx(axis, new_val - 1)
 
     def _update_animation(self):
-        xc, _, _ = self.panel_x.get_values()
-        yc, _, _ = self.panel_y.get_values()
-        zc, _, _ = self.panel_z.get_values()
-        
-        if self.stack_order == 0: 
-            self.anim_x += 1
-            if self.anim_x >= xc:
-                self.anim_x = 0
-                self.anim_y += 1
-                if self.anim_y >= yc:
-                    self.anim_y = 0
-                    self.anim_z += 1
-                    
-        elif self.stack_order == 1: 
-            self.anim_y += 1
-            if self.anim_y >= yc:
-                self.anim_y = 0
-                self.anim_x += 1
-                if self.anim_x >= xc:
-                    self.anim_x = 0
-                    self.anim_z += 1
-                    
-        elif self.stack_order == 2: 
-            self.anim_z += 1
-            if self.anim_z >= zc:
-                self.anim_z = 0
-                self.anim_x += 1
-                if self.anim_x >= xc:
-                    self.anim_x = 0
-                    self.anim_y += 1
-                    
-        else: 
-            self.anim_z += 1
-            if self.anim_z >= zc:
-                self.anim_z = 0
-                self.anim_y += 1
-                if self.anim_y >= yc:
-                    self.anim_y = 0
-                    self.anim_x += 1
+        counts = {
+            "x": self.panel_x.get_values()[0],
+            "y": self.panel_y.get_values()[0],
+            "z": self.panel_z.get_values()[0],
+        }
+        anim = {"x": self.anim_x, "y": self.anim_y, "z": self.anim_z}
+        order = self.STACK_ORDERS[self.stack_order % len(self.STACK_ORDERS)]
 
+        # 첫 축부터 증가, 카운트 도달하면 리셋 + 다음 축 증가, ...
         finished = False
-        if self.stack_order in [0, 1]:
-            if self.anim_z >= zc: finished = True
-        elif self.stack_order == 2:
-            if self.anim_y >= yc: finished = True
-        else: 
-            if self.anim_x >= xc: finished = True
-            
+        for i, ax in enumerate(order):
+            anim[ax] += 1
+            if anim[ax] >= counts[ax]:
+                if i == len(order) - 1:
+                    # 마지막 축까지 오버플로 → 전체 완료
+                    finished = True
+                    break
+                anim[ax] = 0
+            else:
+                break
+
+        self.anim_x, self.anim_y, self.anim_z = anim["x"], anim["y"], anim["z"]
+
         if finished:
-            if self.stack_order in [0, 1]: self.anim_z = zc
-            elif self.stack_order == 2: self.anim_y = yc
-            else: self.anim_x = xc
+            last_ax = order[-1]
+            if last_ax == "x": self.anim_x = counts["x"]
+            elif last_ax == "y": self.anim_y = counts["y"]
+            else: self.anim_z = counts["z"]
             self._stop_simulation(finished=True)
             return
-        
+
         self._update_visualizer(state=1)
 
     def _update_visualizer(self, state):

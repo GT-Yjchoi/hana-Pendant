@@ -4,7 +4,7 @@ import struct
 import sys
 from utils.paths import get_settings_path as _get_settings_path
 from utils.json_utils import load_json, save_json
-from PySide6.QtCore import Qt, Signal, QEventLoop
+from PySide6.QtCore import Qt, Signal, QEventLoop, QThread
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
     QPushButton, QScrollArea, QGridLayout, QComboBox, 
@@ -35,6 +35,26 @@ try:
     from utils.languages import LanguageManager
 except ImportError:
     LanguageManager = None
+
+
+# =========================================================
+# [NEW] WiFi 백그라운드 스캔 워커 — nmcli 호출이 UI 블로킹하지 않게
+# =========================================================
+class WifiScanWorker(QThread):
+    sig_done = Signal(list)
+
+    def __init__(self, wifi_module, parent=None):
+        super().__init__(parent)
+        self._wifi = wifi_module
+
+    def run(self):
+        try:
+            networks = self._wifi.scan()
+        except Exception as e:
+            print(f"[WiFi] 스캔 에러: {e}")
+            networks = []
+        self.sig_done.emit(networks)
+
 
 # =========================================================
 # [NEW] 숫자/IP 입력 전용 오버레이 키패드
@@ -408,6 +428,11 @@ class PageSettings(GlassCard):
         self._init_interlock_tab()
         self.tabs.addTab(self.tab_interlock, "인터록 설정")
 
+        # 7. 네트워크 탭 (WiFi + 유선)
+        self.tab_wifi = QWidget()
+        self._init_wifi_tab()
+        self.tabs.addTab(self.tab_wifi, "네트워크")
+
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.body.addWidget(self.tabs)
 
@@ -430,12 +455,31 @@ class PageSettings(GlassCard):
         if self.tabs.currentIndex() == 2:
             self._load_params()
 
+        # 현재 탭이 네트워크라면 자동 스캔 시작
+        if self.tabs.widget(self.tabs.currentIndex()) is getattr(self, "tab_wifi", None):
+            self._refresh_wifi_status()
+            self._refresh_eth_status()
+            self._start_auto_scan()
+
         super().showEvent(event)
+
+    def hideEvent(self, event):
+        self._stop_auto_scan()
+        super().hideEvent(event)
 
     def _on_tab_changed(self, index):
         """탭 전환 시 파라미터 탭이면 자동으로 불러오기"""
         if index == 2:
             self._load_params()
+
+        # 네트워크 탭 진입/이탈 처리
+        if self.tabs.widget(index) is getattr(self, "tab_wifi", None):
+            self._refresh_wifi_status()
+            self._refresh_eth_status()
+            self._scan_wifi(silent=True)
+            self._start_auto_scan()
+        else:
+            self._stop_auto_scan()
 
     def set_plc_client(self, client):
         self.plc_client = client
@@ -1184,7 +1228,7 @@ class PageSettings(GlassCard):
     # [Tab 5] 알람 메시지
     # ----------------------------------------------------------------------
     def _init_alarm_tab(self):
-        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS, save_sequence_alarms
+        from ui.overlays.alarm_overlay import USER_ALARMS, save_user_alarms
 
         main_layout = QVBoxLayout(self.tab_alarm)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -1248,7 +1292,7 @@ class PageSettings(GlassCard):
         self._refresh_alarm_list()
 
     def _refresh_alarm_list(self):
-        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        from ui.overlays.alarm_overlay import USER_ALARMS
 
         layout = self._alarm_list_layout
         # 기존 행 제거 (stretch 제외)
@@ -1261,8 +1305,8 @@ class PageSettings(GlassCard):
             QWidget#AlarmRow { background: rgba(255,255,255,0.04); border-radius: 6px; }
             QWidget#AlarmRow:hover { background: rgba(255,255,255,0.08); }
         """
-        for no in sorted(SEQUENCE_ALARMS.keys()):
-            msg = SEQUENCE_ALARMS[no]
+        for no in sorted(USER_ALARMS.keys()):
+            msg = USER_ALARMS[no]
             row = QWidget()
             row.setObjectName("AlarmRow")
             row.setFixedHeight(48)
@@ -1307,8 +1351,8 @@ class PageSettings(GlassCard):
             layout.insertWidget(layout.count() - 1, row)
 
     def _alarm_next_no(self):
-        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
-        return max(SEQUENCE_ALARMS.keys(), default=0) + 1
+        from ui.overlays.alarm_overlay import USER_ALARMS
+        return max(USER_ALARMS.keys(), default=0) + 1
 
     def _alarm_input(self, title, current=""):
         """알람 메시지 입력: 터치키보드 → QInputDialog 순으로 시도"""
@@ -1322,35 +1366,35 @@ class PageSettings(GlassCard):
         return msg.strip() if ok and msg.strip() else None
 
     def _add_alarm(self):
-        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        from ui.overlays.alarm_overlay import USER_ALARMS
         no = self._alarm_next_no()
         msg = self._alarm_input(f"A-{no:03d} 알람 메시지 입력")
         if msg is None:
             return
-        SEQUENCE_ALARMS[no] = msg
+        USER_ALARMS[no] = msg
         self._refresh_alarm_list()
 
     def _edit_alarm(self, no):
-        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
-        current = SEQUENCE_ALARMS.get(no, "")
+        from ui.overlays.alarm_overlay import USER_ALARMS
+        current = USER_ALARMS.get(no, "")
         msg = self._alarm_input(f"A-{no:03d} 알람 메시지 수정", current)
         if msg is None:
             return
-        SEQUENCE_ALARMS[no] = msg
+        USER_ALARMS[no] = msg
         self._refresh_alarm_list()
 
     def _delete_alarm(self, no):
-        from ui.overlays.alarm_overlay import SEQUENCE_ALARMS
+        from ui.overlays.alarm_overlay import USER_ALARMS
         from ui.dialogs.sequence_utils import DarkConfirmDialog
         dlg = DarkConfirmDialog("알람 삭제", f"A-{no:03d} 알람을 삭제하시겠습니까?", self)
         if dlg.exec() == QDialog.Accepted:
-            SEQUENCE_ALARMS.pop(no, None)
+            USER_ALARMS.pop(no, None)
             self._refresh_alarm_list()
 
     def _save_alarms(self):
-        from ui.overlays.alarm_overlay import save_sequence_alarms
+        from ui.overlays.alarm_overlay import save_user_alarms
         from ui.dialogs.sequence_utils import DarkMessageDialog
-        save_sequence_alarms()
+        save_user_alarms()
         DarkMessageDialog("저장 완료", "알람 메시지가 저장되었습니다.", parent=self).exec()
 
     # ----------------------------------------------------------------------
@@ -1395,17 +1439,18 @@ class PageSettings(GlassCard):
         grid_axis.setHorizontalSpacing(10)
         grid_axis.setVerticalSpacing(10)
         
-        headers = ["축 이름", "사용 여부", "운전 방향", "스트로크 한계", "가감속 시간"]
+        headers = ["축 이름", "사용 여부", "운전 방향", "스트로크 한계", "가감속 시간", "PPR (pulses/rev)"]
         for c, h in enumerate(headers):
             lbl = QLabel(h)
             lbl.setStyleSheet("color: #BBB; font-weight: bold; font-size: 13px;")
             lbl.setAlignment(Qt.AlignCenter)
             grid_axis.addWidget(lbl, 0, c)
-            
+
         self.chk_axis_uses = []
         self.btn_axis_dirs = []
         self.edt_axis_strokes = []
         self.edt_axis_accels = []
+        self.edt_axis_ppr = []
         
         for i, name in enumerate(AXIS_NAMES):
             row = i + 1
@@ -1450,7 +1495,15 @@ class PageSettings(GlassCard):
             edt_acc.clicked.connect(lambda e=edt_acc, t=f"{name} 가감속": self._open_keypad(e, is_ip=False))
             grid_axis.addWidget(edt_acc, row, 4)
             self.edt_axis_accels.append(edt_acc)
-            
+
+            # PPR (Pulses Per Revolution) - 서보 1회전당 지령펄스수
+            edt_ppr = ClickableLineEdit("15000")
+            edt_ppr.setAlignment(Qt.AlignCenter)
+            edt_ppr.setStyleSheet(LINE_EDIT_STYLE)
+            edt_ppr.clicked.connect(lambda e=edt_ppr, t=f"{name} PPR": self._open_keypad(e, is_ip=False))
+            grid_axis.addWidget(edt_ppr, row, 5)
+            self.edt_axis_ppr.append(edt_ppr)
+
         vbox.addWidget(grp_axis)
         
         # -- [2] 기타 설정 (데이터셋) --
@@ -1612,6 +1665,14 @@ class PageSettings(GlassCard):
             for i in range(8):
                 val = data[25 + i]
                 self.edt_axis_accels[i].setText(str(val))
+
+            # PPR (DT15034~15049, 8축 × DWORD) - 0이면 기본값 15000 표시
+            for i in range(8):
+                idx = 34 + i * 2
+                low  = data[idx] if idx < len(data) else 0
+                high = data[idx + 1] if idx + 1 < len(data) else 0
+                val = low | (high << 16)
+                self.edt_axis_ppr[i].setText(str(val if val > 0 else 15000))
         except Exception as e:
             print(f"Param Load Error: {e}")
 
@@ -1637,10 +1698,12 @@ class PageSettings(GlassCard):
             for i in range(8):
                 send_data[1 + i] = self.btn_axis_dirs[i].property("dir_value")
                 
+            axis_strokes_list = []
             for i in range(8):
                 text = self.edt_axis_strokes[i].text().replace(" mm", "").strip()
                 try: val_float = float(text)
                 except: val_float = 0.0
+                axis_strokes_list.append(val_float)
                 val = int(val_float * 1000)
                 low, high = val & 0xFFFF, (val >> 16) & 0xFFFF
                 idx = 9 + (i * 2)
@@ -1650,12 +1713,20 @@ class PageSettings(GlassCard):
                 try: val = int(self.edt_axis_accels[i].text())
                 except: val = 100
                 send_data[25 + i] = val
-                
+
+            # PPR (DT15034~15049, 8축 × DWORD) - 축별 서보 1회전당 지령펄스수
+            for i in range(8):
+                try: val = int(self.edt_axis_ppr[i].text())
+                except: val = 15000
+                idx = 34 + i * 2
+                send_data[idx]     = val & 0xFFFF          # Low
+                send_data[idx + 1] = (val >> 16) & 0xFFFF  # High
+
             # PLC에 전송
             self.plc_client.write_words(0x09, self.plc_client.AXIS_PARAM_ADDR, send_data)
             
-            # ★ settings.json에 축 설정 저장
-            self._save_axis_settings(axis_uses_list)
+            # ★ settings.json에 축 설정 저장 (사용여부 + 스트로크 한계)
+            self._save_axis_settings(axis_uses_list, axis_strokes_list)
             
             dlg = ConfirmOverlay("적용 완료", "시스템 파라미터가 PLC와 파일에 저장되었습니다.", btn_yes="확인", parent=self.window())
             dlg.btn_cancel.hide(); dlg.exec()
@@ -1800,18 +1871,21 @@ class PageSettings(GlassCard):
     # ★ [신규] 축 설정 저장/로드 (settings.json)
     # =========================================================
     
-    def _save_axis_settings(self, axis_uses_list):
+    def _save_axis_settings(self, axis_uses_list, axis_strokes_list=None):
         """
-        축 사용 여부를 settings.json에 저장
-        axis_uses_list: [True, True, True, False, False, ...] (8개)
+        축 사용 여부 + 스트로크 한계를 settings.json에 저장
+        axis_uses_list: [True, True, True, False, False, ...] (8개 bool)
+        axis_strokes_list: [100.0, 200.0, ...] (8개 float, mm 단위). None 이면 스트로크는 건드리지 않음.
         """
         try:
             path = _get_settings_path()
             settings = load_json(path) or {}
             settings["axis_uses"] = axis_uses_list
+            if axis_strokes_list is not None:
+                settings["axis_strokes"] = axis_strokes_list
             save_json(path, settings)
-            print(f"[Settings] 축 설정 저장 완료: {axis_uses_list}")
-            
+            print(f"[Settings] 축 설정 저장 완료: uses={axis_uses_list}, strokes={axis_strokes_list}")
+
         except Exception as e:
             print(f"[Settings] 축 설정 저장 실패: {e}")
     
@@ -1922,3 +1996,479 @@ class PageSettings(GlassCard):
             data["interlock_mandatory"] = dlg.get_mandatory()
             data["interlock_exclusive"] = dlg.get_exclusive()
             save_json(path, data)
+
+    # ----------------------------------------------------------------------
+    # [Tab 7] 네트워크 (WiFi + 유선)
+    # ----------------------------------------------------------------------
+    def _init_wifi_tab(self):
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        from PySide6.QtCore import QTimer
+        from utils import wifi_manager
+
+        self._wifi = wifi_manager
+
+        # 공용 라벨 팩토리
+        def _lbl(txt, bold=False, color="#DDD"):
+            l = QLabel(txt)
+            style = f"color: {color}; font-size: 14px;"
+            if bold:
+                style += " font-weight: bold;"
+            l.setStyleSheet(style)
+            return l
+
+        btn_style = """
+            QPushButton {
+                background: rgba(70, 140, 255, 0.18);
+                border: 1px solid rgba(70, 140, 255, 0.6);
+                border-radius: 6px; color: #DDEEFF;
+                padding: 7px 16px; font-size: 14px; font-weight: bold;
+            }
+            QPushButton:pressed { background: rgba(70, 140, 255, 0.35); }
+            QPushButton:disabled { color: #888; border-color: #555; background: rgba(255,255,255,0.05); }
+        """
+        btn_danger = """
+            QPushButton {
+                background: rgba(255, 70, 70, 0.15);
+                border: 1px solid rgba(255, 70, 70, 0.5);
+                border-radius: 6px; color: #FFCCCC;
+                padding: 7px 16px; font-size: 14px; font-weight: bold;
+            }
+            QPushButton:pressed { background: rgba(255, 70, 70, 0.3); }
+        """
+
+        outer = QVBoxLayout(self.tab_wifi)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }" + SCROLLBAR_STYLE)
+        QScroller.grabGesture(scroll.viewport(), QScroller.TouchGesture)
+        QScroller.grabGesture(scroll.viewport(), QScroller.LeftMouseButtonGesture)
+
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(content)
+        root.setContentsMargins(20, 15, 20, 15)
+        root.setSpacing(15)
+
+        # ===================== 무선 (WiFi) =====================
+        grp_wifi = QGroupBox("무선 (WiFi)")
+        grp_wifi.setStyleSheet(GROUPBOX_STYLE)
+        wifi_box = QVBoxLayout(grp_wifi)
+        wifi_box.setContentsMargins(20, 30, 20, 15)
+        wifi_box.setSpacing(10)
+
+        s_lay = QGridLayout()
+        s_lay.setHorizontalSpacing(15)
+        s_lay.setVerticalSpacing(8)
+        self.lbl_wifi_ssid_val = _lbl("-", bold=True, color="#00E5FF")
+        self.lbl_wifi_ip_val = _lbl("-", bold=True, color="#FFD280")
+        self.lbl_wifi_signal_val = _lbl("-", color="#DDD")
+        self.lbl_wifi_iface_val = _lbl("-", color="#AAA")
+        s_lay.addWidget(_lbl("SSID:"), 0, 0)
+        s_lay.addWidget(self.lbl_wifi_ssid_val, 0, 1)
+        s_lay.addWidget(_lbl("신호:"), 0, 2)
+        s_lay.addWidget(self.lbl_wifi_signal_val, 0, 3)
+        s_lay.addWidget(_lbl("IP 주소:"), 1, 0)
+        s_lay.addWidget(self.lbl_wifi_ip_val, 1, 1)
+        s_lay.addWidget(_lbl("인터페이스:"), 1, 2)
+        s_lay.addWidget(self.lbl_wifi_iface_val, 1, 3)
+        s_lay.setColumnStretch(1, 1)
+        s_lay.setColumnStretch(3, 1)
+        wifi_box.addLayout(s_lay)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        self.btn_wifi_refresh = QPushButton("새로고침")
+        self.btn_wifi_refresh.setStyleSheet(btn_style)
+        self.btn_wifi_refresh.clicked.connect(self._refresh_wifi_status)
+        self.btn_wifi_scan = QPushButton("네트워크 스캔")
+        self.btn_wifi_scan.setStyleSheet(btn_style)
+        self.btn_wifi_scan.clicked.connect(self._scan_wifi)
+        self.btn_wifi_disconnect = QPushButton("연결 해제")
+        self.btn_wifi_disconnect.setStyleSheet(btn_danger)
+        self.btn_wifi_disconnect.clicked.connect(self._disconnect_wifi)
+        btn_row.addWidget(self.btn_wifi_refresh)
+        btn_row.addWidget(self.btn_wifi_scan)
+        btn_row.addStretch(1)
+        btn_row.addWidget(self.btn_wifi_disconnect)
+        wifi_box.addLayout(btn_row)
+
+        self.list_wifi = QListWidget()
+        self.list_wifi.setMinimumHeight(200)
+        self.list_wifi.setStyleSheet("""
+            QListWidget {
+                background: rgba(0, 0, 0, 0.25);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #EEE;
+                font-size: 15px;
+                padding: 4px;
+            }
+            QListWidget::item {
+                padding: 10px 12px;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
+            }
+            QListWidget::item:selected {
+                background: rgba(70, 140, 255, 0.25);
+                color: #FFFFFF;
+            }
+        """ + SCROLLBAR_STYLE)
+        self.list_wifi.itemDoubleClicked.connect(self._on_wifi_item_activated)
+        wifi_box.addWidget(self.list_wifi)
+
+        root.addWidget(grp_wifi)
+
+        # ===================== 유선 (Ethernet) =====================
+        grp_eth = QGroupBox("유선 (Ethernet)")
+        grp_eth.setStyleSheet(GROUPBOX_STYLE.replace("rgba(255, 255, 255, 0.15)", "rgba(255, 210, 128, 0.35)").replace("#DDD", "#FFD280"))
+        eth_box = QVBoxLayout(grp_eth)
+        eth_box.setContentsMargins(20, 30, 20, 15)
+        eth_box.setSpacing(10)
+
+        e_lay = QGridLayout()
+        e_lay.setHorizontalSpacing(15)
+        e_lay.setVerticalSpacing(8)
+        self.lbl_eth_iface_val = _lbl("-", bold=True, color="#FFD280")
+        self.lbl_eth_state_val = _lbl("-", color="#DDD")
+        self.lbl_eth_method_val = _lbl("-", color="#DDD")
+        self.lbl_eth_ip_val = _lbl("-", bold=True, color="#00E5FF")
+        self.lbl_eth_gw_val = _lbl("-", color="#DDD")
+        self.lbl_eth_conn_val = _lbl("-", color="#AAA")
+        e_lay.addWidget(_lbl("인터페이스:"), 0, 0)
+        e_lay.addWidget(self.lbl_eth_iface_val, 0, 1)
+        e_lay.addWidget(_lbl("상태:"), 0, 2)
+        e_lay.addWidget(self.lbl_eth_state_val, 0, 3)
+        e_lay.addWidget(_lbl("IP 주소:"), 1, 0)
+        e_lay.addWidget(self.lbl_eth_ip_val, 1, 1)
+        e_lay.addWidget(_lbl("방식:"), 1, 2)
+        e_lay.addWidget(self.lbl_eth_method_val, 1, 3)
+        e_lay.addWidget(_lbl("게이트웨이:"), 2, 0)
+        e_lay.addWidget(self.lbl_eth_gw_val, 2, 1)
+        e_lay.addWidget(_lbl("연결 프로파일:"), 2, 2)
+        e_lay.addWidget(self.lbl_eth_conn_val, 2, 3)
+        e_lay.setColumnStretch(1, 1)
+        e_lay.setColumnStretch(3, 1)
+        eth_box.addLayout(e_lay)
+
+        eth_btn_row = QHBoxLayout()
+        eth_btn_row.setSpacing(10)
+        self.btn_eth_refresh = QPushButton("새로고침")
+        self.btn_eth_refresh.setStyleSheet(btn_style)
+        self.btn_eth_refresh.clicked.connect(self._refresh_eth_status)
+        self.btn_eth_dhcp = QPushButton("DHCP 사용")
+        self.btn_eth_dhcp.setStyleSheet(btn_style)
+        self.btn_eth_dhcp.clicked.connect(self._apply_eth_dhcp)
+        self.btn_eth_static = QPushButton("고정 IP 설정")
+        self.btn_eth_static.setStyleSheet(btn_style)
+        self.btn_eth_static.clicked.connect(self._open_eth_static_dialog)
+        eth_btn_row.addWidget(self.btn_eth_refresh)
+        eth_btn_row.addWidget(self.btn_eth_dhcp)
+        eth_btn_row.addStretch(1)
+        eth_btn_row.addWidget(self.btn_eth_static)
+        eth_box.addLayout(eth_btn_row)
+
+        root.addWidget(grp_eth)
+        root.addStretch(1)
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+        # 주기적 스캔 타이머 — 탭이 보일 때만 동작
+        self._wifi_scan_timer = QTimer(self)
+        self._wifi_scan_timer.setInterval(15000)  # 15초
+        self._wifi_scan_timer.timeout.connect(self._auto_scan_tick)
+
+        # 최초 로드
+        self._refresh_wifi_status()
+        self._refresh_eth_status()
+
+    def _refresh_wifi_status(self):
+        if not getattr(self, "_wifi", None):
+            return
+        if not self._wifi.is_available():
+            self.lbl_wifi_ssid_val.setText("nmcli 없음")
+            self.lbl_wifi_ip_val.setText("-")
+            self.lbl_wifi_signal_val.setText("-")
+            self.lbl_wifi_iface_val.setText("-")
+            return
+        info = self._wifi.get_status()
+        self.lbl_wifi_ssid_val.setText(info["ssid"] or "(미연결)")
+        self.lbl_wifi_ip_val.setText(info["ip"] or "-")
+        self.lbl_wifi_signal_val.setText(f"{info['signal']}%" if info["signal"] else "-")
+        self.lbl_wifi_iface_val.setText(info["iface"] or "-")
+
+    def _scan_wifi(self, silent: bool = False):
+        """WiFi 스캔을 백그라운드 스레드에서 실행 (UI 블로킹 방지)."""
+        if not getattr(self, "_wifi", None) or not self._wifi.is_available():
+            return
+        # 중복 스캔 방지 — 진행 중인 워커 있으면 무시
+        # deleteLater 후 Python 참조는 남아도 C++ 객체가 이미 삭제됐을 수 있으므로 RuntimeError 방어
+        worker = getattr(self, "_scan_worker", None)
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    return
+            except RuntimeError:
+                # C++ 객체 이미 소멸 — 참조 버리고 계속
+                self._scan_worker = None
+
+        if not silent:
+            self.btn_wifi_scan.setEnabled(False)
+            self.btn_wifi_scan.setText("스캔 중...")
+
+        self._scan_worker = WifiScanWorker(self._wifi, self)
+        self._scan_worker.sig_done.connect(
+            lambda networks, s=silent: self._on_scan_done(networks, s)
+        )
+        # 스레드 종료 시: Python 참조 클리어 → deleteLater (순서 중요)
+        self._scan_worker.finished.connect(self._on_scan_worker_finished)
+        self._scan_worker.finished.connect(self._scan_worker.deleteLater)
+        self._scan_worker.start()
+
+    def _on_scan_worker_finished(self):
+        """워커 스레드 종료 슬롯 — Python 참조를 None 으로 해제."""
+        self._scan_worker = None
+
+    def _on_scan_done(self, networks, silent: bool):
+        """백그라운드 WiFi 스캔 완료 시 UI 갱신 (메인 스레드에서 호출됨)."""
+        if not silent:
+            self.btn_wifi_scan.setEnabled(True)
+            self.btn_wifi_scan.setText("네트워크 스캔")
+
+        from PySide6.QtWidgets import QListWidgetItem
+        # 선택 유지용 현재 하이라이트 SSID 기억
+        prev_sel = None
+        cur_item = self.list_wifi.currentItem()
+        if cur_item:
+            d = cur_item.data(Qt.UserRole)
+            if d:
+                prev_sel = d.get("ssid")
+
+        self.list_wifi.clear()
+        if not networks:
+            self.list_wifi.addItem(QListWidgetItem("(발견된 네트워크가 없습니다)"))
+            return
+        for net in networks:
+            ssid = net["ssid"]
+            sig = net["signal"] or "0"
+            lock = "🔒 " if net["security"] and net["security"] != "--" else ""
+            mark = "● " if net["in_use"] else "   "
+            item = QListWidgetItem(f"{mark}{lock}{ssid}   ({sig}%)")
+            item.setData(Qt.UserRole, net)
+            self.list_wifi.addItem(item)
+            if ssid == prev_sel:
+                self.list_wifi.setCurrentItem(item)
+
+    def _on_wifi_item_activated(self, item):
+        net = item.data(Qt.UserRole)
+        if not net:
+            return
+        ssid = net["ssid"]
+        secured = bool(net["security"]) and net["security"] != "--"
+        password = None
+        if secured:
+            if TouchKeyboard is None:
+                self._show_wifi_msg("오류", "터치 키보드 모듈을 사용할 수 없습니다.")
+                return
+            kb = TouchKeyboard(title=f"'{ssid}' 암호", default_text="", parent=self)
+            if kb.exec() != QDialog.Accepted:
+                return
+            password = kb.get_text()
+            if not password:
+                return
+        self.btn_wifi_scan.setEnabled(False)
+        QApplication.processEvents()
+        try:
+            res = self._wifi.connect(ssid, password)
+        finally:
+            self.btn_wifi_scan.setEnabled(True)
+        if res.get("ok") == "1":
+            self._show_wifi_msg("연결 완료", f"'{ssid}' 에 연결되었습니다.")
+        else:
+            self._show_wifi_msg("연결 실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_wifi_status()
+
+    def _disconnect_wifi(self):
+        if not getattr(self, "_wifi", None) or not self._wifi.is_available():
+            return
+        res = self._wifi.disconnect()
+        if res.get("ok") != "1":
+            self._show_wifi_msg("해제 실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_wifi_status()
+
+    def _show_wifi_msg(self, title, message):
+        dlg = ConfirmOverlay(title, message, btn_yes="확인", btn_no="닫기", parent=self)
+        dlg.btn_cancel.hide()
+        dlg.exec()
+
+    # --- 주기적 스캔 제어 ---
+    def _auto_scan_tick(self):
+        # 사용자가 비밀번호 입력 등 대화형 동작 중이면 스킵
+        if not self.btn_wifi_scan.isEnabled():
+            return
+        self._scan_wifi(silent=True)
+
+    def _start_auto_scan(self):
+        if getattr(self, "_wifi_scan_timer", None) and not self._wifi_scan_timer.isActive():
+            self._wifi_scan_timer.start()
+
+    def _stop_auto_scan(self):
+        if getattr(self, "_wifi_scan_timer", None) and self._wifi_scan_timer.isActive():
+            self._wifi_scan_timer.stop()
+
+    # --- 유선 이더넷 ---
+    def _refresh_eth_status(self):
+        if not getattr(self, "_wifi", None):
+            return
+        info = self._wifi.get_ethernet_status()
+        self.lbl_eth_iface_val.setText(info["iface"] or "-")
+        state = info["state"] or "-"
+        state_color = "#77FF88" if state == "connected" else "#FF7777"
+        self.lbl_eth_state_val.setStyleSheet(f"color: {state_color}; font-size: 14px; font-weight: bold;")
+        self.lbl_eth_state_val.setText(state)
+        self.lbl_eth_ip_val.setText(info["ip"] or "-")
+        self.lbl_eth_gw_val.setText(info["gateway"] or "-")
+        method_map = {"auto": "DHCP", "manual": "고정 IP"}
+        self.lbl_eth_method_val.setText(method_map.get(info["method"], info["method"] or "-"))
+        self.lbl_eth_conn_val.setText(info["connection"] or "-")
+
+    def _apply_eth_dhcp(self):
+        if not getattr(self, "_wifi", None):
+            return
+        res = self._wifi.set_ethernet_dhcp()
+        if res.get("ok") == "1":
+            self._show_wifi_msg("DHCP 적용", "유선 연결을 DHCP로 변경했습니다.")
+        else:
+            self._show_wifi_msg("실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_eth_status()
+
+    def _open_eth_static_dialog(self):
+        cur = self._wifi.get_ethernet_status()
+        dlg = _EthernetStaticDialog(
+            current_ip=cur["ip"],
+            current_gateway=cur["gateway"],
+            parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        ip = dlg.ip_value
+        gw = dlg.gateway_value
+        prefix = dlg.prefix_value
+        dns = dlg.dns_value
+        res = self._wifi.set_ethernet_static(ip, prefix, gw, dns)
+        if res.get("ok") == "1":
+            self._show_wifi_msg("고정 IP 적용", f"{ip}/{prefix} 로 설정했습니다.")
+        else:
+            self._show_wifi_msg("실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_eth_status()
+
+
+class _EthernetStaticDialog(QDialog):
+    """유선 고정 IP 입력 다이얼로그"""
+    def __init__(self, current_ip="", current_gateway="", parent=None):
+        super().__init__(parent)
+        self.setModal(True)
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        if parent:
+            main = parent.window()
+            self.resize(main.size())
+
+        self.ip_value = current_ip
+        self.prefix_value = 24
+        self.gateway_value = current_gateway
+        self.dns_value = "8.8.8.8"
+
+        bg = QVBoxLayout(self)
+        bg.setAlignment(Qt.AlignCenter)
+        bg.setContentsMargins(0, 0, 0, 0)
+
+        container = QFrame()
+        container.setFixedSize(520, 380)
+        container.setStyleSheet("""
+            QFrame { background: #1A1F2B; border: 2px solid #468CFF; border-radius: 14px; }
+            QLabel { background: transparent; border: none; color: #DDD; font-size: 15px; font-weight: bold; }
+            QLineEdit {
+                background: rgba(0,0,0,0.25); color: #FFD280;
+                border: 1px solid rgba(255,255,255,0.2); border-radius: 6px;
+                padding: 8px 10px; font-size: 18px; font-weight: bold;
+            }
+        """)
+        bg.addWidget(container)
+
+        v = QVBoxLayout(container)
+        v.setContentsMargins(25, 25, 25, 20)
+        v.setSpacing(12)
+
+        title = QLabel("고정 IP 설정")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #468CFF; font-size: 20px; font-weight: 900;")
+        v.addWidget(title)
+
+        def _row(label_text, edit):
+            row = QHBoxLayout()
+            lbl = QLabel(label_text)
+            lbl.setFixedWidth(100)
+            row.addWidget(lbl)
+            row.addWidget(edit, 1)
+            return row
+
+        self.edit_ip = ClickableLineEdit(current_ip or "192.168.1.100")
+        self.edit_ip.setReadOnly(True)
+        self.edit_ip.clicked.connect(lambda: self._pick_ip(self.edit_ip))
+
+        self.edit_prefix = ClickableLineEdit("24")
+        self.edit_prefix.setReadOnly(True)
+        self.edit_prefix.clicked.connect(lambda: self._pick_num(self.edit_prefix))
+
+        self.edit_gw = ClickableLineEdit(current_gateway or "192.168.1.1")
+        self.edit_gw.setReadOnly(True)
+        self.edit_gw.clicked.connect(lambda: self._pick_ip(self.edit_gw))
+
+        self.edit_dns = ClickableLineEdit("8.8.8.8")
+        self.edit_dns.setReadOnly(True)
+        self.edit_dns.clicked.connect(lambda: self._pick_ip(self.edit_dns))
+
+        v.addLayout(_row("IP 주소", self.edit_ip))
+        v.addLayout(_row("서브넷(/bit)", self.edit_prefix))
+        v.addLayout(_row("게이트웨이", self.edit_gw))
+        v.addLayout(_row("DNS", self.edit_dns))
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setFixedHeight(46)
+        btn_cancel.setStyleSheet("QPushButton { background:#34495E; color:white; border-radius:8px; font-size:15px; font-weight:bold; }")
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok = QPushButton("적용")
+        btn_ok.setFixedHeight(46)
+        btn_ok.setStyleSheet("QPushButton { background:#2980B9; color:white; border:1px solid #3498DB; border-radius:8px; font-size:15px; font-weight:bold; }")
+        btn_ok.clicked.connect(self._on_accept)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
+        v.addLayout(btn_row)
+
+    def _pick_ip(self, edit):
+        dlg = NumberInputOverlay(edit.text(), is_ip=True, parent=self)
+        if dlg.exec():
+            edit.setText(dlg.result_val)
+
+    def _pick_num(self, edit):
+        dlg = NumberInputOverlay(edit.text(), is_ip=False, parent=self)
+        if dlg.exec():
+            edit.setText(dlg.result_val)
+
+    def _on_accept(self):
+        try:
+            prefix = int(self.edit_prefix.text().strip() or "24")
+            if not (1 <= prefix <= 32):
+                raise ValueError
+        except ValueError:
+            prefix = 24
+        self.ip_value = self.edit_ip.text().strip()
+        self.prefix_value = prefix
+        self.gateway_value = self.edit_gw.text().strip()
+        self.dns_value = self.edit_dns.text().strip()
+        self.accept()

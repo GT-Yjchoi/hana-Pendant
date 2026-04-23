@@ -16,14 +16,34 @@ os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QFontDatabase
 from ui.main_window import MainWindow
 from ui.theme import APP_STYLESHEET
 from utils.plc_client import PLCClient
+from utils.paths import get_base_dir
+
+
+def _load_bundled_fonts(app: QApplication) -> None:
+    fonts_dir = os.path.join(get_base_dir(), "assets", "fonts")
+    if not os.path.isdir(fonts_dir):
+        return
+    families = []
+    for name in os.listdir(fonts_dir):
+        if name.lower().endswith((".ttf", ".otf")):
+            fid = QFontDatabase.addApplicationFont(os.path.join(fonts_dir, name))
+            if fid != -1:
+                families.extend(QFontDatabase.applicationFontFamilies(fid))
+    if families:
+        app.setFont(QFont(families[0], 11))
+
 
 def main():
     # 1. 앱 생성
     app = QApplication(sys.argv)
-    
+
+    # 번들된 한글 폰트 로드 (시스템 폰트 설치 불필요)
+    _load_bundled_fonts(app)
+
     # 2. 기본 스타일 'Fusion'으로 설정
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLESHEET)

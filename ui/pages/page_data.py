@@ -98,7 +98,7 @@ class GlassConfirmDialog(QDialog):
 class PageData(GlassCard):
     sig_file_loaded = Signal(str)
 
-    def __init__(self, sequence_data=None, position_points=None, timer_library=None, mode_data=None, view_order_data=None):
+    def __init__(self, sequence_data=None, position_points=None, timer_library=None, mode_data=None, view_order_data=None, speed_state=None, packing_config=None):
         # [수정] 타이틀 제거
         super().__init__("")
         
@@ -120,7 +120,9 @@ class PageData(GlassCard):
         self.timer_library = timer_library if timer_library is not None else {}
         self.mode_data = mode_data if mode_data is not None else []
         self.view_order_data = view_order_data if view_order_data is not None else []
-        
+        self.speed_state = speed_state if speed_state is not None else {"speed_level": 10}
+        self.packing_config = packing_config if packing_config is not None else {}
+
         self.save_dir = get_recipes_dir()
         self.current_filename = None
         
@@ -316,7 +318,24 @@ class PageData(GlassCard):
         except Exception as e:
             self.lbl_info.setText(f"X 오류: {e}")
 
+    def _reset_button_state(self):
+        """모달 팝업 뜰 때 버튼이 pressed/hover 시각 상태에 갇히는 문제 방지.
+        sender 버튼의 down/hover 속성 해제 + 포커스 제거 + 리페인트."""
+        btn = self.sender()
+        if btn is None:
+            return
+        try:
+            btn.setDown(False)
+            btn.setAttribute(Qt.WA_UnderMouse, False)
+            btn.clearFocus()
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.update()
+        except Exception:
+            pass
+
     def _on_new_clicked(self):
+        self._reset_button_state()
         if "Main" not in self.sequence_data:
             self.sequence_data["Main"] = []
         if not isinstance(self.sequence_data["Main"], list):
@@ -361,6 +380,7 @@ class PageData(GlassCard):
                 self._perform_save(filepath, safe_name)
 
     def _on_save_clicked(self):
+        self._reset_button_state()
         lm = LanguageManager.instance() if LanguageManager else None
         
         if not self.current_filename or self.current_filename == "No Data":
@@ -401,6 +421,8 @@ class PageData(GlassCard):
             "timer_library": self.timer_library,
             "mode": self.mode_data,
             "view_order": self.view_order_data,
+            "speed_level": int(self.speed_state.get("speed_level", 10)),
+            "packing_config": self.packing_config,
             "user_modes": ModeManager.instance().to_dict() if ModeManager else {}
         }
 
@@ -436,6 +458,7 @@ class PageData(GlassCard):
                 print(f"[AutoSave] Error: {e}")
 
     def _on_load_clicked(self):
+        self._reset_button_state()
         item = self.file_list.currentItem()
         lm = LanguageManager.instance() if LanguageManager else None
         
@@ -491,6 +514,16 @@ class PageData(GlassCard):
                 if i < len(self.mode_data):
                     self.mode_data[i] = val
 
+            try:
+                self.speed_state["speed_level"] = max(1, min(10, int(new_data.get("speed_level", 10))))
+            except (TypeError, ValueError):
+                self.speed_state["speed_level"] = 10
+
+            self.packing_config.clear()
+            pc = new_data.get("packing_config", {})
+            if isinstance(pc, dict):
+                self.packing_config.update(pc)
+
             self.current_filename = item.text()
             self.sig_file_loaded.emit(item.text())
 
@@ -510,6 +543,7 @@ class PageData(GlassCard):
             err.exec()
 
     def _on_del_clicked(self):
+        self._reset_button_state()
         item = self.file_list.currentItem()
         lm = LanguageManager.instance() if LanguageManager else None
         

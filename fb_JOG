@@ -1,0 +1,393 @@
+(* 
+(* =====================================================
+   FB_JOG_8Axis - 8축 JOG 펑션블록
+   ===================================================== *)
+
+FUNCTION_BLOCK FB_JOG_8Axis
+
+(* =====================================================
+   VAR_INPUT - 입력 변수
+   ===================================================== *)
+VAR_INPUT
+    (* --- JOG 방향 입력 --- *)
+    b_1축_역방향 : BOOL;
+    b_1축_정방향 : BOOL;
+    b_2축_역방향 : BOOL;
+    b_2축_정방향 : BOOL;
+    b_3축_역방향 : BOOL;
+    b_3축_정방향 : BOOL;
+    b_4축_역방향 : BOOL;
+    b_4축_정방향 : BOOL;
+    b_5축_역방향 : BOOL;
+    b_5축_정방향 : BOOL;
+    b_6축_역방향 : BOOL;
+    b_6축_정방향 : BOOL;
+    b_7축_역방향 : BOOL;
+    b_7축_정방향 : BOOL;
+    b_8축_역방향 : BOOL;
+    b_8축_정방향 : BOOL;
+
+    (* --- 축별 리밋+ 위치 (정방향 목표위치) --- *)
+    di_1축_리밋플러스 : DINT;
+    di_2축_리밋플러스 : DINT;
+    di_3축_리밋플러스 : DINT;
+    di_4축_리밋플러스 : DINT;
+    di_5축_리밋플러스 : DINT;
+    di_6축_리밋플러스 : DINT;
+    di_7축_리밋플러스 : DINT;
+    di_8축_리밋플러스 : DINT;
+
+    (* --- 공통 속도/가감속 --- *)
+    di_JogSpeed     : DINT;
+    i_AccTime       : INT;
+    i_DecTime       : INT;
+
+    (* --- JOG 속도 단계 선택 (조그 팝업 1~5) --- *)
+    (* 1: 8000  /  2: 20000  /  3: 50000  /  4: 80000  /  5: 100000 *)
+    i_Jog_Speed_Set : INT;
+END_VAR
+
+(* =====================================================
+   VAR_OUTPUT - 출력 변수
+   ===================================================== *)
+VAR_OUTPUT
+    b_1축_실행 : BOOL;
+    b_2축_실행 : BOOL;
+    b_3축_실행 : BOOL;
+    b_4축_실행 : BOOL;
+    b_5축_실행 : BOOL;
+    b_6축_실행 : BOOL;
+    b_7축_실행 : BOOL;
+    b_8축_실행 : BOOL;
+END_VAR
+
+(* =====================================================
+   VAR - 내부 변수
+   ===================================================== *)
+VAR
+    TableData     : DUT_TableData;  (* 테이블 데이터 구조체 *)
+    i_TableNumber : INT;            (* 테이블 번호 저장용 10001 or 10002 *)
+END_VAR
+
+(* =====================================================
+   BODY - 메인 로직
+   ===================================================== *)
+*)
+
+(* =====================================================
+   JOG 속도 단계 → udi_JogSpeed 매핑
+   i_Jog_Speed_Set: 조그 팝업의 속도 선택값 (1~5)
+   범위 밖이면 기본값(1단계: 8000) 적용
+   ===================================================== *)
+CASE i_Jog_Speed_Set OF
+    1: udi_JogSpeed := UDINT#8000;
+    2: udi_JogSpeed := UDINT#20000;
+    3: udi_JogSpeed := UDINT#50000;
+    4: udi_JogSpeed := UDINT#80000;
+    5: udi_JogSpeed := UDINT#100000;
+ELSE
+    udi_JogSpeed := UDINT#8000;   (* 방어: 기본 저속 *)
+END_CASE;
+
+
+if NOT(b_Enable) then
+	(* --- 공통 테이블 데이터 고정값 설정 --- *)
+	TableData.ControlCode := 16#0001;  (* E point *)
+	TableData.Pattern     := 16#0000;  (* End *)
+	TableData.dummy1      := 0;
+	TableData.dummy2      := 0;
+	TableData.AccTime     := i_AccTime;
+	TableData.DecTime     := i_DecTime;
+	TableData.TargetSpeed := udi_JogSpeed;
+	TableData.AuxPoint    := 0;
+	TableData.DwellTime   := 0;
+	TableData.AuxOutput   := 0;
+	TableData.dummy3      := 0;
+	TableData.dummy4      := 0;
+
+	(* =====================================================
+	   1축 JOG  뱅크: 16#0B00  테이블번호지정: 16#0100
+	   ===================================================== *)
+	IF b_1축_역방향 THEN
+		(* 역방향: 목표위치 0, 테이블 10001 어드레스 16#0270 *)
+		TableData.TargetPosition := 0;
+		F151_WRT(s1_BankSlot := 16#0B00,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0270);
+		(* 실행할 테이블 번호 10001 지정 *)
+		i_TableNumber := 10001;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0100);
+		b_1축_실행 := TRUE;
+
+	ELSIF b_1축_정방향 THEN
+		(* 정방향: 목표위치 리밋+, 테이블 10002 어드레스 16#0280 *)
+		TableData.TargetPosition := di_1축_LP;
+		F151_WRT(s1_BankSlot := 16#0B00,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0280);
+		(* 실행할 테이블 번호 10002 지정 *)
+		i_TableNumber := 10002;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0100);
+		b_1축_실행 := TRUE;
+
+	ELSE
+		b_1축_실행 := FALSE;
+	END_IF;
+
+	(* =====================================================
+	   2축 JOG  뱅크: 16#1500  테이블번호지정: 16#0101
+	   ===================================================== *)
+	IF b_2축_역방향 THEN
+		TableData.TargetPosition := di_2축_LN;
+		F151_WRT(s1_BankSlot := 16#1500,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0270);
+		i_TableNumber := 10001;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0101);
+		b_2축_실행 := TRUE;
+
+	ELSIF b_2축_정방향 THEN
+		TableData.TargetPosition := di_2축_LP;
+		F151_WRT(s1_BankSlot := 16#1500,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0280);
+		i_TableNumber := 10002;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0101);
+		b_2축_실행 := TRUE;
+
+	ELSE
+		b_2축_실행 := FALSE;
+	END_IF;
+
+	(* =====================================================
+	   3축 JOG  뱅크: 16#1F00  테이블번호지정: 16#0102
+	   ===================================================== *)
+	IF b_3축_역방향 THEN
+		TableData.TargetPosition := 0;
+		F151_WRT(s1_BankSlot := 16#1F00,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0270);
+		i_TableNumber := 10001;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0102);
+		b_3축_실행 := TRUE;
+
+	ELSIF b_3축_정방향 THEN
+		TableData.TargetPosition := di_3축_LP;
+		F151_WRT(s1_BankSlot := 16#1F00,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0280);
+		i_TableNumber := 10002;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0102);
+		b_3축_실행 := TRUE;
+
+	ELSE
+		b_3축_실행 := FALSE;
+	END_IF;
+
+	(* =====================================================
+	   4축 JOG  뱅크: 16#2900  테이블번호지정: 16#0103
+	   ===================================================== *)
+	IF b_4축_역방향 THEN
+		TableData.TargetPosition := di_4축_LN;
+		F151_WRT(s1_BankSlot := 16#2900,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0270);
+		i_TableNumber := 10001;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0103);
+		b_4축_실행 := TRUE;
+
+	ELSIF b_4축_정방향 THEN
+		TableData.TargetPosition := di_4축_LP;
+		F151_WRT(s1_BankSlot := 16#2900,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0280);
+		i_TableNumber := 10002;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0103);
+		b_4축_실행 := TRUE;
+
+	ELSE
+		b_4축_실행 := FALSE;
+	END_IF;
+
+	(* =====================================================
+	   5축 JOG  뱅크: 16#3300  테이블번호지정: 16#0104
+	   ===================================================== *)
+	IF b_5축_역방향 THEN
+		TableData.TargetPosition := 0;
+		F151_WRT(s1_BankSlot := 16#3300,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0270);
+		i_TableNumber := 10001;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0104);
+		b_5축_실행 := TRUE;
+
+	ELSIF b_5축_정방향 THEN
+		TableData.TargetPosition := di_5축_LP;
+		F151_WRT(s1_BankSlot := 16#3300,
+				 s2_Start    := Adr_Of_Var(TableData),
+				 n_Number    := 14,
+				 d_Start     := 16#0280);
+		i_TableNumber := 10002;
+		F151_WRT(s1_BankSlot := 16#0000,
+				 s2_Start    := Adr_Of_Var(i_TableNumber),
+				 n_Number    := 1,
+				 d_Start     := 16#0104);
+		b_5축_실행 := TRUE;
+
+	ELSE
+		b_5축_실행 := FALSE;
+	END_IF;
+
+end_if;
+
+if (b_Enable) then
+	JogData.AccTime := i_AccTime;
+	JogData.DecTime := i_DecTime;
+	JogData.TargetSpeed := udi_JogSpeed;
+		
+	if DF(b_1축_역방향 OR b_1축_정방향) then
+		F151_WRT(s1_BankSlot := 16#0200, 
+		s2_Start := Adr_Of_Var(JogData), 
+		n_Number := 5, 
+		d_Start := 16#0029);
+	end_if;
+	
+	if DF(b_2축_역방향 OR b_2축_정방향) then
+		F151_WRT(s1_BankSlot := 16#0C00, 
+		s2_Start := Adr_Of_Var(JogData), 
+		n_Number := 5, 
+		d_Start := 16#0029);
+	end_if;
+	
+	if DF(b_3축_역방향 OR b_3축_정방향) then
+		F151_WRT(s1_BankSlot := 16#1600, 
+		s2_Start := Adr_Of_Var(JogData), 
+		n_Number := 5, 
+		d_Start := 16#0029);
+	end_if;
+	
+	if DF(b_4축_역방향 OR b_4축_정방향) then
+		F151_WRT(s1_BankSlot := 16#2000, 
+		s2_Start := Adr_Of_Var(JogData), 
+		n_Number := 5, 
+		d_Start := 16#0029);
+	end_if;
+	
+	if DF(b_5축_역방향 OR b_5축_정방향) then
+		F151_WRT(s1_BankSlot := 16#2A00, 
+		s2_Start := Adr_Of_Var(JogData), 
+		n_Number := 5, 
+		d_Start := 16#0029);
+	end_if;
+	(* =====================================================
+	   1축 JOG 
+	   ===================================================== *)
+	if (b_1축_역방향) then
+		b_1축N := TRUE;
+	else
+		b_1축N := FALSE;
+	end_if;
+	
+	if (b_1축_정방향) then
+		b_1축P := TRUE;
+	else
+		b_1축P := FALSE;
+	end_if;
+	
+	(* =====================================================
+	   2축 JOG 
+	   ===================================================== *)
+	if (b_2축_역방향) then
+		b_2축N := TRUE;
+	else
+		b_2축N := FALSE;
+	end_if;
+	
+	if (b_2축_정방향) then
+		b_2축P := TRUE;
+	else
+		b_2축P := FALSE;
+	end_if;
+	
+	(* =====================================================
+	   3축 JOG 
+	   ===================================================== *)
+	if (b_3축_역방향) then
+		b_3축N := TRUE;
+	else
+		b_3축N := FALSE;
+	end_if;
+	
+	if (b_3축_정방향) then
+		b_3축P := TRUE;
+	else
+		b_3축P := FALSE;
+	end_if;
+	
+	(* =====================================================
+	   4축 JOG 
+	   ===================================================== *)
+	if (b_4축_역방향) then
+		b_4축N := TRUE;
+	else
+		b_4축N := FALSE;
+	end_if;
+	
+	if (b_4축_정방향) then
+		b_4축P := TRUE;
+	else
+		b_4축P := FALSE;
+	end_if;
+	
+	(* =====================================================
+	   5축 JOG 
+	   ===================================================== *)
+	if (b_5축_역방향) then
+		b_5축N := TRUE;
+	else
+		b_5축N := FALSE;
+	end_if;
+	
+	if (b_5축_정방향) then
+		b_5축P := TRUE;
+	else
+		b_5축P := FALSE;
+	end_if;
+	
+end_if;

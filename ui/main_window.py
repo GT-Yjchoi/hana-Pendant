@@ -1,6 +1,8 @@
+import copy
 import json
 import os
 import sys
+import threading
 from datetime import datetime
 from utils.paths import get_settings_path, get_recipes_dir
 from utils.json_utils import load_json, save_json
@@ -19,6 +21,7 @@ from ui.pages.page_position import PagePosition
 from ui.pages.page_timer import PageTimer
 from ui.pages.page_packing import PagePacking
 from ui.pages.page_data import PageData
+from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY
 from ui.pages.page_manual import PageManual
 from ui.pages.page_auto import PageAuto
 from ui.pages.page_settings import PageSettings
@@ -27,7 +30,10 @@ from ui.pages.page_settings import PageSettings
 from ui.dialogs.jog_control_dialog import JogControlDialog
 
 # ★ [추가] 알람 오버레이 임포트
-from ui.overlays.alarm_overlay import AlarmOverlay
+from ui.overlays.alarm_overlay import AlarmOverlay, STEP_ALARM_DESCRIPTIONS, USER_ALARMS
+from ui.overlays.alarm_history_overlay import AlarmHistoryOverlay
+from utils.alarm_history import record as record_alarm
+from utils.op_history import record as record_op
 
 # 유틸리티 임포트
 from utils.plc_client import PLCClient
@@ -54,9 +60,9 @@ except ImportError:
 
 
 # ============================================================
-# 시퀀스 팝업 메시지 테이블 (w_SeqPopup 코드 → 제목, 메시지)
-# PLC에서 w_SeqPopup에 아래 코드를 넣으면 해당 팝업이 표시됩니다.
-# 키: 팝업 코드 (WORD, 1~65535)
+# 사용자 알람 테이블 (w_UserAlarm 코드 → 제목, 메시지)
+# PLC에서 w_UserAlarm(DT159) 에 아래 코드를 넣으면 해당 알람이 표시됩니다.
+# 키: 알람 코드 (WORD, 1~65535)
 # 값: (제목, 메시지) 튜플
 # ============================================================
 
@@ -108,6 +114,8 @@ class MainWindow(QWidget):
         self.master_timer_library = {}
         self.master_mode_data = [False] * 40
         self.master_view_order = []
+        self.master_speed_state = {"speed_level": 10}
+        self.master_packing_config = {}
 
         self.current_recipe_name = None
 
@@ -156,6 +164,15 @@ class MainWindow(QWidget):
                                     self.master_mode_data[:len(mod)] = mod
                                     self.master_view_order.extend(vo)
 
+                                    try:
+                                        self.master_speed_state["speed_level"] = max(1, min(10, int(data.get("speed_level", 10))))
+                                    except (TypeError, ValueError):
+                                        self.master_speed_state["speed_level"] = 10
+
+                                    pc = data.get("packing_config", {})
+                                    if isinstance(pc, dict):
+                                        self.master_packing_config.update(pc)
+
                                     user_modes = data.get("user_modes")
                                     if user_modes and ModeManager:
                                         ModeManager.instance().load_from_dict(user_modes)
@@ -187,7 +204,7 @@ class MainWindow(QWidget):
         self.page_keys = ["manual", "auto", "mode", "position", "timer", "packing", "data", "settings"]
 
         self.pages["manual"] = PageManual(plc_client=self.plc_client)
-        self.pages["auto"] = PageAuto(plc_client=self.plc_client)
+        self.pages["auto"] = PageAuto(plc_client=self.plc_client, speed_state=self.master_speed_state)
         
         self.pages["mode"] = PageMode(mode_data=self.master_mode_data, plc_client=self.plc_client)
         
@@ -211,14 +228,25 @@ class MainWindow(QWidget):
             position_points=self.master_position_points,
             timer_library=self.master_timer_library,
             mode_data=self.master_mode_data,
-            view_order_data=self.master_view_order
+            view_order_data=self.master_view_order,
+            speed_state=self.master_speed_state,
+            packing_config=self.master_packing_config
         )
-        
-        self.pages["packing"] = PagePacking()
-        self.pages["settings"] = PageSettings() 
+
+        self.pages["packing"] = PagePacking(
+            position_points=self.master_position_points,
+            sequence_data=self.master_sequence_data,
+            plc_client=self.plc_client,
+            packing_config=self.master_packing_config,
+        )
+        self.pages["settings"] = PageSettings()
 
         self.pages["data"].sig_file_loaded.connect(self._on_recipe_loaded)
         self.pages["position"].sig_sequence_changed.connect(self._on_sequence_updated)
+        self.pages["timer"].sig_timer_changed.connect(self._auto_save_data)
+        self.pages["auto"].sig_speed_changed.connect(self._auto_save_data)
+        self.pages["packing"].sig_packing_changed.connect(self._auto_save_data)
+        self.pages["packing"].sig_packing_changed.connect(self._send_packing_config_to_plc)
 
         for key in self.page_keys:
             self.stack.addWidget(self.pages[key])
@@ -267,17 +295,17 @@ class MainWindow(QWidget):
         # =========================================================
         self.current_error_code = None
         self._alarm_resetting = False
-        self._seq_alarm_showing = False
+        self._user_alarm_showing = False
         self._jog_dialog = None
         self._prev_op_status = 0
-        self._seq_alarm_no = 0
+        self._user_alarm_no = 0
+        self._step_alarm_id = 0
         self.alarm_overlay = AlarmOverlay(self) # MainWindow(self)가 부모
         self.alarm_overlay.resize(self.size()) # 초기 크기 맞춤
 
         # 리셋 버튼 신호 연결 (모멘터리: 누를때 1, 뗄때 0)
         self.alarm_overlay.sig_reset_pressed.connect(self._on_alarm_reset_pressed)
         self.alarm_overlay.sig_reset_released.connect(self._on_alarm_reset_released)
-        self.alarm_overlay.sig_dismissed.connect(self._on_alarm_dismissed)
         
         # PLC 데이터 감시 연결 (알람 체크용)
         if self.plc_client:
@@ -310,14 +338,11 @@ class MainWindow(QWidget):
         self._gpio_estop_active = active
         if self.plc_client and self.plc_client.is_connected:
             self.plc_client.send_soft_estop(active)
-        if active:
-            # X0 비상정지와 동일한 팝업 표시 (axis_alarm 9 = 비상정지)
-            self.alarm_overlay.show_error([9], [0] * 8)
+        # GPIO 또는 DT142 bit8(=axis 9) 중 하나라도 활성이면 estop 알람 유지
+        if active or getattr(self, '_plc_estop_active', False):
+            self.alarm_overlay.show_estop()
         else:
-            # 해제 시 팝업 닫기 (알람 리셋 중이 아닐 때)
-            if not self._alarm_resetting and not self._seq_alarm_showing:
-                self.alarm_overlay.hide()
-                self.current_error_code = None
+            self.alarm_overlay.hide_estop()
 
     def closeEvent(self, event):
         """앱 종료 시 GPIO 정리"""
@@ -351,15 +376,92 @@ class MainWindow(QWidget):
             self.alarm_overlay.hide_comm_error()
             QTimer.singleShot(200, self._send_mode_to_plc)
         else:
-            if not self._alarm_resetting and not self._seq_alarm_showing:
-                self.alarm_overlay.show_comm_error()
+            self.alarm_overlay.show_comm_error()
+            # [NEW] 통신 오류 발생 이력 기록 (전이 시에만)
+            if not getattr(self, '_prev_comm_err_logged', False):
+                record_alarm("COMM", 0, "PLC 통신 끊김")
+                self._prev_comm_err_logged = True
+        if connected:
+            self._prev_comm_err_logged = False
 
     def _send_mode_to_plc(self):
-        """master_mode_data → DT206~208 전송 (재부팅 후 PLC 동기화)"""
+        """PLC 연결 후 현재 로딩된 레시피 전체를 PLC 에 동기화.
+        - 빠른 항목 (mode/speed/packing config) 은 즉시 송신
+        - 무거운 항목 (포인트 60개 + 시퀀스 40 슬롯) 은 **백그라운드 스레드**로 송신
+          → UI 블로킹 방지"""
         if not self.plc_client or not self.plc_client.is_connected:
             return
+        # 즉시 전송: 수 Words 단위라 빠름
         self.plc_client.send_mode_settings(self.master_mode_data)
-        print(f"[Mode] PLC 연결 후 모드 설정 전송 완료")
+        self.plc_client.send_speed_override(self.master_speed_state.get("speed_level", 10))
+        self.plc_client.send_packing_config(self.master_packing_config)
+        print(f"[Sync] PLC 연결 후 모드/전체속도/패킹설정 전송 완료")
+
+        # 무거운 항목: 백그라운드에서 전송 (수초 소요)
+        threading.Thread(target=self._send_full_recipe_to_plc, daemon=True).start()
+
+    def _send_packing_config_to_plc(self):
+        """패킹 설정 변경 시 PLC 로 전송 (sig_packing_changed 슬롯)"""
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        self.plc_client.send_packing_config(self.master_packing_config)
+
+    def _send_full_recipe_to_plc(self):
+        """포인트 테이블 + 시퀀스 40슬롯 전체를 PLC 로 송신 (백그라운드 스레드 호출).
+        sequence_editor_dialog._send_all_sequences_to_plc 와 동일한 인코딩 규칙."""
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        try:
+            points = self.master_position_points
+            sequences = self.master_sequence_data
+
+            sorted_p_names = sorted(points.keys())
+            point_map = {name: i for i, name in enumerate(sorted_p_names)}
+
+            seq_map = {"Main": 0, MONITOR_SEQ_KEY: 39}
+            reserved = set(seq_map.keys())
+            sub = sorted([k for k in sequences.keys() if k not in reserved])
+            for i, k in enumerate(sub):
+                seq_map[k] = i + 1
+
+            ok_seq = True
+            for seq_name, slot_id in seq_map.items():
+                raw_steps = sequences.get(seq_name, [])
+                if not isinstance(raw_steps, list):
+                    continue
+
+                # COMMENT 제외 인덱스 재매핑 (JMP target 재계산용)
+                plc_idx_map = {}
+                plc_idx = 0
+                for orig_idx, step in enumerate(raw_steps):
+                    if step.get("type") != "COMMENT":
+                        plc_idx_map[orig_idx] = plc_idx
+                        plc_idx += 1
+
+                plc_steps = []
+                for orig_idx, step in enumerate(raw_steps):
+                    if step.get("type") == "COMMENT":
+                        continue
+                    s_data = copy.deepcopy(step)
+                    if s_data.get("type") == "POS":
+                        s_data["point_index"] = point_map.get(s_data.get("point_name"), 0)
+                    elif s_data.get("type") == "CALL":
+                        s_data["sequence_id"] = seq_map.get(s_data.get("target_seq"), 0)
+                    elif s_data.get("type") == "JMP":
+                        s_data["target_step"] = plc_idx_map.get(s_data.get("target_idx", 0), 0)
+                    plc_steps.append(s_data)
+
+                if not self.plc_client.send_sequence_to_slot(slot_id, plc_steps):
+                    ok_seq = False
+
+            ok_pts = self.plc_client.send_all_points(points, sorted_p_names)
+
+            if ok_seq and ok_pts:
+                print("[Sync] 포인트·시퀀스 전체 재전송 완료")
+            else:
+                print(f"[Sync] ⚠ 일부 전송 실패 (seq_ok={ok_seq}, pts_ok={ok_pts})")
+        except Exception as e:
+            print(f"[Sync] 전체 레시피 전송 중 예외: {e}")
 
     # 조그 오버레이 실행 함수
     def _open_jog_overlay(self):
@@ -411,6 +513,7 @@ class MainWindow(QWidget):
     def _on_recipe_loaded(self, filename):
         self.current_recipe_name = filename
         self.top_bar.set_mold_data(filename)
+        record_op("RECIPE", f"레시피 로드: {filename}")
 
         # 새 레시피 로드 후 settings.json의 point_visibility 오버라이드 적용
         self._apply_point_visibility_from_settings()
@@ -421,10 +524,17 @@ class MainWindow(QWidget):
             self.pages["position"]._refresh_ui()
         if "timer" in self.pages:
             self.pages["timer"].refresh_grid()
+        if "auto" in self.pages:
+            self.pages["auto"].refresh_speed_from_state()
+        if "packing" in self.pages:
+            self.pages["packing"].refresh_ui()
 
         if self.plc_client and self.plc_client.is_connected:
             self.plc_client.send_mode_settings(self.master_mode_data)
-            print(f"[Mode] 레시피 '{filename}' 모드 → DT206~208 전송")
+            self.plc_client.send_packing_config(self.master_packing_config)
+            # 레시피 교체 시에도 포인트·시퀀스 전체 재전송 (백그라운드)
+            threading.Thread(target=self._send_full_recipe_to_plc, daemon=True).start()
+            print(f"[Mode] 레시피 '{filename}' 모드/패킹설정 전송 + 전체 재전송 시작")
         
         try:
             data = load_json(self.settings_file) or {}
@@ -436,6 +546,8 @@ class MainWindow(QWidget):
     def _on_sequence_updated(self):
         if "timer" in self.pages:
             self.pages["timer"].refresh_grid()
+        if "packing" in self.pages:
+            self.pages["packing"]._refresh_base_points_label()
         self._save_point_visibility_to_settings()
         self._auto_save_data()
 
@@ -482,67 +594,114 @@ class MainWindow(QWidget):
         super().resizeEvent(event)
 
     def _show_alarm_overlay(self):
-        """TopBar 알람 텍스트 클릭 시 오버레이 재표시"""
-        if self.current_error_code:
+        """TopBar 알람 텍스트 클릭 시:
+        - 현재 알람 있음 → 기존 알람 오버레이 재표시
+        - 현재 알람 없음 → 최근 30일 알람 이력 팝업 표시
+        """
+        if self.alarm_overlay.has_any_alarm():
             self.alarm_overlay.show()
             self.alarm_overlay.raise_()
+        else:
+            AlarmHistoryOverlay(parent=self).exec()
 
     def _on_alarm_reset_pressed(self):
         self._alarm_resetting = True
         self.plc_client.write_words(0x09, self.plc_client.ADDR_ALARM_RESET, [1])
+        record_op("ALARM_RESET", "알람 리셋 버튼")
 
     def _on_alarm_reset_released(self):
         self.plc_client.write_words(0x09, self.plc_client.ADDR_ALARM_RESET, [0])
-        # 시퀀스 알람(DT159) 클리어 및 즉시 숨김
-        if getattr(self, '_seq_alarm_showing', False):
-            self.plc_client.write_words(0x09, self.plc_client.ADDR_SEQ_POPUP, [0])
-            self._seq_alarm_showing = False
-            self._seq_alarm_no = 0
-            self.alarm_overlay.hide()
+        # 사용자 알람(DT159) 클리어 및 즉시 숨김
+        if getattr(self, '_user_alarm_showing', False):
+            self.plc_client.write_words(0x09, self.plc_client.ADDR_USER_ALARM, [0])
+            self._user_alarm_showing = False
+            self._user_alarm_no = 0
+            self.alarm_overlay.hide_user_alarm()
         QTimer.singleShot(500, self._clear_alarm_reset_flag)
 
     def _clear_alarm_reset_flag(self):
         self._alarm_resetting = False
 
-    def _on_alarm_dismissed(self):
-        """X버튼으로 알람 닫을 때 플래그 리셋 → 다음 알람 수신 가능"""
-        self._seq_alarm_showing = False
-        self._seq_alarm_no = 0
-
     # ★ [추가] 알람 상태 감시 함수
     def _check_alarm_status(self, data):
         op_status = data.get('op_status', 0)
+        prev_op = getattr(self, '_prev_op_status', 0)
 
         # 자동/확인운전 시작 시 JOG 팝업 강제 종료
         if op_status in (1, 2):
             if getattr(self, '_jog_dialog', None) is not None:
                 self._jog_dialog.close_overlay()
 
-        self._prev_op_status = op_status
-
-        # DT141: 축 알람 상태 워드 (비트별 축 알람)
+        # DT142: 축 알람 비트맵 (비트0~7=1~8축, 비트8=비상정지)
         axis_alarms = data.get('axis_alarms', [])
         axis_error_codes = data.get('axis_error_codes', [0] * 8)
-        if axis_alarms:
-            key = tuple(axis_alarms) + tuple(axis_error_codes)
-            if self.current_error_code != key:  # 알람 내용이 바뀔 때만 재표시
-                self.current_error_code = key
-                self.alarm_overlay.show_error(axis_alarms, axis_error_codes)
-        else:
-            if not self.alarm_overlay.isHidden() and not self._alarm_resetting and not self._seq_alarm_showing and not getattr(self, '_gpio_estop_active', False):
-                self.alarm_overlay.hide()
-                self.current_error_code = None
 
-        # DT159: 시퀀스 알람 요청 (alarm_no, bit15=알람+진행 플래그)
-        seq_popup = data.get('seq_popup', 0)
-        if seq_popup > 0 and not self._seq_alarm_showing:
-            alarm_go = seq_popup >= 1000               # 1000 이상 → 알람+진행
-            alarm_no = seq_popup - 1000 if alarm_go else seq_popup  # 실제 알람 번호
-            print(f"[Main] 시퀀스 알람 요청 (alarm_no={alarm_no}, alarm_go={alarm_go})")
-            self._seq_alarm_showing = True
-            self._seq_alarm_no = alarm_no
+        # E-STOP: DT142 bit8 또는 GPIO 중 하나라도 활성이면 유지
+        estop_active = self._plc_estop_active = 9 in axis_alarms
+        estop_combined = estop_active or getattr(self, '_gpio_estop_active', False)
+        if estop_combined:
+            self.alarm_overlay.show_estop()
+        else:
+            self.alarm_overlay.hide_estop()
+        # [NEW] 이력 기록 - 발생 전이(False→True)만
+        if estop_combined and not getattr(self, '_prev_estop_logged', False):
+            record_alarm("ESTOP", 0, "비상정지 발생")
+        self._prev_estop_logged = estop_combined
+
+        # 축 알람 (9번=비상정지 제외)
+        axis_only = [a for a in axis_alarms if a != 9]
+        if axis_only:
+            key = tuple(axis_only) + tuple(axis_error_codes)
+            if self.current_error_code != key:
+                self.current_error_code = key
+                self.alarm_overlay.show_error(axis_only, axis_error_codes)
+                # [NEW] 이력 기록 - 축별 에러코드와 함께
+                axes_txt = ", ".join(f"{a}축" for a in axis_only)
+                codes_txt = ", ".join(
+                    f"{a}축 E-{axis_error_codes[a-1]:04X}"
+                    for a in axis_only if axis_error_codes[a-1] > 0
+                )
+                msg = f"{axes_txt} 서보 알람" + (f" ({codes_txt})" if codes_txt else "")
+                record_alarm("AXIS", axis_error_codes[axis_only[0]-1] if axis_error_codes else 0, msg)
+        else:
+            self.alarm_overlay.hide_axis_alarm()
+            self.current_error_code = None
+
+        # DT159: 사용자 알람 (w_UserAlarm, IN 스텝 P3=1/2 발동, 1000+ = 알람+진행)
+        user_alarm = data.get('user_alarm', 0)
+        if user_alarm > 0 and not self._user_alarm_showing:
+            alarm_go = user_alarm >= 1000
+            alarm_no = user_alarm - 1000 if alarm_go else user_alarm
+            print(f"[Main] 사용자 알람 (alarm_no={alarm_no}, alarm_go={alarm_go})")
+            self._user_alarm_showing = True
+            self._user_alarm_no = alarm_no
             # 즉시 DT159 클리어 (핸드셰이크) → 재트리거 방지
-            self.plc_client.write_words(0x09, self.plc_client.ADDR_SEQ_POPUP, [0])
-            # DT200/DT202는 PLC FB(VAR_IN_OUT)가 직접 처리 → HMI는 팝업 표시만
-            self.alarm_overlay.show_sequence_alarm(alarm_no)
+            self.plc_client.write_words(0x09, self.plc_client.ADDR_USER_ALARM, [0])
+            self.alarm_overlay.show_user_alarm(alarm_no)
+            # [NEW] 이력 기록
+            msg = USER_ALARMS.get(alarm_no, f"사용자 알람 #{alarm_no}")
+            record_alarm("USER", alarm_no, f"A-{alarm_no:03d}: {msg}" + (" (진행)" if alarm_go else " (정지)"))
+
+        # 사용자 알람 자동 해제: 정지 상태에서 운전 재개 시 (0 → 1/2 전이)
+        if self._user_alarm_showing and op_status in (1, 2) and prev_op == 0:
+            self._user_alarm_showing = False
+            self._user_alarm_no = 0
+            self.alarm_overlay.hide_user_alarm()
+
+        # DT160: 스텝 알람 (i_StepAlarmID, FB 엔진 스텝 진행 에러)
+        step_alarm_id = data.get('step_alarm_id', 0)
+        if step_alarm_id > 0:
+            if self._step_alarm_id != step_alarm_id:
+                self._step_alarm_id = step_alarm_id
+                print(f"[Main] 스텝 알람 (i_StepAlarmID={step_alarm_id})")
+                self.alarm_overlay.show_step_alarm(step_alarm_id)
+                # [NEW] 이력 기록
+                desc = STEP_ALARM_DESCRIPTIONS.get(step_alarm_id, f"정의되지 않은 에러")
+                record_alarm("STEP", step_alarm_id, f"E-{step_alarm_id:02d}: {desc}")
+        else:
+            if self._step_alarm_id != 0:
+                self._step_alarm_id = 0
+                self.alarm_overlay.hide_step_alarm()
+
+        self._prev_op_status = op_status
 

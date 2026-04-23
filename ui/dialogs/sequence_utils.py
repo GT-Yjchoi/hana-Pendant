@@ -284,10 +284,7 @@ class SequenceListDialog(OverlayDialog):
         scroll.setWidget(container)
         self.layout.addWidget(scroll)
 
-        hint = QLabel("※ Main/Monitor 외 시퀀스는 길게 눌러 이름 변경")
-        hint.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 12px;")
-        hint.setAlignment(Qt.AlignCenter)
-        self.layout.addWidget(hint)
+        # 길게 눌러 이름 변경 기능 제거 - 시퀀스 편집기의 [이름변경] 버튼으로 대체
 
         btn_close = QPushButton("닫기")
         btn_close.setFixedHeight(50)
@@ -296,29 +293,8 @@ class SequenceListDialog(OverlayDialog):
         self.layout.addWidget(btn_close)
 
     def _setup_btn_actions(self, btn, name):
-        from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY
-        _long_pressed = [False]
-        timer = QTimer(btn)
-        timer.setSingleShot(True)
-        timer.setInterval(600)
-
-        def on_long_press():
-            _long_pressed[0] = True
-            btn.setDown(False)
-            if name not in ("Main", MONITOR_SEQ_KEY):
-                self.rename_requested = name
-                self.accept()
-
-        def on_click():
-            if _long_pressed[0]:
-                _long_pressed[0] = False
-                return
-            self._on_selected(name)
-
-        timer.timeout.connect(on_long_press)
-        btn.pressed.connect(timer.start)
-        btn.released.connect(timer.stop)
-        btn.clicked.connect(on_click)
+        # 단순 클릭으로 선택만 수행. 이름 변경은 편집기의 [이름변경] 버튼에서 처리.
+        btn.clicked.connect(lambda _=False, n=name: self._on_selected(n))
 
     def _on_selected(self, name):
         self.selected_seq = name
@@ -339,13 +315,16 @@ class CardListDialog(OverlayDialog):
     CARD_H = 95  # 모든 카드 공통 높이
 
     def __init__(self, items, current=None, title="항목을 선택하세요", columns=4,
-                 on_delete=None, on_rename=None, parent=None):
+                 on_delete=None, on_rename=None, rename_handler=None, parent=None):
         super().__init__(parent)
         self.selected_item = None
         self._columns = columns
         self._current = current
         self._on_delete_cb = on_delete
         self._on_rename_cb = on_rename
+        # rename_handler: 호출자가 전체 rename 흐름을 직접 처리 (시그니처: (item, parent_dialog) -> new_display_str or None)
+        # None 반환 시 취소. RenameDialog 자동 호출을 완전히 대체함.
+        self._rename_handler = rename_handler
         self._items = list(items)
         self.setFixedContentSize(850, 600)
 
@@ -399,7 +378,7 @@ class CardListDialog(OverlayDialog):
 
         row, col = 0, 0
         for item in self._items:
-            show_actions = (self._on_delete_cb is not None or self._on_rename_cb is not None) and not item.startswith("+")
+            show_actions = (self._on_delete_cb is not None or self._on_rename_cb is not None or self._rename_handler is not None) and not item.startswith("+")
 
             if show_actions:
                 # ── 액션 버튼 포함 카드 ──
@@ -435,7 +414,7 @@ class CardListDialog(OverlayDialog):
                         color: %s;
                         font-size: 13px;
                         font-weight: bold;
-                        text-align: left;
+                        text-align: center;
                         padding: 0 2px;
                     }
                     QPushButton:pressed { color: #468CFF; }
@@ -444,7 +423,7 @@ class CardListDialog(OverlayDialog):
                 btn_name.clicked.connect(lambda checked, i=item: self._on_selected(i))
                 top_row.addWidget(btn_name, 1)
 
-                if self._on_rename_cb is not None:
+                if self._on_rename_cb is not None or self._rename_handler is not None:
                     btn_rename = QPushButton("✎")
                     btn_rename.setFixedSize(28, 28)
                     btn_rename.setStyleSheet("""
@@ -531,6 +510,18 @@ class CardListDialog(OverlayDialog):
         self._build_grid()
 
     def _rename_item(self, item):
+        # rename_handler 가 있으면 호출자가 모든 처리 담당 (RenameDialog 직접 띄움/초기값 커스터마이즈 가능)
+        if self._rename_handler is not None:
+            new_display = self._rename_handler(item, self)
+            if new_display is None:
+                return  # 취소
+            idx = self._items.index(item)
+            self._items[idx] = new_display
+            if self._current == item:
+                self._current = new_display
+            self._build_grid()
+            return
+
         if not self._on_rename_cb:
             return
         existing = [i for i in self._items if i != item and not i.startswith("+")]
@@ -538,11 +529,14 @@ class CardListDialog(OverlayDialog):
         if dlg.exec() == QDialog.Accepted:
             new_name = dlg.get_new_name()
             if new_name and new_name != item:
-                self._on_rename_cb(item, new_name)
+                # 콜백이 새 display 문자열을 반환하면 그걸 카드에 쓰고,
+                # 아니면 사용자가 입력한 new_name 을 그대로 씀.
+                result = self._on_rename_cb(item, new_name)
+                display = result if isinstance(result, str) and result else new_name
                 idx = self._items.index(item)
-                self._items[idx] = new_name
+                self._items[idx] = display
                 if self._current == item:
-                    self._current = new_name
+                    self._current = display
                 self._build_grid()
 
     def _on_selected(self, item):
@@ -558,19 +552,20 @@ class CardListDialog(OverlayDialog):
 class DarkMessageDialog(OverlayDialog):
     def __init__(self, title, message, is_error=False, parent=None):
         super().__init__(parent)
-        self.setFixedContentSize(400, 200)
+        self.setFixedContentSize(520, 280)
         color = "#FF4646" if is_error else "#468CFF"
         self.setStyleSheet(f"""
-            QLabel {{ color: white; font-size: 16px; font-weight: bold; background: transparent; border: none; }}
-            QPushButton {{ background: rgba(70, 140, 255, 40); border: 1px solid {color}; border-radius: 8px; color: white; font-size: 15px; font-weight: bold; height: 45px; }}
+            QLabel {{ color: white; font-size: 18px; font-weight: bold; background: transparent; border: none; }}
+            QPushButton {{ background: rgba(70, 140, 255, 40); border: 1px solid {color}; border-radius: 8px; color: white; font-size: 17px; font-weight: bold; height: 52px; }}
             QPushButton:pressed {{ background: rgba(70, 140, 255, 80); }}
         """)
         lbl_title = QLabel(title)
-        lbl_title.setStyleSheet(f"color: {color}; font-size: 19px; margin-bottom: 5px;")
+        lbl_title.setStyleSheet(f"color: {color}; font-size: 22px; margin-bottom: 8px;")
         self.layout.addWidget(lbl_title)
         lbl_msg = QLabel(message)
         lbl_msg.setWordWrap(True)
         lbl_msg.setAlignment(Qt.AlignCenter)
+        lbl_msg.setStyleSheet("color: white; font-size: 18px; font-weight: bold; background: transparent; border: none; line-height: 140%;")
         self.layout.addWidget(lbl_msg)
         self.layout.addStretch(1)
         btn_ok = QPushButton("확인")
@@ -879,10 +874,12 @@ class VisModeMultiPickerDialog(OverlayDialog):
 # [4] 이름 변경 다이얼로그 (Rename)
 # =========================================================
 class RenameDialog(OverlayDialog):
-    def __init__(self, current_name, existing_names, parent=None, confirm_text="변경", visible_mode=None):
+    def __init__(self, current_name, existing_names, parent=None, confirm_text="변경",
+                 visible_mode=None, initial_text=None, allow_empty=False):
         super().__init__(parent)
         self.existing_names = [n for n in existing_names if n != current_name]
         self._current_name = current_name
+        self._allow_empty = allow_empty
         # visible_mode=None → 표시 조건 UI 숨김
         # visible_mode=int or list → 표시 조건 UI 표시 (int는 하위 호환 변환)
         self._visible_mode = _normalize_vis_mode(visible_mode) if visible_mode is not None else None
@@ -896,7 +893,9 @@ class RenameDialog(OverlayDialog):
         """)
         self.layout.addWidget(QLabel("이름을 입력하세요:"))
         input_layout = QHBoxLayout()
-        self.input_field = QLineEdit(current_name)
+        # initial_text 가 주어지면 그걸 씀. None 이면 current_name (기존 동작)
+        _init = initial_text if initial_text is not None else current_name
+        self.input_field = QLineEdit(_init)
         input_layout.addWidget(self.input_field)
         btn_keyboard = QPushButton("⌨")
         btn_keyboard.setFixedSize(50, 40)
@@ -971,10 +970,10 @@ class RenameDialog(OverlayDialog):
 
     def check_and_accept(self):
         new_name = self.input_field.text().strip()
-        if not new_name:
+        if not new_name and not self._allow_empty:
             self.lbl_error.setText("이름을 입력해주세요.")
             return
-        if new_name in self.existing_names:
+        if new_name and new_name in self.existing_names:
             self.lbl_error.setText(f"이미 존재하는 이름입니다: {new_name}")
             return
         self.accept()
@@ -1303,7 +1302,10 @@ class TimerReorderDialog(OverlayDialog):
         self.list_widget = QListWidget()
         self.list_widget.setSpacing(2)
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        # 터치 스크롤 — QScroller + 이벤트 필터 이중 적용 (QListWidget 선택 이벤트 충돌 회피)
         apply_touch_scroll(self.list_widget)
+        self._drag_filter = DragScrollFilter(self.list_widget)
+        self._drag_filter.attach(self.list_widget)
         for name in timer_names:
             self.list_widget.addItem(name)
         if self.list_widget.count():

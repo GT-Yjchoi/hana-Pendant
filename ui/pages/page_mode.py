@@ -27,6 +27,11 @@ try:
 except ImportError:
     ModeManager = None
 
+try:
+    from ui.dialogs.sequence_utils import DarkMessageDialog
+except ImportError:
+    DarkMessageDialog = None
+
 # [상수] 기본 모드 키값 목록 (0~33번)
 DEFAULT_MODE_KEYS = [
     "mode_prod_takeout", "mode_runner_takeout", "mode_wait_move", "mode_wait_down",
@@ -248,6 +253,10 @@ class PageMode(GlassCard):
         self.mode_data[idx] = checked
         name = self._get_mode_name(idx)
         button.inner_label.setText(self._format_text(name, checked))
+        try:
+            from utils.op_history import record as op_record
+            op_record("MODE", f"{name} {'ON' if checked else 'OFF'}")
+        except Exception: pass
 
         grp = self.interlock_groups[idx] if idx < len(self.interlock_groups) else 0
         if grp > 0:
@@ -261,6 +270,14 @@ class PageMode(GlassCard):
                     button.blockSignals(False)
                     self.mode_data[idx] = True
                     button.inner_label.setText(self._format_text(self._get_mode_name(idx), True))
+                    # 경고 팝업: 최소 하나는 켜져 있어야 함
+                    if DarkMessageDialog:
+                        DarkMessageDialog(
+                            "설정 불가",
+                            "이 그룹은 필수 항목입니다.\n최소 하나는 반드시 켜져 있어야 합니다.",
+                            is_error=True,
+                            parent=self
+                        ).exec()
                     return
             is_exclusive = self.interlock_exclusive[grp] if grp < len(self.interlock_exclusive) else False
             if checked and is_exclusive:

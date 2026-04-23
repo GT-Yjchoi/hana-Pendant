@@ -7,138 +7,156 @@ from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
 
 # ============================================================
 # 축 에러 코드 설명 테이블
-# 에러코드와 설명을 여기에 추가하세요.
-# 키: 에러코드 (int, 16진수로 입력 가능)
-# 값: 설명 문자열 (str)
 # ============================================================
 AXIS_ERROR_DESCRIPTIONS = {
     0x3001: "과부하 발생",
-
-    # 여기에 에러코드와 설명을 계속 추가하세요.
-    # 예시: 0x0050: "인코더 이상",
 }
 
 # ============================================================
-# 시퀀스 알람 테이블
-# 입력대기(IN) 스텝 타임아웃 시 띄울 알람 메시지
-# 키: 알람 번호 (int, 1부터 시작)
-# 값: 알람 메시지 (str)
+# 사용자 알람 테이블 (IN 스텝 P3=1/2 에서 발동, w_UserAlarm → DT159)
+# 시퀀스 작성자가 정의한 알람 번호 ↔ 메시지 매핑
 # ============================================================
-SEQUENCE_ALARMS = {}
+USER_ALARMS = {}
+
+# ============================================================
+# 스텝 알람 설명 (new_plc_fb.st i_StepAlarmID → DT160)
+# 스텝 진행 실패 시 FB 엔진이 세팅하는 에러 코드
+# ============================================================
+STEP_ALARM_DESCRIPTIONS = {
+    21: "POS 축 이동 확인 실패 — BUSY 상승을 감지하지 못함 (RTEX 트리거 거부 또는 전파 실패)",
+    22: "패킹 베이스 인덱스 범위 오류 — pack_base 스텝의 point_index 가 0~59 범위를 벗어남",
+    50: "서브 시퀀스 에러 (예약)",
+    93: "동기 CALL 스택 오버플로 — 4레벨 초과",
+    94: "CALL 사용 불가 — 이 인스턴스는 b_NoSubCall=TRUE (Monitor 등 최하위 FB)",
+    95: "JMP 타겟 스텝 번호 범위 초과 (0~99)",
+    96: "CALL 슬롯 번호 범위 초과 (0~39)",
+    97: "실행 슬롯 번호 범위 초과 (0~39)",
+    98: "OUT 지연 타이머 슬롯 없음 — 5개 모두 사용중",
+    99: "알 수 없는 커맨드",
+}
 
 _SETTINGS_PATH = get_settings_path()
 
 
-def load_sequence_alarms(settings_path=None):
-    """settings.json의 sequence_alarms를 읽어 SEQUENCE_ALARMS 딕셔너리를 갱신합니다."""
+def load_user_alarms(settings_path=None):
     path = settings_path or _SETTINGS_PATH
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        # 기존 settings.json 호환: "sequence_alarms" 키 유지
         saved = data.get("sequence_alarms")
         if saved:
-            SEQUENCE_ALARMS.clear()
-            SEQUENCE_ALARMS.update({int(k): v for k, v in saved.items()})
+            USER_ALARMS.clear()
+            USER_ALARMS.update({int(k): v for k, v in saved.items()})
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        pass  # 저장된 데이터 없으면 기본값 유지
+        pass
 
 
-def save_sequence_alarms(settings_path=None):
-    """SEQUENCE_ALARMS를 settings.json에 저장합니다."""
+def save_user_alarms(settings_path=None):
     path = settings_path or _SETTINGS_PATH
     try:
         settings = load_json(path) or {}
-        settings["sequence_alarms"] = {str(k): v for k, v in sorted(SEQUENCE_ALARMS.items())}
+        settings["sequence_alarms"] = {str(k): v for k, v in sorted(USER_ALARMS.items())}
         save_json(path, settings)
     except (OSError, json.JSONDecodeError) as e:
         print(f"[알람] 저장 실패: {e}")
 
 
-# 앱 시작 시 settings.json에서 자동 로드
-load_sequence_alarms()
+load_user_alarms()
+
+
+# 알람 스타일 정의
+_STYLE_ALARM = {
+    'title_color': '#FF4646',
+    'box_bg': '#2D1A1A',
+    'box_border': '#FF4646',
+}
+_STYLE_COMM = {
+    'title_color': '#F39C12',
+    'box_bg': '#1A1500',
+    'box_border': '#F39C12',
+}
+
 
 class AlarmOverlay(QWidget):
     sig_reset_pressed = Signal()
     sig_reset_released = Signal()
-    sig_dismissed = Signal()  # X버튼으로 닫을 때
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        
-        # 1. 배경 설정 (반투명 검정)
+
+        # 활성 알람 관리
+        self._alarms = {}       # id → {title, message, style_name, show_reset}
+        self._order = []        # 삽입 순서 보존
+        self._current_idx = 0
+
+        # 배경
         self.setStyleSheet("background-color: rgba(0, 0, 0, 200);")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        
-        # 터치 이벤트가 뒤로 넘어가지 않도록 막음 (알람 중 조작 금지)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.setCursor(Qt.ArrowCursor)
 
-        # 2. 메인 레이아웃 (중앙 정렬)
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
 
-        # 3. 알람 박스 디자인
+        # 알람 박스
         self.box = QFrame()
-        self.box.setFixedSize(500, 320)
-        self.box.setStyleSheet("""
-            QFrame {
-                background-color: #2D1A1A; 
-                border: 4px solid #FF4646; 
-                border-radius: 20px;
-            }
-            QLabel { background: transparent; border: none; }
-        """)
-        
-        # 그림자 효과 (입체감)
+        self.box.setFixedSize(500, 340)
+
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(50)
         shadow.setColor(Qt.black)
         shadow.setOffset(0, 10)
         self.box.setGraphicsEffect(shadow)
 
-        # 박스 내부 레이아웃
         box_layout = QVBoxLayout(self.box)
-        box_layout.setContentsMargins(30, 14, 30, 30)
-        box_layout.setSpacing(20)
+        box_layout.setContentsMargins(30, 20, 30, 20)
+        box_layout.setSpacing(14)
 
-        # [닫기 버튼 (X)] - 오른쪽 상단
-        close_row = QHBoxLayout()
-        close_row.setContentsMargins(0, 0, 0, 0)
-        close_row.addStretch()
-        self.btn_close = QPushButton("X")
-        self.btn_close.setFixedSize(48, 48)
-        self.btn_close.setCursor(Qt.PointingHandCursor)
-        self.btn_close.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #FF4646;
-                font-size: 27px;
-                font-weight: bold;
-                border: none;
-            }
-            QPushButton:hover { color: white; }
-            QPushButton:pressed { color: #aaa; }
-        """)
-        self.btn_close.clicked.connect(self._on_close_clicked)
-        close_row.addWidget(self.btn_close)
-        box_layout.addLayout(close_row)
-
-        # [아이콘/제목]
+        # 제목
         self.lbl_title = QLabel("[!] SYSTEM ALARM [!]")
         self.lbl_title.setAlignment(Qt.AlignCenter)
-        self.lbl_title.setStyleSheet("color: #FF4646; font-size: 32px; font-weight: 900;")
         box_layout.addWidget(self.lbl_title)
 
-        # [에러 코드 및 메시지]
-        self.lbl_msg = QLabel("E-001: 비상정지가 눌렸습니다.")
+        # 메시지
+        self.lbl_msg = QLabel("")
         self.lbl_msg.setAlignment(Qt.AlignCenter)
         self.lbl_msg.setWordWrap(True)
-        self.lbl_msg.setStyleSheet("color: white; font-size: 24px; font-weight: bold;")
-        box_layout.addWidget(self.lbl_msg)
+        self.lbl_msg.setStyleSheet("color: white; font-size: 22px; font-weight: bold;")
+        box_layout.addWidget(self.lbl_msg, 1)
 
-        # [리셋 버튼]
+        # 페이지 내비게이션 (여러 알람 때만 보임)
+        self.nav_frame = QFrame()
+        self.nav_frame.setStyleSheet("QFrame { background: transparent; border: none; }")
+        nav_layout = QHBoxLayout(self.nav_frame)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(18)
+        nav_layout.setAlignment(Qt.AlignCenter)
+
+        self.btn_prev = QPushButton("◀")
+        self.btn_prev.setFixedSize(60, 40)
+        self.btn_prev.setCursor(Qt.PointingHandCursor)
+        self.btn_prev.setStyleSheet(self._nav_btn_qss())
+        self.btn_prev.clicked.connect(self._on_prev)
+
+        self.lbl_page = QLabel("1/1")
+        self.lbl_page.setAlignment(Qt.AlignCenter)
+        self.lbl_page.setStyleSheet("color: #EEE; font-size: 18px; font-weight: bold; min-width: 60px;")
+
+        self.btn_next = QPushButton("▶")
+        self.btn_next.setFixedSize(60, 40)
+        self.btn_next.setCursor(Qt.PointingHandCursor)
+        self.btn_next.setStyleSheet(self._nav_btn_qss())
+        self.btn_next.clicked.connect(self._on_next)
+
+        nav_layout.addWidget(self.btn_prev)
+        nav_layout.addWidget(self.lbl_page)
+        nav_layout.addWidget(self.btn_next)
+        box_layout.addWidget(self.nav_frame)
+
+        # 리셋 버튼
         self.btn_reset = QPushButton("ALARM RESET")
-        self.btn_reset.setFixedSize(250, 60)
+        self.btn_reset.setFixedSize(250, 56)
         self.btn_reset.setCursor(Qt.PointingHandCursor)
         self.btn_reset.setStyleSheet("""
             QPushButton {
@@ -149,91 +167,185 @@ class AlarmOverlay(QWidget):
                 border: 2px solid #E74C3C;
                 border-radius: 10px;
             }
-            QPushButton:pressed {
-                background-color: #E74C3C;
-            }
+            QPushButton:pressed { background-color: #E74C3C; }
         """)
         self.btn_reset.pressed.connect(self.sig_reset_pressed.emit)
         self.btn_reset.released.connect(self.sig_reset_released.emit)
 
-        # 버튼 중앙 정렬을 위한 레이아웃
-        btn_layout = QVBoxLayout()
-        btn_layout.setAlignment(Qt.AlignCenter)
-        btn_layout.addWidget(self.btn_reset)
-        box_layout.addLayout(btn_layout)
+        btn_row = QHBoxLayout()
+        btn_row.setAlignment(Qt.AlignCenter)
+        btn_row.addWidget(self.btn_reset)
+        box_layout.addLayout(btn_row)
 
         layout.addWidget(self.box)
 
-        # 초기엔 숨김
         self.hide()
 
-    def _on_close_clicked(self):
-        self.hide()
-        self.sig_dismissed.emit()
-
-    def _set_alarm_style(self):
-        """기본 알람 스타일(빨강)으로 복구"""
-        self.lbl_title.setText("[!] SYSTEM ALARM [!]")
-        self.lbl_title.setStyleSheet("color: #FF4646; font-size: 32px; font-weight: 900;")
-        self.box.setStyleSheet("""
-            QFrame {
-                background-color: #2D1A1A;
-                border: 4px solid #FF4646;
-                border-radius: 20px;
+    def _nav_btn_qss(self):
+        return """
+            QPushButton {
+                background: transparent;
+                color: white;
+                font-size: 22px;
+                font-weight: bold;
+                border: 2px solid #888;
+                border-radius: 8px;
             }
-            QLabel { background: transparent; border: none; }
-        """)
-        self.btn_reset.show()
+            QPushButton:hover { color: #FFD; border-color: #CCC; }
+            QPushButton:pressed { color: #AAA; border-color: #666; }
+            QPushButton:disabled { color: #555; border-color: #444; }
+        """
 
-    def show_comm_error(self):
-        """PLC 통신 에러 팝업"""
-        self.lbl_title.setText("[!] COMM ERROR [!]")
-        self.lbl_title.setStyleSheet("color: #F39C12; font-size: 32px; font-weight: 900;")
-        self.box.setStyleSheet("""
-            QFrame {
-                background-color: #1A1500;
-                border: 4px solid #F39C12;
-                border-radius: 20px;
-            }
-            QLabel { background: transparent; border: none; }
-        """)
-        self.lbl_msg.setText("PLC와의 통신이 끊어졌습니다.\n자동으로 재연결을 시도합니다.")
-        self.btn_reset.hide()
-        self._comm_error = True
-        self.show()
-        self.raise_()
+    # ================================================================
+    # 공개 API - 알람 추가/제거
+    # ================================================================
 
-    def hide_comm_error(self):
-        """통신 복구 시 COMM ERROR 팝업 닫기"""
-        if getattr(self, '_comm_error', False):
-            self._comm_error = False
-            self._set_alarm_style()
-            self.hide()
+    def add_alarm(self, alarm_id, title, message, style='alarm', show_reset=True):
+        """알람 추가 또는 업데이트. 새 알람이면 해당 페이지로 자동 이동."""
+        is_new = alarm_id not in self._alarms
+        self._alarms[alarm_id] = {
+            'title': title,
+            'message': message,
+            'style': style,
+            'show_reset': show_reset,
+        }
+        if is_new:
+            self._order.append(alarm_id)
+            self._current_idx = len(self._order) - 1
+        self._refresh()
 
-    def show_sequence_alarm(self, alarm_no):
-        """시퀀스 알람 (IN 스텝 타임아웃 등)을 화면에 띄움"""
-        self._set_alarm_style()
-        msg = SEQUENCE_ALARMS.get(alarm_no, f"시퀀스 알람 #{alarm_no}")
-        self.lbl_msg.setText(f"A-{alarm_no:03d}: {msg}")
-        self.show()
-        self.raise_()
+    def remove_alarm(self, alarm_id):
+        """알람 제거. 활성 알람 없으면 오버레이 자동 숨김."""
+        if alarm_id in self._alarms:
+            del self._alarms[alarm_id]
+            self._order.remove(alarm_id)
+            if self._current_idx >= len(self._order):
+                self._current_idx = max(0, len(self._order) - 1)
+            self._refresh()
+
+    def has_alarm(self, alarm_id):
+        return alarm_id in self._alarms
+
+    def has_any_alarm(self):
+        return bool(self._order)
+
+    # ================================================================
+    # 하위 호환 API
+    # ================================================================
 
     def show_error(self, axis_list, error_codes=None):
-        """축 알람 메시지를 설정하고 화면에 띄움"""
-        self._set_alarm_style()
-        axis_names = {1: "X축", 2: "Y축", 3: "Z축", 4: "Y2축", 5: "Z2축", 6: "θ축", 7: "R1축", 8: "R2축", 9: "비상정지"}
-        lines = []
-        for a in axis_list:
-            name = axis_names.get(a, f"{a}축")
-            if error_codes and len(error_codes) >= a and error_codes[a - 1] > 0:
-                code = error_codes[a - 1]
-                desc = AXIS_ERROR_DESCRIPTIONS.get(code, "")
-                if desc:
-                    lines.append(f"{name}: E-{code:04X} ({desc})")
+        """축 알람 + E-STOP 분리 등록."""
+        axis_names = {1: "X축", 2: "Y축", 3: "Z축", 4: "Y2축", 5: "Z2축",
+                      6: "θ축", 7: "R1축", 8: "R2축"}
+        estop_present = 9 in axis_list
+        axis_only = [a for a in axis_list if a != 9]
+
+        if axis_only:
+            lines = []
+            for a in axis_only:
+                name = axis_names.get(a, f"{a}축")
+                if error_codes and len(error_codes) >= a and error_codes[a - 1] > 0:
+                    code = error_codes[a - 1]
+                    desc = AXIS_ERROR_DESCRIPTIONS.get(code, "")
+                    if desc:
+                        lines.append(f"{name}: E-{code:04X} ({desc})")
+                    else:
+                        lines.append(f"{name}: E-{code:04X}")
                 else:
-                    lines.append(f"{name}: E-{code:04X}")
-            else:
-                lines.append(name)
-        self.lbl_msg.setText("축 알람 발생\n" + "\n".join(lines))
-        self.show()
+                    lines.append(name)
+            msg = "축 알람 발생\n" + "\n".join(lines)
+            self.add_alarm('axis', '[!] AXIS ALARM [!]', msg, 'alarm')
+        else:
+            self.remove_alarm('axis')
+
+        if estop_present:
+            self.add_alarm('estop', '[!] E-STOP [!]',
+                           '비상정지가 활성화되었습니다.', 'alarm')
+        # estop 해제는 호출자가 명시적으로 hide_estop()으로 처리
+
+    def hide_axis_alarm(self):
+        self.remove_alarm('axis')
+
+    def show_estop(self):
+        self.add_alarm('estop', '[!] E-STOP [!]',
+                       '비상정지가 활성화되었습니다.', 'alarm')
+
+    def hide_estop(self):
+        self.remove_alarm('estop')
+
+    def show_user_alarm(self, alarm_no):
+        """사용자 알람 (IN 스텝 P3=1/2, w_UserAlarm/DT159) 표시."""
+        msg = USER_ALARMS.get(alarm_no, f"사용자 알람 #{alarm_no}")
+        self.add_alarm('user_alarm', '[!] USER ALARM [!]',
+                       f"A-{alarm_no:03d}: {msg}", 'alarm')
+
+    def hide_user_alarm(self):
+        self.remove_alarm('user_alarm')
+
+    def show_step_alarm(self, alarm_id):
+        """스텝 알람 (i_StepAlarmID/DT160) 표시."""
+        desc = STEP_ALARM_DESCRIPTIONS.get(alarm_id, f"정의되지 않은 에러 (ID={alarm_id})")
+        self.add_alarm('step_alarm', '[!] STEP ALARM [!]',
+                       f"E-{alarm_id:02d}: {desc}", 'alarm')
+
+    def hide_step_alarm(self):
+        self.remove_alarm('step_alarm')
+
+    def show_comm_error(self):
+        self.add_alarm('comm', '[!] COMM ERROR [!]',
+                       'PLC와의 통신이 끊어졌습니다.\n자동으로 재연결을 시도합니다.',
+                       'comm', show_reset=False)
+
+    def hide_comm_error(self):
+        self.remove_alarm('comm')
+
+    # ================================================================
+    # 내부: 표시 갱신
+    # ================================================================
+
+    def _refresh(self):
+        if not self._order:
+            if not self.isHidden():
+                self.hide()
+            return
+
+        aid = self._order[self._current_idx]
+        a = self._alarms[aid]
+        self.lbl_title.setText(a['title'])
+        self.lbl_msg.setText(a['message'])
+        self._apply_style(a['style'])
+        self.btn_reset.setVisible(a['show_reset'])
+
+        total = len(self._order)
+        self.lbl_page.setText(f"{self._current_idx + 1}/{total}")
+        self.nav_frame.setVisible(total > 1)
+        self.btn_prev.setEnabled(self._current_idx > 0)
+        self.btn_next.setEnabled(self._current_idx < total - 1)
+
+        if self.isHidden():
+            self.show()
         self.raise_()
+
+    def _apply_style(self, style_name):
+        s = _STYLE_COMM if style_name == 'comm' else _STYLE_ALARM
+        self.lbl_title.setStyleSheet(
+            f"color: {s['title_color']}; font-size: 30px; font-weight: 900;"
+        )
+        self.box.setStyleSheet(f"""
+            QFrame {{
+                background-color: {s['box_bg']};
+                border: 4px solid {s['box_border']};
+                border-radius: 20px;
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+
+    def _on_prev(self):
+        if self._current_idx > 0:
+            self._current_idx -= 1
+            self._refresh()
+
+    def _on_next(self):
+        if self._current_idx < len(self._order) - 1:
+            self._current_idx += 1
+            self._refresh()

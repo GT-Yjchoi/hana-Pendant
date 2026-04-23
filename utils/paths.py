@@ -24,3 +24,7 @@ def get_settings_path() -> str:
 
 def get_recipes_dir() -> str:
     return os.path.join(get_base_dir(), "recipes")
+
+
+def get_alarm_history_path() -> str:
+    return os.path.join(get_base_dir(), "alarm_history.json")

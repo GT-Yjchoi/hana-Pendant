@@ -73,6 +73,79 @@ class NumberInputOverlay(QWidget):
         self.close(); self.deleteLater()
     def exec(self): self.show(); self.raise_(); self._event_loop = QEventLoop(); self._event_loop.exec(); return self.result_val
 
+# =========================================================================
+# [NEW] 자동운전 중 기억위치 미세조정 오버레이
+# 값 라벨 클릭 시 열림. -1 / -0.1 / +0.1 / +1 버튼으로 즉시 가감산,
+# on_adjust(delta) 콜백으로 호출자에게 델타 전달.
+# 호출자는 범위검증·저장·PLC전송 후 set_value() 로 표시값만 갱신.
+# =========================================================================
+class FineAdjustOverlay(QWidget):
+    def __init__(self, axis_name, initial_val, on_adjust, parent=None):
+        super().__init__(parent)
+        if parent:
+            main_window = parent.window()
+            self.setParent(main_window)
+            self.resize(main_window.size())
+        self.setStyleSheet("background-color: rgba(0,0,0,180);")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAttribute(Qt.WA_AcceptTouchEvents, True)
+
+        self._on_adjust = on_adjust  # callback(delta)
+        self._event_loop = None
+
+        layout = QVBoxLayout(self); layout.setAlignment(Qt.AlignCenter)
+        container = QFrame(); container.setFixedSize(540, 280)
+        container.setStyleSheet("""
+            QFrame { background-color: #1A1F2B; border: 2px solid #468CFF; border-radius: 14px; }
+            QLabel#title { color: #468CFF; font-size: 22px; font-weight: bold; background: transparent; border: none; }
+            QLabel#value { color: #64FFDA; font-size: 40px; font-weight: 900; background: rgba(0,0,0,0.3);
+                           border: 1px solid #555; border-radius: 8px; padding: 8px; }
+            QPushButton { background: rgba(70,140,255,0.25); border: 1px solid #468CFF; border-radius: 8px;
+                          color: white; font-size: 22px; font-weight: 900; }
+            QPushButton:pressed { background: rgba(70,140,255,0.55); }
+            QPushButton#close { background: #582F2F; border: 1px solid #C0392B; font-size: 18px; }
+            QPushButton#close:pressed { background: #C0392B; }
+        """)
+
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(20, 16, 20, 16)
+        vbox.setSpacing(12)
+
+        lbl_title = QLabel(f"{axis_name}축 기억위치 미세조정"); lbl_title.setObjectName("title")
+        lbl_title.setAlignment(Qt.AlignCenter)
+        vbox.addWidget(lbl_title)
+
+        self.lbl_value = QLabel(f"{initial_val:.3f} mm"); self.lbl_value.setObjectName("value")
+        self.lbl_value.setAlignment(Qt.AlignCenter)
+        self.lbl_value.setFixedHeight(72)
+        vbox.addWidget(self.lbl_value)
+
+        h = QHBoxLayout(); h.setSpacing(10)
+        for delta in (-1.0, -0.1, 0.1, 1.0):
+            btn = QPushButton(f"{delta:+g}"); btn.setFixedHeight(60)
+            btn.clicked.connect(lambda _, d=delta: self._on_adjust(d))
+            h.addWidget(btn)
+        vbox.addLayout(h)
+
+        btn_close = QPushButton("닫기"); btn_close.setObjectName("close"); btn_close.setFixedHeight(44)
+        btn_close.clicked.connect(self._quit)
+        vbox.addWidget(btn_close)
+
+        layout.addWidget(container)
+
+    def set_value(self, val):
+        """호출자가 조정 후 갱신된 값 반영용."""
+        self.lbl_value.setText(f"{val:.3f} mm")
+
+    def _quit(self):
+        if self._event_loop: self._event_loop.quit()
+        self.close(); self.deleteLater()
+
+    def exec(self):
+        self.show(); self.raise_()
+        self._event_loop = QEventLoop(); self._event_loop.exec()
+
+
 # -------------------------------------------------------------------------
 # [Helper Classes]
 # -------------------------------------------------------------------------
@@ -250,6 +323,7 @@ class PagePosition(GlassCard):
 
         # [NEW] 축 행(Row) 숨김 제어를 위한 리스트
         self.axis_rows = []
+        self._current_op_status = 0  # 0=정지, 1=자동, 2=확인
 
         self._init_ui()
         self._refresh_ui()
@@ -293,14 +367,18 @@ class PagePosition(GlassCard):
 
         nav_layout.addWidget(self.btn_prev); nav_layout.addWidget(self.point_name_btn, 1); nav_layout.addWidget(self.btn_reorder); nav_layout.addWidget(self.btn_next)
         left_layout.addLayout(nav_layout)
-        
+
         data_frame = QFrame(); data_frame.setStyleSheet("background: rgba(0,0,0,0.15); border-radius: 10px;")
         grid = QGridLayout(data_frame); grid.setContentsMargins(10, 10, 10, 10); grid.setHorizontalSpacing(10); grid.setVerticalSpacing(10) 
         
-        # [수정] 헤더 폰트 확대 (16px)
+        # [수정] 헤더 폰트 확대 (16px) + 명시적 투명 배경/무테두리 (박스 겹침 방지)
         headers = ["축", "현재위치", "기억위치", "속도%"]
         for c, h in enumerate(headers):
-            lbl = QLabel(h); lbl.setAlignment(Qt.AlignCenter); lbl.setStyleSheet("color: rgba(255,255,255,0.6); font-size: 16px; font-weight: bold;")
+            lbl = QLabel(h); lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet(
+                "color: rgba(255,255,255,0.6); font-size: 16px; font-weight: bold;"
+                "background: transparent; border: none;"
+            )
             grid.addWidget(lbl, 0, c)
         grid.setColumnStretch(0, 0); grid.setColumnStretch(1, 5); grid.setColumnStretch(2, 5); grid.setColumnStretch(3, 2)
 
@@ -329,7 +407,7 @@ class PagePosition(GlassCard):
             box_cur, lbl_cur = create_val_label("#FFFFFF", "0.00", is_current=True); grid.addWidget(box_cur, r, 1); self.lbl_curr_vals.append(lbl_cur)
             box_sav, lbl_sav = create_val_label("#64FFDA", "0.00", row_idx=row_idx, val_type="coords"); grid.addWidget(box_sav, r, 2); self.lbl_saved_vals.append(lbl_sav)
             box_spd, lbl_spd = create_val_label("#FFD280", "100", row_idx=row_idx, val_type="speed"); grid.addWidget(box_spd, r, 3); self.lbl_speed_vals.append(lbl_spd); grid.setRowStretch(r, 1)
-            
+
             # [NEW] 숨김 제어를 위해 행별 위젯 저장
             self.axis_rows.append([lbl_axis, box_cur, box_sav, box_spd])
 
@@ -422,6 +500,7 @@ class PagePosition(GlassCard):
             position_points=self.position_points,
             timer_library=self.timer_library,
             plc_client=self.plc_client,
+            mode_data=self.mode_data,
             parent=self
         )
         if dlg.exec() == QDialog.Accepted:
@@ -457,11 +536,40 @@ class PagePosition(GlassCard):
         op_status = data.get('op_status', 0) if isinstance(data, dict) else 0
         current_step = data.get('current_step', -1) if isinstance(data, dict) else -1
 
+        # 현재 운전 상태 추적 (기억위치 클릭 시 오버레이 분기용)
+        self._current_op_status = op_status
+
         # op_status: 1=자동, 2=확인운전 → 시퀀스 실행 중
         if op_status in (1, 2):
+            # 현재 실행 중인 슬롯으로 드롭다운 자동 전환 (동작순서 추종)
+            current_slot = data.get('sub_seq_idx', 0) if isinstance(data, dict) else 0
+            target_name = self._get_seq_name_by_slot(current_slot)
+            if target_name and target_name != self.current_seq_key and target_name in self.sequences:
+                idx = self.seq_selector.findText(target_name)
+                if idx >= 0:
+                    self.seq_selector.blockSignals(True)
+                    self.seq_selector.setCurrentIndex(idx)
+                    self.seq_selector.blockSignals(False)
+                self.current_seq_key = target_name
+                self._update_preview_list()
+                self._last_highlighted_step = None   # 하이라이트 재계산 유도
             self._highlight_step(current_step)
         else:
             self._highlight_step(-1)
+
+    def _get_seq_name_by_slot(self, slot_id):
+        """PLC 슬롯 번호 → 시퀀스 이름 매핑 (page_timer._sync_steps_time와 동일 규칙)"""
+        MONITOR_KEY = "Monitor"
+        if slot_id == 0:
+            return "Main"
+        if slot_id == 39:
+            return MONITOR_KEY if MONITOR_KEY in self.sequences else None
+        reserved = {"Main", MONITOR_KEY}
+        subs = sorted([k for k in self.sequences.keys() if k not in reserved])
+        idx = slot_id - 1
+        if 0 <= idx < len(subs):
+            return subs[idx]
+        return None
 
     def _highlight_step(self, step_idx):
         """preview_list에서 현재 실행 중인 스텝을 하이라이트.
@@ -587,11 +695,94 @@ class PagePosition(GlassCard):
             name = step.get("name", "Unknown")
             if stype == "POS":
                 p_name = step.get("point_name", "")
-                if p_name and p_name != name: name = f"{name} ({p_name})"
+                if p_name and p_name != name:
+                    name = f"{name}  ({p_name})"
             elif stype == "CALL":
                 tgt = step.get("target_seq", "")
-                name = f"{name} -> {tgt}"
+                if tgt:
+                    name = f"{name}  ({tgt})"
+            elif stype == "OUT":
+                out_type = int(step.get("out_type", 0))
+                port = int(step.get("port", 0))
+                on_val = step.get("on", step.get("on_off", False))
+                port_name = self._out_port_name(out_type, port)
+                name = f"{name}  ({port_name} {'ON' if on_val else 'OFF'})"
+            elif stype == "IN":
+                port = int(step.get("port", step.get("io_index", 0)))
+                on_val = step.get("on", step.get("on_off", True))
+                port_name = self._in_port_name(port)
+                name = f"{name}  ({port_name} {'ON' if on_val else 'OFF'})"
+            elif stype == "JMP":
+                tgt_idx = int(step.get("target_idx", 0))
+                tgt_name = self._jmp_target_name(current_steps, tgt_idx)
+                if tgt_name:
+                    name = f"{name}  ({tgt_name})"
+            elif stype == "TMR":
+                ref = step.get("timer_ref", "")
+                if ref:
+                    name = f"{name}  ({ref})"
             self.preview_list.addItem(f"[{step_num:02d}] {name}")
+
+    def _out_port_name(self, out_type, bit_index):
+        """OUT 스텝 포트 표시 이름. IOManager + 내부비트 사용자 정의 반영."""
+        try:
+            from utils.io_manager import IOManager
+            mgr = IOManager.instance()
+            if out_type == 0:
+                return f"Y{bit_index:02X}: {mgr.get_output_name(bit_index)}"
+            elif out_type == 1:
+                return f"Y{0x20+bit_index:02X}: {mgr.get_output_name(16+bit_index)}"
+        except Exception:
+            pass
+        if out_type == 0:
+            return f"Y{bit_index:02X}"
+        if out_type == 1:
+            return f"Y{0x20+bit_index:02X}"
+        # 내부비트 (out_type == 2)
+        try:
+            from utils.internal_bit_names import get_name
+            nm = get_name(f"M{bit_index:02d}")
+            if nm:
+                return f"M{bit_index:02d}: {nm}"
+        except Exception:
+            pass
+        return f"M{bit_index:02d}"
+
+    def _in_port_name(self, port_index):
+        """IN 스텝 포트 표시 이름."""
+        # 내부비트
+        if 100 <= port_index <= 131:
+            bit_idx = port_index - 100
+            try:
+                from utils.internal_bit_names import get_name
+                nm = get_name(f"M{bit_idx:02d}")
+                if nm:
+                    return f"M{bit_idx:02d}: {nm}"
+            except Exception:
+                pass
+            return f"M{bit_idx:02d}"
+        # 시스템/밸브 입력
+        try:
+            from utils.io_manager import IOManager
+            mgr = IOManager.instance()
+            if 0 <= port_index < 16:
+                return f"X{port_index:02X}: {mgr.get_input_name(port_index)}"
+            if 32 <= port_index < 48:
+                return f"X{port_index:02X}: {mgr.get_input_name(port_index - 16)}"
+        except Exception:
+            pass
+        return f"X{port_index:02X}" if port_index < 100 else f"포트{port_index}"
+
+    def _jmp_target_name(self, current_steps, target_idx):
+        """현재 시퀀스에서 COMMENT 제외 target_idx 번째 스텝의 name 반환."""
+        n = 0
+        for step in current_steps:
+            if step.get("type") == "COMMENT":
+                continue
+            if n == target_idx:
+                return step.get("name", f"스텝{target_idx}")
+            n += 1
+        return f"스텝{target_idx}"
 
     def _on_prev_point(self):
         idx = self.point_combo.currentIndex()
@@ -609,7 +800,7 @@ class PagePosition(GlassCard):
             self.point_name_btn.setText("위치 없음")
             self._clear_display(); return
         self.point_name_btn.setText(selected_point)
-        
+
         if selected_point in self.position_points:
             data = self.position_points[selected_point]
             coords = data.get("coords", [0.0]*8)
@@ -626,6 +817,11 @@ class PagePosition(GlassCard):
         selected_point = self.point_combo.currentText()
         if selected_point not in self.position_points: return
 
+        # [NEW] 자동/확인운전 중 기억위치는 미세조정 오버레이로 분기
+        if col_type == "coords" and self._current_op_status in (1, 2):
+            self._open_fine_adjust_overlay(selected_point, row_idx)
+            return
+
         current_val_str = ""
         if col_type == "coords": current_val_str = self.lbl_saved_vals[row_idx].text()
         elif col_type == "speed": current_val_str = self.lbl_speed_vals[row_idx].text()
@@ -636,7 +832,30 @@ class PagePosition(GlassCard):
         if new_val_str is None: return
 
         try: new_val = float(new_val_str)
-        except ValueError: return 
+        except ValueError: return
+
+        # 속도: 1~100 % 는 기존대로 클램프
+        if col_type == "speed":
+            try:
+                old_speed = int(float(self.lbl_speed_vals[row_idx].text()))
+            except Exception:
+                old_speed = 0
+            new_val = max(1, min(100, int(new_val)))
+        elif col_type == "coords":
+            # 기억위치: 0 ~ 스트로크 한계(mm) 검증. 벗어나면 팝업 후 중단
+            from utils.axis_limits import get_axis_strokes
+            stroke = get_axis_strokes()[row_idx] if 0 <= row_idx < 8 else 1000.0
+            if new_val < 0.0 or new_val > stroke:
+                try:
+                    from ui.dialogs.sequence_utils import DarkMessageDialog
+                    DarkMessageDialog(
+                        "입력 범위 초과",
+                        f"스트로크 한계를 벗어났습니다.\n허용 범위: 0 ~ {stroke:.3f} mm\n입력값: {new_val:.3f} mm",
+                        is_error=True, parent=self.window()
+                    ).exec()
+                except Exception as e:
+                    print(f"[Position] 범위초과 팝업 실패: {e}")
+                return
 
         if col_type == "coords":
             self.position_points[selected_point]["coords"][row_idx] = new_val
@@ -646,11 +865,11 @@ class PagePosition(GlassCard):
                         p_name = step.get("point_name", step.get("name"))
                         if p_name == selected_point:
                             if "coords" in step: step["coords"][row_idx] = new_val
-                                
+
         elif col_type == "speed":
             if "speeds" not in self.position_points[selected_point]:
                 self.position_points[selected_point]["speeds"] = [100]*8
-            self.position_points[selected_point]["speeds"][row_idx] = int(new_val)
+            self.position_points[selected_point]["speeds"][row_idx] = new_val
 
         if self.plc_client and self.plc_client.is_connected:
             try:
@@ -670,6 +889,85 @@ class PagePosition(GlassCard):
 
         self._on_combo_changed(self.point_combo.currentIndex())
         self.sig_sequence_changed.emit()
+
+        # 조작 이력 기록
+        try:
+            from utils.op_history import record as op_record
+            axis_names = ["X", "Y", "Z", "Y2", "Z2", "θ", "R1", "R2"]
+            axis = axis_names[row_idx] if 0 <= row_idx < 8 else f"축{row_idx+1}"
+            if col_type == "coords":
+                op_record("POS", f"{selected_point} {axis}축 기억위치 변경 → {new_val:.3f} mm")
+            elif col_type == "speed":
+                op_record("SPEED", f"{selected_point} {axis}축 속도 {old_speed} → {new_val} %")
+        except Exception: pass
+
+    def _open_fine_adjust_overlay(self, selected_point, row_idx):
+        """자동/확인운전 중 기억위치 미세조정 오버레이 열기."""
+        coords = self.position_points[selected_point].setdefault("coords", [0.0]*8)
+        cur = coords[row_idx] if row_idx < len(coords) else 0.0
+        axis_names = ["X", "Y", "Z", "Y2", "Z2", "θ", "R1", "R2"]
+        axis_name = axis_names[row_idx] if 0 <= row_idx < 8 else f"{row_idx+1}"
+
+        overlay = FineAdjustOverlay(axis_name, cur, on_adjust=None, parent=self)
+
+        def _apply(delta):
+            # 콜백 안에서 overlay 와 row_idx, selected_point 캡쳐
+            self._apply_fine_adjust(selected_point, row_idx, delta, overlay)
+
+        overlay._on_adjust = _apply
+        overlay.exec()
+
+    def _apply_fine_adjust(self, selected_point, row_idx, delta, overlay):
+        """미세조정 버튼 1회 클릭 처리: 범위검증 → 저장 → PLC전송 → UI 갱신."""
+        if selected_point not in self.position_points: return
+        coords = self.position_points[selected_point].setdefault("coords", [0.0]*8)
+        cur = coords[row_idx] if row_idx < len(coords) else 0.0
+        new_val = round(cur + delta, 3)
+
+        from utils.axis_limits import get_axis_strokes
+        stroke = get_axis_strokes()[row_idx] if 0 <= row_idx < 8 else 1000.0
+        if new_val < 0.0 or new_val > stroke:
+            from ui.dialogs.sequence_utils import DarkMessageDialog
+            DarkMessageDialog(
+                "입력 범위 초과",
+                f"스트로크 한계를 벗어났습니다.\n허용 범위: 0 ~ {stroke:.3f} mm\n입력값: {new_val:.3f} mm",
+                is_error=True, parent=self.window()
+            ).exec()
+            return
+
+        coords[row_idx] = new_val
+        # 시퀀스 스텝의 coords 도 동기화
+        for seq in self.sequences.values():
+            for step in seq:
+                if step.get("type") == "POS":
+                    p_name = step.get("point_name", step.get("name"))
+                    if p_name == selected_point and "coords" in step:
+                        step["coords"][row_idx] = new_val
+
+        # PLC 즉시 전송
+        if self.plc_client and self.plc_client.is_connected:
+            try:
+                sorted_names = sorted(list(self.position_points.keys()))
+                point_idx = sorted_names.index(selected_point)
+                base_addr = self.plc_client.POINT_BASE_ADDR + (point_idx * self.plc_client.POINT_SIZE)
+                target_addr = base_addr + 2 + (row_idx * 2)
+                self.plc_client.write_dint(0x09, target_addr, int(new_val * 1000))
+            except Exception as e:
+                print(f"[Position] 미세조정 PLC 전송 실패: {e}")
+
+        # UI 갱신
+        self.lbl_saved_vals[row_idx].setText(f"{new_val:.3f}")
+        if overlay is not None:
+            overlay.set_value(new_val)
+        self.sig_sequence_changed.emit()
+
+        # 조작 이력 (자동 중 미세조정)
+        try:
+            from utils.op_history import record as op_record
+            axis_names = ["X", "Y", "Z", "Y2", "Z2", "θ", "R1", "R2"]
+            axis = axis_names[row_idx] if 0 <= row_idx < 8 else f"축{row_idx+1}"
+            op_record("POS", f"(자동중) {selected_point} {axis}축 미세조정 {delta:+g} → {new_val:.3f} mm")
+        except Exception: pass
 
     def _clear_display(self):
         for i in range(8):

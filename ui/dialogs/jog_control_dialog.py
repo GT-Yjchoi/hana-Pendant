@@ -177,6 +177,12 @@ class JogControlDialog(QWidget):
         main_layout.addWidget(self.container)
 
         self._set_speed(JogControlDialog._last_speed)
+
+        # [NEW] 실시간 출력 상태로 토글 밸브 버튼 동기화 (valve_tile.ValvePanel 과 동일 방식)
+        self._monitor_connected = False
+        if self.plc_client and self._valve_btns:
+            self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
+            self._monitor_connected = True
         self._init_runner_arm()
 
     def _load_jog_valves(self):
@@ -249,8 +255,21 @@ class JogControlDialog(QWidget):
             if data:
                 val = data[0] | (1 << bit_pos) if checked else data[0] & ~(1 << bit_pos)
                 self.plc_client.write_words(0x09, dt_addr, [val & 0xFFFF])
+                self._log_valve_op(bit_index, "ON" if checked else "OFF")
         except Exception as e:
             print(f"[JOG Valve] toggle error: {e}")
+
+    def _log_valve_op(self, bit_index, state):
+        try:
+            from utils.op_history import record as op_record
+            name = None
+            for cfg in self._valve_configs:
+                if cfg.get("index") == bit_index:
+                    name = cfg.get("name")
+                    break
+            label = name or f"밸브 #{bit_index}"
+            op_record("VALVE", f"(JOG) {label} {state}")
+        except Exception: pass
 
     def _on_valve_press(self, bit_index):
         if not self.plc_client or not self.plc_client.is_connected:
@@ -273,6 +292,36 @@ class JogControlDialog(QWidget):
                 self.plc_client.write_words(0x09, dt_addr, [(data[0] & ~(1 << bit_pos)) & 0xFFFF])
         except Exception as e:
             print(f"[JOG Valve] release error: {e}")
+
+    # ==========================================================
+    # [NEW] 실시간 출력 상태 → 토글 밸브 버튼 동기화
+    # bit_index 0~15  → outputs[0] (DT120=Y00~Y0F) bit 0~15
+    # bit_index 16~31 → outputs[1] (DT121=Y20~Y2F) bit 0~15
+    # 모멘터리 버튼은 건드리지 않음 (사용자가 누르는 중일 수 있음)
+    # ==========================================================
+    def _on_monitor_data(self, data):
+        if not isinstance(data, dict) or not self.isVisible():
+            return
+        outputs = data.get('outputs', [])
+        if not outputs or len(outputs) < 2:
+            return
+        for btn in self._valve_btns:
+            if btn.property("valve_mode") != "toggle":
+                continue
+            bit_index = btn.property("bit_index")
+            if bit_index is None:
+                continue
+            if bit_index < 16:
+                word_idx, bit_pos = 0, bit_index
+            else:
+                word_idx, bit_pos = 1, bit_index - 16
+            if word_idx >= len(outputs):
+                continue
+            is_on = bool(outputs[word_idx] & (1 << bit_pos))
+            if btn.isChecked() != is_on:
+                btn.blockSignals(True)
+                btn.setChecked(is_on)
+                btn.blockSignals(False)
 
     def _on_arm_toggled(self, checked):
         self.btn_runner_arm.setText("런너암 조작" if checked else "제품암 조작")
@@ -373,6 +422,13 @@ class JogControlDialog(QWidget):
         super().mousePressEvent(event)
 
     def close_overlay(self):
+        # 시그널 disconnect — 반복 개방 시 슬롯 누적 방지
+        if getattr(self, '_monitor_connected', False) and self.plc_client:
+            try:
+                self.plc_client.sig_monitor_data.disconnect(self._on_monitor_data)
+            except (RuntimeError, TypeError):
+                pass
+            self._monitor_connected = False
         if self._event_loop: self._event_loop.quit()
         self.close(); self.deleteLater()
 

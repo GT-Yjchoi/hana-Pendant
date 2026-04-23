@@ -4,7 +4,7 @@ APP_STYLESHEET = """
    ======================================================== */
 QWidget {
     color: #E9EEF3;
-    font-family: "Segoe UI";
+    font-family: "Pretendard", "Segoe UI";
     font-size: 20px;
 }
 

@@ -1,7 +1,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QGridLayout, QPushButton, QScrollArea, 
-    QFrame, QScroller, QScrollerProperties, QScrollBar
+    QWidget, QGridLayout, QPushButton, QScrollArea,
+    QFrame, QScroller, QScrollerProperties, QScrollBar,
+    QVBoxLayout, QLabel
 )
 import json
 import os
@@ -64,9 +65,36 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
 
         # 5. settings.json에서 밸브 설정 로드 및 UI 생성
         self._load_and_create_valves()
-        
+
         # 초기 수정 시간 저장
         self._update_config_mtime()
+
+        # [NEW] 자동/확인운전 중 밸브 수동조작 차단 오버레이
+        # 반투명 배경 + 중앙 "자동 중 사용 불가" 메시지 + 마우스 이벤트 가로챔
+        self._lock_overlay = QFrame(self)
+        self._lock_overlay.setStyleSheet("""
+            QFrame {
+                background-color: rgba(0, 0, 0, 0.55);
+                border-radius: 10px;
+            }
+            QLabel {
+                color: white;
+                font-size: 22px;
+                font-weight: bold;
+                background: transparent;
+                border: none;
+            }
+        """)
+        _lock_lay = QVBoxLayout(self._lock_overlay)
+        _lock_lay.setAlignment(Qt.AlignCenter)
+        _lock_lbl = QLabel("자동 중에는 사용할 수 없습니다")
+        _lock_lbl.setAlignment(Qt.AlignCenter)
+        _lock_lay.addWidget(_lock_lbl)
+        self._lock_overlay.hide()
+
+        # [NEW] PLC 실시간 출력 상태로 토글 버튼 동기화 + 자동운전 감지
+        if self.plc_client:
+            self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
     
     def showEvent(self, event):
         """페이지 표시 시 설정 변경 확인 및 자동 새로고침"""
@@ -213,8 +241,22 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
                         new_value = current_value & ~(1 << bit_pos)
                     self.plc_client.write_words(0x09, dt_addr, [new_value & 0xFFFF])
                     print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) {'ON' if checked else 'OFF'}")
+                    self._log_valve_op(bit_index, "ON" if checked else "OFF")
             except Exception as e:
                 print(f"[ValvePanel] 밸브 제어 실패: {e}")
+
+    def _log_valve_op(self, bit_index, state):
+        """조작 이력에 밸브 조작 기록."""
+        try:
+            from utils.op_history import record as op_record
+            name = None
+            for cfg in self.valve_configs:
+                if cfg.get("index") == bit_index:
+                    name = cfg.get("name")
+                    break
+            label = name or f"밸브 #{bit_index}"
+            op_record("VALVE", f"{label} {state}")
+        except Exception: pass
 
     def _on_valve_pressed(self, bit_index):
         """모멘터리 모드 밸브 누름 (ON)"""
@@ -226,6 +268,7 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
                     new_value = data[0] | (1 << bit_pos)
                     self.plc_client.write_words(0x09, dt_addr, [new_value & 0xFFFF])
                     print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) 누름 (ON)")
+                    self._log_valve_op(bit_index, "모멘터리 ON")
             except Exception as e:
                 print(f"[ValvePanel] 밸브 제어 실패: {e}")
 
@@ -241,6 +284,62 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
                     print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) 뗌 (OFF)")
             except Exception as e:
                 print(f"[ValvePanel] 밸브 제어 실패: {e}")
+
+    # ==========================================================
+    # [NEW] 실시간 출력 상태 동기화
+    # ==========================================================
+    def resizeEvent(self, event):
+        """ValvePanel 크기 변경 시 잠금 오버레이도 함께 리사이즈."""
+        super().resizeEvent(event)
+        if hasattr(self, '_lock_overlay') and self._lock_overlay is not None:
+            self._lock_overlay.setGeometry(0, 0, self.width(), self.height())
+
+    def _on_monitor_data(self, data):
+        """sig_monitor_data 수신 → 자동운전 감지 + 토글 버튼 상태 동기화."""
+        if not isinstance(data, dict):
+            return
+
+        # [NEW] 자동/확인운전 중이면 수동조작 차단 오버레이 표시
+        op_status = data.get('op_status', 0)
+        in_auto = op_status in (1, 2)
+        if in_auto and not self._lock_overlay.isVisible():
+            self._lock_overlay.setGeometry(0, 0, self.width(), self.height())
+            self._lock_overlay.show()
+            self._lock_overlay.raise_()
+        elif not in_auto and self._lock_overlay.isVisible():
+            self._lock_overlay.hide()
+
+        if not self.isVisible():
+            return  # 숨겨진 페이지는 버튼 동기화 불필요
+        outputs = data.get('outputs', [])
+        if not outputs or len(outputs) < 2:
+            return
+        self._sync_toggle_buttons(outputs)
+
+    def _sync_toggle_buttons(self, outputs):
+        """outputs (DT120=Y00~Y0F, DT121=Y20~Y2F) 로 토글 버튼 checked 상태 갱신.
+        bit_index 0~15  → outputs[0] (DT120) bit 0~15
+        bit_index 16~31 → outputs[1] (DT121) bit 0~15
+        모멘터리 버튼은 건드리지 않음 (사용자가 누르고 있는 중일 수 있음).
+        """
+        for btn in self.valve_buttons:
+            if btn.property("mode") != "toggle":
+                continue
+            bit_index = btn.property("bit_index")
+            if bit_index is None:
+                continue
+            if bit_index < 16:
+                word_idx, bit_pos = 0, bit_index
+            else:
+                word_idx, bit_pos = 1, bit_index - 16
+            if word_idx >= len(outputs):
+                continue
+            is_on = bool(outputs[word_idx] & (1 << bit_pos))
+            if btn.isChecked() != is_on:
+                # 신호 차단 후 변경 - _on_valve_toggle 재호출 방지
+                btn.blockSignals(True)
+                btn.setChecked(is_on)
+                btn.blockSignals(False)
     
     def _get_default_valve_config(self):
         """기본 밸브 설정 반환"""

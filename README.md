@@ -9,11 +9,15 @@
 
 | 항목 | 값 |
 |---|---|
-| 플랫폼 | Raspberry Pi (aarch64) |
-| OS | Raspberry Pi OS (Debian) |
+| 플랫폼 | Raspberry Pi 5 (aarch64) |
+| OS | Raspberry Pi OS Lite (Debian Trixie) — 데스크탑 없음 |
 | Python | 3.x |
-| 가상환경 | `/home/yjchoi/Desktop/Pendant/.venv` |
+| 프로젝트 경로 | `/home/yjchoi/Pendant/` |
+| 가상환경 | `/home/yjchoi/Pendant/.venv` |
+| Qt 플랫폼 | `linuxfb` (프레임버퍼 직접 렌더) |
 | 해상도 | 1024 × 600 (풀스크린) |
+| 터치 입력 | SiS HID Touch (USB, evdev `/dev/input/event5`) |
+| WiFi 스캔 권한 | polkit 규칙 `/etc/polkit-1/rules.d/50-netdev-wifi.rules` |
 
 ---
 
@@ -23,33 +27,41 @@
 Pendant/
 ├── main.py                        # 진입점 (QApplication, PLCClient, MainWindow)
 ├── main.spec                      # PyInstaller 빌드 스펙
-├── settings.json                  # 사용자 설정 (PLC IP/Port, 밸브, IO 이름 등)
+├── settings.json                  # 사용자 설정 (PLC IP/Port, 밸브, IO 이름, 축 등)
 ├── style.qss                      # 전역 스타일시트 (Fusion 기반)
-├── plc_fb.st                      # PLC 펑션블록 소스 (파나소닉 FPWIN Pro ST)
+├── new_plc_fb.st                  # PLC 펑션블록 (현재 사용, 2-instance + 콜스택)
+├── plc_fb.st                      # 구버전 FB (3-tier, 미사용 - 참고용)
+├── fb_WriteMotionTable.st         # RTEX 모션 테이블 일괄 쓰기 FB
+├── fb_MainAxis.st                 # 메인 축 제어 FB
+├── fb_RTEX_Amp_Param.st           # RTEX 앰프 파라미터 FB
+├── alarm_history.json             # 알람 발생 이력 (최근 30일, 자동 관리)
+├── op_history.json                # 사용자 조작 이력 (최근 7일, 자동 관리)
 │
 ├── ui/                            # UI 레이어
 │   ├── main_window.py             # 메인 윈도우 (페이지 스택, 네비게이션, 알람 오버레이)
-│   ├── top_bar.py                 # 상단 바 (PLC 상태, 모드, 카운터, JOG 버튼)
+│   ├── top_bar.py                 # 상단 바 (통신·모드·알람 상태, JOG 버튼)
+│   ├── theme.py                   # 전역 테마
 │   ├── overlays/
-│   │   └── alarm_overlay.py       # 축 알람 오버레이 (리셋 버튼 포함)
+│   │   ├── alarm_overlay.py       # 축/E-STOP/시퀀스 알람 오버레이
+│   │   └── alarm_history_overlay.py  # 이력 팝업 (알람 30일 / 조작 7일 탭)
 │   ├── pages/
 │   │   ├── page_manual.py         # 수동 운전 페이지 (밸브 수동 제어)
-│   │   ├── page_auto.py           # 자동 운전 페이지 (시퀀스 실행, 확인운전)
+│   │   ├── page_auto.py           # 자동 운전 페이지 (시퀀스 실행, 확인운전, 전체속도 조절)
 │   │   ├── page_mode.py           # 모드 설정 페이지 (40개 모드 On/Off)
-│   │   ├── page_position.py       # 포인트 관리 + 시퀀스 미리보기
-│   │   ├── page_timer.py          # 타이머 설정 페이지 (시퀀스 TMR 스텝 편집)
+│   │   ├── page_position.py       # 포인트 관리 + 시퀀스 미리보기 + 자동 중 미세조정
+│   │   ├── page_timer.py          # 타이머 설정 페이지 (TMR 스텝 시간 편집)
 │   │   ├── page_packing.py        # 패킹 페이지 (X/Y/Z축 적재 카운터)
-│   │   ├── page_data.py           # 레시피 관리 (저장/로드/새로만들기)
-│   │   └── page_settings.py       # 설정 페이지 (PLC IP·Port, 언어, 밸브 이름 등)
+│   │   ├── page_data.py           # 레시피 관리 (저장/로드/새로만들기/삭제)
+│   │   └── page_settings.py       # 설정 페이지 (PLC/IO/축/밸브/알람/네트워크)
 │   ├── dialogs/
-│   │   ├── jog_control_dialog.py  # 조그 제어 팝업 (축별 수동 이동)
+│   │   ├── jog_control_dialog.py  # 조그 제어 팝업 (축별 수동 이동 + 밸브)
 │   │   ├── sequence_editor_dialog.py  # 시퀀스 편집기 (스텝 추가/수정/삭제)
 │   │   ├── sequence_step_ui.py    # 스텝 UI 위젯 (POS/OUT/IN/TMR/JMP/CALL/END/COMMENT)
-│   │   ├── sequence_utils.py      # 시퀀스 유틸리티 (OverlayDialog 등)
+│   │   ├── sequence_utils.py      # 공용 오버레이 (CardList, Rename, NumericKeypad 등)
 │   │   └── timer_edit_dialog.py   # 타이머 값 편집 팝업
 │   └── widgets/
 │       ├── axis_position_panel.py # 축 위치 표시 패널
-│       ├── valve_tile.py          # 밸브 타일 위젯 (Toggle/Momentary)
+│       ├── valve_tile.py          # 밸브 타일 (Y 출력 실시간 동기화, 자동중 조작 차단 오버레이)
 │       └── custom_inputs.py       # 커스텀 입력 위젯
 │
 ├── utils/                         # 비즈니스 로직
@@ -58,19 +70,27 @@ Pendant/
 │   ├── mode_manager.py            # 모드 이름 관리 (싱글톤)
 │   ├── languages.py               # 다국어 지원 (한/영)
 │   ├── gpio_estop.py              # GPIO 기반 하드 비상정지 입력
+│   ├── wifi_manager.py            # WiFi / 유선 네트워크 nmcli 래퍼
 │   ├── json_utils.py              # JSON 읽기/쓰기 공통 유틸
-│   └── paths.py                   # 리소스 경로 유틸 (PyInstaller 호환)
+│   ├── paths.py                   # 리소스 경로 유틸 (PyInstaller 호환)
+│   ├── alarm_history.py           # 알람 이력 기록 (30일)
+│   ├── op_history.py              # 조작 이력 기록 (7일)
+│   ├── axis_limits.py             # 축 스트로크 한계 조회·클램프
+│   └── internal_bit_names.py      # 내부비트 M00~M31 사용자 정의 이름
 │
 ├── widgets/                       # 공용 재사용 위젯
 │   ├── nav_button.py              # 하단 네비게이션 버튼
 │   ├── glass_card.py              # 글래스 카드 컨테이너
 │   ├── io_panel.py                # IO 상태 패널
 │   ├── square_toggle_tile.py      # 정사각형 토글 타일
-│   ├── touch_keyboard.py          # 터치 소프트 키보드
+│   ├── touch_keyboard.py          # 터치 소프트 키보드 (한/영 + 특수문자 _ . )
 │   └── touch_number_keyboard.py   # 터치 숫자 키패드
 │
+├── assets/                        # 정적 리소스
+│   └── fonts/                     # Pretendard 한글 폰트 번들
+│
 └── recipes/                       # 레시피 파일 (런타임 생성)
-    └── *.json                     # 시퀀스·포인트·모드 통합 저장
+    └── *.json                     # 시퀀스·포인트·모드·전체속도 통합 저장
 ```
 
 ---
@@ -91,20 +111,23 @@ Pendant/
 |---|---|---|
 | **모니터링 (PLC→HMI)** | DT100~115 | 8축 현재 위치 (DINT×8, 0.001mm 단위) |
 | | DT116~119 | 입력(X) 상태 (WORD×4, 64점) |
-| | DT120~123 | 출력(Y) 상태 (WORD×4, 64점) |
-| | DT124~125 | 밸브 동작 상태 (32개 밸브) |
-| | DT126 | R입력 R0~RF (HMI port 200~215 매핑) |
-| | DT129 | 운전 상태 (0=정지, 1=수동, 2=자동, 3=일정지) |
-| | DT130 | 확인운전 상태 |
-| | DT131 | 현재 시퀀스 스텝 번호(코멘트 제외) |
-| | DT132~133 | 총 취출 횟수 (DINT) |
-| | DT134~135 | 성형 시간 (0.1초 단위) |
-| | DT136~137 | 취출 시간 (0.1초 단위) |
-| | DT138~140 | 패킹 카운터 X/Y/Z |
-| | DT141 | 축 알람 비트맵 (bit0~7=1~8축, bit8=비상정지) |
-| | DT143~158 | 축별 에러코드 (DINT×8) |
-| | DT159 | 시퀀스 팝업 요청 코드 |
-| | DT160 | 작업자 응답 (0=대기, 1=계속, 2=정지) |
+| | DT120~123 | 출력(Y) 상태 (WORD×4). 이 PLC 는 `DT120=Y00~Y0F`, `DT121=Y20~Y2F` 매핑 |
+| | DT124~125 | 밸브 동작 상태 (32개 밸브 비트) |
+| | DT126~128 | 미사용 |
+| | DT129 | 운전 상태 (op_status: 0=정지, 1=자동, 2=확인운전) |
+| | DT130 | 확인운전 상태 (check_run_status) |
+| | DT131 | 현재 실행 스텝 (FB.i_CurrentStep, 스택 top 기준) |
+| | DT132 | 현재 실행 슬롯 (FB.i_CurrentSlot: Main=0, 서브=1~N, Monitor=39) |
+| | DT133 | 콜 스택 깊이 (FB.i_StackDepth, 0~3) |
+| | DT134 | 병렬 실행 슬롯 (FB_Monitor.i_CurrentSlot, 0=idle) |
+| | DT135 | 병렬 실행 스텝 (FB_Monitor.i_CurrentStep) |
+| | DT136~137 | 총 취출 횟수 (DINT) |
+| | DT138~139 | 현재 성형 시간 (DINT, 0.1초 단위) |
+| | DT140~141 | 현재 취출 시간 (DINT, 0.1초 단위) |
+| | DT142 | 축 알람 비트맵 (bit0~7=1~8축, bit8=비상정지) |
+| | DT143~158 | 축별 에러코드 (DINT×8축) |
+| | DT159 | 사용자 알람 (`w_UserAlarm`, IN 스텝 P3=1/2 발동, 핸드셰이크: HMI 수신 후 0으로 클리어) |
+| | DT160 | 스텝 알람 ID (`i_StepAlarmID`, 0=정상, 21/50/93~99) |
 | **제어 (HMI→PLC)** | DT200 | 운전 제어 (0=정지, 1=자동, 2=확인운전) |
 | | DT201 | 조작압 선택 (0=제품압, 1=티칭압) |
 | | DT202 | 확인운전 제어 (상승엣지로 1스텝 진행) |
@@ -112,12 +135,18 @@ Pendant/
 | | DT205 | 조그 제어 (비트별 축) |
 | | DT206~208 | 모드 설정 (40개 모드 비트팩, 3 Words) |
 | | DT211 | 조그 속도 |
-| | DT212 | 알람 리셋 (1=리셋, 0=해제) |
+| | DT212 | 알람 리셋 상승펄스 → `b_AlarmReset` 으로 배선 |
 | | DT213 | 소프트 비상정지 (0=정상, 1=비상정지) |
 | | DT214 | 하트비트 (0~100 순환) |
 | | DT215 | 수동조작 모드 (0=앱솔루트, 1=JOG) |
+| | DT216 | 전체 속도 배율 (1~10 단계, 자동/확인운전 공통) |
 | **축 파라미터** | DT15000~15049 | 8축 공통 설정 블록 (50 Words) |
-| | DT15033 | 축 데이터셋 전송 트리거 |
+| | DT15000 | 축 사용 비트마스크 (bit0~7 = 1~8축) → FB 의 `w_AxisEnable` |
+| | DT15001~15008 | 8축 운전 방향 (0=정방향, 1=역방향) |
+| | DT15009~15024 | 8축 스트로크 한계 (DINT×8, mm × 1000) |
+| | DT15025~15032 | 8축 가감속 시간 (WORD×8) |
+| | DT15033 | 축 데이터셋 전송 트리거 (버튼 누름 시 축 비트 ON) |
+| | DT15034~15049 | 8축 PPR — 서보 1회전당 지령펄스수 (DINT×8) |
 | **포인트 데이터** | DT16000~ | 포인트당 32 Words × 최대 100 포인트 (DT16000~DT19199) |
 | **시퀀스 데이터** | DT20000~ | 슬롯당 1000 Words (100스텝 × 10Words) × 최대 40슬롯 (DT20000~DT59999) |
 
@@ -144,7 +173,7 @@ Pendant/
 | 21 | IN | 입력 대기 (P2 = 타임아웃, P3 = 동작, P4 = 알람번호) |
 | 30 | TMR | 타이머 대기 또는 신호유지 (0.01초 단위) |
 | 40 | JMP | 점프 (OPT=0 무조건, OPT=1 조건부) |
-| 50 | CALL | 서브 시퀀스 호출 (OPT=0 대기, OPT=1 동시실행) |
+| 50 | CALL | 서브 시퀀스 호출 (OPT=0 동기, OPT=1 병렬) |
 | 99 | END | 시퀀스 종료 |
 
 > **주의**: 코멘트 스텝은 PLC 전송 시 제외되므로, PLC 관점의 스텝 번호와 HMI 리스트 행 번호가 다를 수 있습니다. `page_position._highlight_step` 에서 PLC step 인덱스를 UI 행으로 매핑합니다.
@@ -161,8 +190,8 @@ Pendant/
 **타이머 기동후출력 동작:**
 - P3 > 0 이면 타이머만 기동하고 즉시 다음 스텝으로 진행
 - 타이머 만료 시 지정된 출력(P1, P2, OPT)을 실행
-- 최대 **2개** 동시 기동 가능 (슬롯 0~1)
-- 2개 초과 시 `i_ErrorID = 98` 에러로 시퀀스 정지
+- 최대 **5개** 동시 기동 가능 (슬롯 0~4)
+- 5개 초과 시 `i_StepAlarmID = 98` 에러로 시퀀스 정지
 
 #### IN 스텝 포트 매핑
 
@@ -170,57 +199,147 @@ Pendant/
 |---|---|
 | 0~63 | 시스템/밸브 입력 X00~X3F |
 | 100~131 | 내부 비트 M00~M31 (DT300~301) |
-| 200~215 | R입력 R0~RF (DT126 비트 0~15) |
 
-### PLC 펑션블록 (`plc_fb.st`) — 3-tier 인스턴스 구조
+---
 
-시퀀스 실행 FB는 3개 인스턴스로 배선합니다 (Main → Sub → SubSub). CALL 스텝은 최대 2단계 중첩(메인 → 서브 → 서브서브) 까지 지원.
+### PLC 펑션블록 (`new_plc_fb.st`) — 2-instance + 내부 콜 스택
+
+시퀀스 실행 FB 는 **2개 인스턴스**로 배선. 동기 CALL 은 FB 내부 콜 스택(4레벨)으로 처리하고, 병렬 CALL 만 Monitor 인스턴스로 외부 기동합니다.
 
 ```
-FB_Main   (slot 0 고정, b_Run = 외부 운전 명령)
-   ↓ b_CallStart / i_CallSlotOut
-FB_Sub    (slot 동적, 메인의 CALL에서 기동)
-   ↓
-FB_SubSub (slot 동적, 서브의 CALL에서 기동, b_NoSubCall=TRUE)
+FB_Main    (slot 0 고정, 모든 동기 CALL 처리, 내부 스택 최대 4레벨)
+   ↓ b_ParallelStart / i_ParallelSlot (병렬 CALL 시 1스캔 펄스)
+FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 ```
 
-**핵심 I/O:**
-- `b_SubBusy` : 하위 FB 실행중 플래그 (병렬 CALL 충돌 방지)
-- `b_NoSubCall` : 최하위 인스턴스 표시 (SubSub에 TRUE 배선)
-- `b_IsBusy` : 이 FB가 실행중 (상위의 `b_SubBusy`에 연결)
-- `b_Step_End` : END 도달 펄스 (상위의 `b_SubDone`에 연결)
+#### VAR_INPUT (주요)
 
-**에러 ID:**
+| 이름 | 용도 |
+|---|---|
+| `i_SlotNo` | 시작 슬롯 (Main=0) |
+| `b_Run` | 외부 자동운전 명령 |
+| `b_Reset` | **운전정지 상승펄스** — 스택/타이머/SystemOutput/내부비트 초기화 (에러/Valve 유지) |
+| `b_AlarmReset` | **알람 리셋 상승펄스 (DT212)** — UserAlarm/StepAlarm 모두 클리어 + state 900 트랩 탈출 |
+| `b_NoSubCall` | TRUE면 이 인스턴스는 CALL 불가 (Monitor 용) |
+| `t_WaitTime` | state 21 BUSY 감지 타임아웃 (PROGRAM에서 T#500MS 이상 배선 필수) |
+| `w_AxisEnable` | DT15000 축 사용 비트마스크 — POS 스텝 자동 마스킹 (3축/5축 공용 레시피 지원) |
+
+#### VAR_IN_OUT (공유 변수, Main/Monitor 같은 전역변수 배선)
+
+| 이름 | 매핑 | 용도 |
+|---|---|---|
+| `i_ControlCmd` | DT200 | 운전 명령 |
+| `i_CheckRunState` | — | 확인운전 상태 |
+| `w_system_Output` | DT203 | 시스템 출력 (b_Reset 시 초기화) |
+| `w_Valve_Output` | DT204 | 밸브 출력 (b_Reset 시 유지 — 척/진공 보호) |
+| `w_internal_Bit0` | DT300 | 내부비트 M00~M15 (b_Reset 시 초기화) |
+| `w_internal_Bit1` | DT301 | 내부비트 M16~M31 (b_Reset 시 초기화) |
+| `w_UserAlarm` | DT159 | IN 스텝 P3=1/2 발동 사용자 알람 |
+| `b_StepAlarm` | — | 스텝 진행 에러 플래그 (PROGRAM 자동정지 트리거) |
+| `i_StepAlarmID` | DT160 | 스텝 진행 에러 코드 |
+
+#### VAR_OUTPUT
+
+- `b_StepDone` — 스텝 완료 펄스
+- `b_Step_End` — 최상위 END 도달 펄스 (카운터 증가 등에 사용)
+- `b_IsBusy` — FB 실행 중 (i_SeqState <> 0 또는 스택 깊이 > 0)
+- `i_CurrentStep`, `i_CurrentSlot`, `i_StackDepth` — HMI 모니터링용
+- `i_ParallelSlot`, `b_ParallelStart` — Main → Monitor 병렬 CALL 기동
+
+#### 스텝 알람 ID (`i_StepAlarmID`)
 
 | ID | 의미 |
 |---|---|
-| 21 | POS 축 이동 확인 실패 |
-| 50 | 서브 시퀀스 에러 |
-| 93 | 병렬 CALL 실패 — 서브 FB가 이미 실행중 |
-| 94 | CALL 사용 불가 — 최하위 인스턴스(`b_NoSubCall=TRUE`) |
+| 21 | POS 축 이동 확인 실패 (BUSY 상승 미감지) — 타임아웃 후 INP 체크 백업까지 실패한 경우 |
+| 50 | 예약 (미사용) |
+| 93 | 동기 CALL 스택 오버플로 (4레벨 초과) |
+| 94 | CALL 사용 불가 — 이 인스턴스는 `b_NoSubCall=TRUE` (Monitor 등) |
 | 95 | JMP 타겟 스텝 번호 범위 초과 (0~99) |
 | 96 | CALL 슬롯 번호 범위 초과 (0~39) |
 | 97 | 실행 슬롯 번호 범위 초과 (0~39) |
-| 98 | OUT 지연 타이머 슬롯 없음 (2개 모두 사용중) |
+| 98 | OUT 지연 타이머 슬롯 없음 (5개 모두 사용중) |
 | 99 | 알 수 없는 커맨드 |
+
+#### 리셋 경로 분리
+
+| 경로 | 트리거 | 초기화 대상 | 보존 대상 |
+|---|---|---|---|
+| `b_Reset` | 자동정지 DF 펄스 | 콜 스택, 시퀀스 상태, 타이머, SystemOutput, 내부비트 | **b_StepAlarm/i_StepAlarmID/w_UserAlarm (알람 유지), Valve_Output (물림 상태)** |
+| `b_AlarmReset` | DT212 상승펄스 | b_StepAlarm, i_StepAlarmID, w_UserAlarm, state 900 | — |
+
+이 분리 덕분에 에러 발생 시 **정지 → 알람 표시 → 작업자 확인 후 리셋** 흐름이 가능하며, 공작물을 물고 있는 밸브는 정지로 자동 해제되지 않습니다.
+
+#### POS 스텝 상세 (state 11~30)
+
+1. **state 11**: `w_EffOpt := w_StepOpt AND w_AxisEnable` 로 미연결 축 마스킹 → F151_WRT 로 활성 축에만 테이블 번호 쓰기
+2. **state 12**: RTEX 전파 대기 (50ms 고정)
+3. **state 20**: 활성 축 기동 신호 ON
+4. **state 21**: BUSY 상승 래치 (어느 축이든 BUSY=TRUE 감지하면 통과). `t_WaitTime` 내 BUSY 미감지 시 **INP 백업 체크** — 모든 활성 축 INP=TRUE 면 "이미 제자리" 로 간주해 정상 통과, 아니면 에러 21
+5. **state 30**: 모든 활성 축 BUSY=FALSE 대기 → state 99 (다음 스텝)
+
+---
+
+### 알람 & 조작 이력
+
+| 유형 | 파일 | 보존 | 위치 |
+|---|---|---|---|
+| 알람 발생 이력 | `alarm_history.json` | 30일 (하드캡 5000건) | `utils/alarm_history.py` |
+| 조작 이력 | `op_history.json` | 7일 (하드캡 10000건) | `utils/op_history.py` |
+
+**TopBar 의 `알람: 없음` 을 클릭** 하면 탭 전환 팝업 (`AlarmHistoryOverlay`) 이 열려 양쪽을 조회할 수 있습니다.
+
+#### 알람 카테고리 (`category` 필드)
+
+| 카테고리 | 발생 시점 |
+|---|---|
+| `ESTOP` | DT142 bit8 또는 GPIO E-STOP 활성화 |
+| `AXIS` | 축 서보 알람 (DT142 bit0~7) |
+| `STEP` | `i_StepAlarmID` ≠ 0 |
+| `USER` | IN 스텝 P3=1/2 에서 발동한 사용자 정의 알람 |
+| `COMM` | PLC TCP 통신 끊김 |
+
+#### 조작 카테고리
+
+| 카테고리 | 예시 메시지 |
+|---|---|
+| `RUN` | 자동 운전 시작 / 확인 운전 시작 / 정지 버튼 |
+| `VALVE` | 흡착 1 ON / (JOG) 척 1 OFF / 포스쳐 반전 모멘터리 ON |
+| `POS` | M0665 X축 기억위치 변경 → 150.000 mm / (자동중) 미세조정 +0.1 |
+| `SPEED` | 전체속도 8 → 10 / M0665 Y축 속도 80 → 100 % |
+| `TIMER` | 타이머 'CycleStart' 1.00s → 1.50s |
+| `MODE` | 척1 배타 ON |
+| `RECIPE` | 레시피 로드: M0665 |
+| `ALARM_RESET` | 알람 리셋 버튼 |
+
+자동 정리는 `load_history()` / `record()` 호출마다 **시간 기반 + 하드캡 이중 필터**. 사용자 개입 없이 파일 크기가 안전 범위로 유지됩니다.
+
+---
 
 ### 레시피 파일 형식 (`recipes/*.json`)
 
 ```json
 {
+    "version": 1.5,
+    "saved_at": "2026-04-20 13:45:00",
     "sequence": {
         "Main": [...],
         "Sub1": [...]
     },
     "position_points": {
-        "Home": {"coords": [0,0,0,0,0,0,0,0], "speeds": [100,100,100,100,100,100,100,100]},
+        "Home":    {"coords": [0,0,0,0,0,0,0,0], "speeds": [100]*8, "visible_mode": []},
         "Point_1": {"coords": [100.5, 200.0, ...], "speeds": [...]}
     },
+    "timer_library": {"CycleStart": 1.0, "취출전진대기": 0.5},
     "mode": [false, true, false, ...],
     "view_order": ["Home", "Point_1", ...],
+    "speed_level": 10,
     "user_modes": {...}
 }
 ```
+
+앱 시작 시 `settings.json` 의 `last_recipe` 값으로 자동 로드되며, `page_data` 에서 선택 로드 시 `sig_file_loaded` 시그널이 발생해 각 페이지 UI/PLC 가 동기화됩니다.
+
+---
 
 ### settings.json 주요 구조
 
@@ -228,53 +347,251 @@ FB_SubSub (slot 동적, 서브의 CALL에서 기동, b_NoSubCall=TRUE)
 {
     "plc_ip": "192.168.0.60",
     "plc_port": "60001",
-    "last_recipe": "레시피명",
-    "axis_uses": [true, true, true, false, false, false, false, false],
+    "last_recipe": "M0665",
+
+    "axis_uses":    [true, true, true, false, false, false, false, false],
+    "axis_strokes": [500.0, 400.0, 300.0, 0, 0, 0, 0, 0],
+
     "valve_config": [
-        {"index": 0, "name": "척 1", "mode": "toggle", "enabled": true},
+        {"index": 0, "name": "척 1", "mode": "toggle",    "enabled": true, "jog_valve": true},
         {"index": 8, "name": "포스쳐 반전", "mode": "momentary", "enabled": true}
     ],
+
     "io_names": {
-        "inputs": ["X00 비상정지", "X01", ...],
+        "inputs":  ["X00 비상정지", "X01", ...],
         "outputs": ["Y00", ..., "Y0D 서보온", ...]
-    }
+    },
+
+    "sequence_alarms": {
+        "1": "입력 대기 타임아웃",
+        "2": "도어 열림"
+    },
+
+    "internal_bit_names": {
+        "M00": "감지비트",
+        "M05": "초기화완료"
+    },
+
+    "point_visibility": {"Home": []}
 }
 ```
 
 ---
 
-## 시퀀스 팝업 메시지 (`ui/main_window.py`)
+## 주요 기능
 
-PLC DT159에 코드 값이 들어오면 작업자 확인 팝업을 표시합니다.
-응답(계속=1 / 정지=2)은 DT160에 기록됩니다.
+### 자동 운전 페이지 (`page_auto`)
 
-| 코드 | 제목 | 메시지 |
-|---|---|---|
-| 1 | 입력 대기 타임아웃 | 입력 신호를 받지 못했습니다. |
-| 2 | 도어 열림 경고 | 도어가 열려 있습니다. |
-| 3 | 공압 이상 | 공압이 낮습니다. |
+- AUTO / CHECK / STOP 버튼
+- **전체속도 (1~10 단계)**: 계단형 그래프 UI, `±1 ±0.1` 대신 +/- 버튼. 값은 DT216으로 전송되고 레시피 JSON 에 저장 (`speed_level`)
+- IO 패널 (X/Y 실시간)
+- 축 위치 패널
+- 생산 정보 (취출횟수, 예약알람, 성형시간, 취출시간)
 
-`SEQ_POPUP_MESSAGES` 딕셔너리에 코드를 추가해 확장할 수 있습니다.
+### 위치설정 페이지 (`page_position`)
+
+- 포인트 선택 (콤보 or 네임카드 오버레이)
+- 축별 [축 / 현재위치 / 기억위치 / 속도%] 그리드
+- **기억위치 스트로크 한계 검증**: `axis_strokes` 참조, 벗어나면 팝업 후 입력 거부
+- **자동/확인운전 중 기억위치 수정**: 값 셀 클릭 시 키패드 대신 **미세조정 오버레이** (`-1 / -0.1 / +0.1 / +1` 버튼) 표시, 즉시 PLC 반영
+- 동작순서 미리보기 — 스텝 타입별 파라미터 요약 표시 (예: `출력제어_1 (Y24: 흡착 1 ON)`, `타이머_1 (취출전진대기)`, `JMP (점프할 스텝명)`)
+- 티치 버튼 — 현재 축 위치를 기억위치로 기록
+
+### 수동 운전 페이지 & 위치 설정 우측 밸브 패널
+
+- `valve_tile.ValvePanel` 공용 컴포넌트
+- **출력 상태 실시간 동기화**: DT120/DT121 기반으로 토글 버튼 상태가 실제 Y 출력과 항상 일치
+- **자동/확인운전 중 조작 차단**: 반투명 오버레이 + "자동 중에는 사용할 수 없습니다" 안내
+- Toggle / Momentary 모드 지원 (`settings.json` → `valve_config.mode`)
+
+### 시퀀스 편집기 (`sequence_editor_dialog`)
+
+- 시퀀스 카드 목록 — **단순 클릭 선택** (길게 눌러 이름 변경 제거, 스크롤 중 오발동 방지)
+- 시퀀스 네비게이션 바: `[이름변경] [+] [삭제]` (Main/Monitor 는 이름변경/삭제 비활성)
+- **이름 변경 시 모든 CALL 스텝의 `target_seq` 자동 갱신** (끊김 없음)
+- 스텝 라벨에 주요 파라미터 표시:
+  - POS: `위치이동_1 (원점)`
+  - OUT/IN: `출력제어_1 (Y24: 흡착 1 ON)`
+  - JMP: `점프_1 (출력제어_1)`
+  - TMR: `타이머_1 (취출전진대기)`
+  - CALL: `호출_1 (취출동작)`
+  - COMMENT: `// 텍스트` (노란색)
+- **내부비트 선택 시 ✎ 아이콘으로 이름 지정** — `settings.json` `internal_bit_names` 에 저장되어 `M00 \n 감지비트` 두 줄로 표시
+
+### 타이머 페이지 (`page_timer`)
+
+- 타이머 카드 그리드, 클릭 시 시간 편집
+- 현재 실행 중인 TMR 카드 **초록색 점멸 하이라이트** (최소 500ms 유지 + 큐잉 방식으로 연속 타이머도 놓치지 않음)
+- 순서 변경 다이얼로그
+
+### TopBar
+
+- 통신: `통신: 정상 / 오류`
+- 모드: `모드: 자동운전 / 확인운전 / 정지`
+- 알람: `알람: 없음` (클릭 → 이력 팝업) / `[!] 알람 (N축)` / `[!] 비상정지`
+- 금형: 현재 레시피 이름
+- JOG 버튼 (정지 상태에서만 활성)
+
+---
+
+## PLC 펑션블록 와이어링 (PROGRAM 예시)
+
+```st
+(* 전역 변수 *)
+VAR_GLOBAL
+    g_UserAlarm    : WORD;  (* DT159 매핑 *)
+    g_StepAlarm    : BOOL;
+    g_StepAlarmID  : INT;   (* DT160 매핑 *)
+END_VAR
+
+(* FB_Main *)
+FB_Main.i_SlotNo       := 0;
+FB_Main.b_NoSubCall    := FALSE;
+FB_Main.b_Run          := <외부 운전 명령>;
+FB_Main.b_Reset        := b_AutoStopRising;    (* 자동정지 DF 펄스 *)
+FB_Main.b_AlarmReset   := b_DT212_Rising;      (* DT212 상승펄스 *)
+FB_Main.t_WaitTime     := T#500MS;
+FB_Main.w_AxisEnable   := DT15000;
+FB_Main.i_ControlCmd   := DT200;
+FB_Main.w_UserAlarm    := g_UserAlarm;
+FB_Main.b_StepAlarm    := g_StepAlarm;
+FB_Main.i_StepAlarmID  := g_StepAlarmID;
+(* ... 서보/입력/모드 변수 연결 ... *)
+
+(* FB_Monitor *)
+FB_Monitor.i_SlotNo     := FB_Main.i_ParallelSlot;
+FB_Monitor.b_Run        := FB_Main.b_ParallelStart;
+FB_Monitor.b_NoSubCall  := TRUE;
+FB_Monitor.b_Reset      := b_AutoStopRising;
+FB_Monitor.b_AlarmReset := b_DT212_Rising;
+FB_Monitor.t_WaitTime   := T#500MS;
+FB_Monitor.w_AxisEnable := DT15000;
+FB_Monitor.i_ControlCmd := DT200;
+FB_Monitor.w_UserAlarm  := g_UserAlarm;
+FB_Monitor.b_StepAlarm  := g_StepAlarm;
+FB_Monitor.i_StepAlarmID:= g_StepAlarmID;
+(* 동일한 I/O 변수 공유 *)
+
+(* HMI 모니터링 *)
+DT131 := FB_Main.i_CurrentStep;
+DT132 := FB_Main.i_CurrentSlot;
+DT133 := FB_Main.i_StackDepth;
+DT134 := FB_Monitor.i_CurrentSlot;
+DT135 := FB_Monitor.i_CurrentStep;
+DT160 := INT_TO_WORD(g_StepAlarmID);
+
+(* 자동정지 트리거 - 에러 발생 시 *)
+IF g_StepAlarm AND NOT g_StepAlarmPrev THEN
+    DT200 := 0;   (* i_ControlCmd := 0 → 자동정지 DF → b_Reset *)
+END_IF;
+g_StepAlarmPrev := g_StepAlarm;
+```
+
+---
+
+## 신규 라즈베리파이 초기 세팅
+
+```bash
+git clone git@github.com:GT-Yjchoi/Pendant.git
+cd Pendant
+./setup.sh        # 시스템 라이브러리 + venv + PySide6 + polkit(WiFi 스캔 권한)
+```
+
+SSH 키를 등록해 두지 않았다면 먼저:
+```bash
+ssh-keygen -t ed25519 -C "<email>"
+cat ~/.ssh/id_ed25519.pub   # GitHub → Settings → SSH keys 에 등록
+```
 
 ---
 
 ## 빌드 방법
 
 ```bash
-cd /home/yjchoi/Desktop/Pendant
+cd /home/yjchoi/Pendant
 source .venv/bin/activate
 pyinstaller --clean -y main.spec
 ```
+
+> `main.spec` 의 `datas` 에 `assets/fonts` 가 포함되어 있어 번들 폰트가 실행파일에 포함됩니다.
 
 ---
 
 ## 개발 실행
 
 ```bash
-cd /home/yjchoi/Desktop/Pendant
-source .venv/bin/activate
-python main.py
+cd /home/yjchoi/Pendant
+QT_QPA_PLATFORM=linuxfb .venv/bin/python main.py
 ```
+
+> Lite OS 에는 데스크탑이 없으므로 `QT_QPA_PLATFORM=linuxfb` 가 필수.
+> 종료 후 프레임버퍼에 잔상이 남으면 `sudo dd if=/dev/zero of=/dev/fb0` 로 지울 수 있습니다.
+
+---
+
+## 번들 폰트 (한글 렌더)
+
+시스템에 한글 폰트를 설치하지 않아도 되도록 프로젝트에 Pretendard(OFL) 를 포함.
+
+- 위치: `assets/fonts/Pretendard-Regular.ttf`, `assets/fonts/Pretendard-Bold.ttf` (총 ~5MB)
+- 로드: `main.py` 의 `_load_bundled_fonts()` 가 `QFontDatabase.addApplicationFont()` 로 등록 후 앱 기본 폰트로 설정
+- 스타일시트: `ui/theme.py` 의 `QWidget { font-family: "Pretendard", "Segoe UI"; }` 로 우선순위 지정
+
+---
+
+## 문제 해결
+
+### HDMI 연결이 끊기면 앱이 종료됨
+`linuxfb` 플랫폼 플러그인은 부팅 시 `/dev/fb0` 를 잡은 상태로 고정.
+HDMI 핫플러그로 `vc4-kms-v3d` 드라이버가 프레임버퍼를 재구성하면 Qt 가 따라가지 못하고 크래시.
+재연결 후에는 프레임버퍼 상태가 달라져 터치 좌표 매핑이 어긋나거나 evdev 가 꼬인다.
+
+**증상 연쇄**:
+1. HDMI 끊김 → 앱 크래시 종료
+2. 재연결 후 tty1 은 여전히 **텍스트 모드** 상태로 남아있어 커서가 FB 에 찍힘
+3. 앱을 다시 실행해도 Qt 가 `KDSETMODE KD_GRAPHICS` ioctl 로 tty 모드 전환에 실패 → 커서와 앱이 겹쳐 보임
+4. USB/evdev 레이어도 half-init 상태라 Qt 가 터치 디바이스 exclusive grab 실패 → 터치 안 됨
+
+**복구 방법**:
+- 1차 (거의 항상 필요): **재부팅**. `sudo dd if=/dev/zero of=/dev/fb0`, `chvt 2 && chvt 1`, `systemctl restart getty@tty1` 등은 대부분 효과 없음.
+- 근본 예방: `/boot/firmware/cmdline.txt` 끝에 `video=HDMI-A-1:1024x600M@60D` 추가 — `D` 플래그가 HDMI 핫플러그 무시하고 출력 강제 유지. 그리고 systemd 로 앱 자동 재시작 서비스 등록.
+
+### 앱 좌상단에 tty1 커서가 깜빡이거나 콘솔 텍스트가 비침
+linuxfb 는 `/dev/fb0` 를 직접 그리지만 커널 프레임버퍼 콘솔(`fbcon`)도 같은 FB 를 공유하므로
+기본 상태에선 tty1 의 커서·텍스트가 앱 뒤로 겹쳐 보인다.
+
+**해결**: `/boot/firmware/cmdline.txt` 에 아래 플래그 추가 후 재부팅.
+```
+vt.global_cursor_default=0 consoleblank=0 fbcon=map:2 logo.nologo
+```
+- `vt.global_cursor_default=0` — 콘솔 커서 깜빡임 제거
+- `consoleblank=0` — 화면 자동 꺼짐 방지
+- `fbcon=map:2` — fbcon 을 존재하지 않는 FB 로 돌려 FB0 점유 해제 (핵심)
+- `logo.nologo` — 부팅 로고 제거
+
+> `setup.sh` 의 `[3/5]` 단계가 이 플래그를 멱등하게 추가한다. 새 하드웨어에선 자동 적용됨.
+> 재부팅 없이 임시로만 끄려면: `sudo sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind'`
+
+### 앱 종료 & tty 복귀
+- tty1 에서 실행 중이면 해당 터미널에서 `Ctrl+C` — Qt 앱이 SIGINT 받고 종료, 셸 프롬프트 복귀.
+- 화면에 잔상이 남으면 `sudo dd if=/dev/zero of=/dev/fb0` 또는 `chvt 2 && chvt 1`.
+- 다른 tty 로 전환: `Ctrl+Alt+F2` (돌아올 때 `Ctrl+Alt+F1`). SSH 로 접속해 `pkill -f "python main.py"` 로 강제 종료도 가능.
+
+### 0초 타이머가 HMI 에 표시 안 됨
+HMI 폴링 주기(50ms)가 PLC 스캔(1~5ms)보다 느려 0초 TMR 스텝이 `i_CurrentStep` 에 1스캔만 나타나 HMI 가 놓칠 수 있습니다.
+현재는 **관측된 경우**에만 최소 500ms 하이라이트 + 큐잉으로 보정합니다. 완벽한 감지가 필요하면 PLC 에 TMR 진입 이벤트 래치 + 핸드셰이크 레지스터를 추가해야 합니다 (미구현).
+
+---
+
+## 네트워크 탭 (설정 > 네트워크)
+
+`ui/pages/page_settings.py` 의 마지막 탭. NetworkManager(`nmcli`) 래퍼는 `utils/wifi_manager.py`.
+
+- **무선**: 현재 SSID/IP/신호 표시, 스캔/암호 입력(터치 키보드)/연결 해제. 탭이 보이는 동안 15초마다 자동 스캔.
+- **유선**: 인터페이스/상태/IP/게이트웨이/방식(DHCP/고정) 표시, DHCP 적용 · 고정 IP 설정(IP/prefix/GW/DNS).
+- WiFi 스캔은 polkit 인증이 필요 — `setup.sh` 가 `netdev` 그룹에 권한 부여 규칙을 설치.
+
+> 핸드폰 핫스팟이 안 잡힐 때: iOS 는 핫스팟 설정 화면을 열어둔 상태에서만 5GHz 비콘을 활발히 송출. 2.4GHz 로 설정하면 안정적.
 
 ---
 
@@ -283,12 +600,15 @@ python main.py
 | 목적 | 파일 |
 |---|---|
 | PLC IP/Port 기본값 | `ui/main_window.py` → `_try_auto_connect` |
-| 시퀀스 팝업 메시지 추가 | `ui/main_window.py` → `SEQ_POPUP_MESSAGES` |
-| 밸브 이름·모드 설정 | `settings.json` → `valve_config` |
-| IO 이름 변경 | `settings.json` → `io_names` |
+| 사용자 알람 메시지 (IN 스텝) | 설정 페이지 > 알람 탭 (또는 `settings.json` `sequence_alarms`) |
+| 밸브 이름·모드·JOG 노출 | 설정 페이지 > 밸브 탭 (또는 `settings.json` `valve_config`) |
+| IO 이름 변경 | 설정 페이지 > IO 탭 (또는 `settings.json` `io_names`) |
+| 축 설정 (사용여부·스트로크·가감속·PPR) | 설정 페이지 > 축 파라미터 (또는 `settings.json` `axis_uses`·`axis_strokes`) |
+| 내부비트 이름 | 시퀀스 편집기 OUT/IN 스텝 → 내부비트 카드 ✎ 아이콘 |
 | 모니터링 주기 변경 | `utils/plc_client.py` → `_mon_loop` (`time.sleep`) |
 | PLC 주소 상수 | `utils/plc_client.py` → `__init__` 상단 |
-| 시퀀스 FB 로직 | `plc_fb.st` |
-| 페이지 추가 | `ui/pages/` 파일 생성 후 `ui/main_window.py`에 등록 |
+| 시퀀스 FB 로직 | `new_plc_fb.st` |
+| 페이지 추가 | `ui/pages/` 생성 후 `ui/main_window.py` 에 등록 |
 | 네비게이션 버튼 순서 | `ui/main_window.py` → `add_nav(...)` 호출 순서 |
-| 스타일 변경 | `style.qss` |
+| 이력 보존 기간 | `utils/alarm_history.py` (RETENTION_DAYS=30) / `utils/op_history.py` (=7) |
+| 스타일 변경 | `style.qss` / 각 위젯 setStyleSheet |

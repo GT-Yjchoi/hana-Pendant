@@ -1,99 +1,51 @@
 {
     "version": 1.5,
-    "saved_at": "2026-04-21 00:06:49.637124",
+    "saved_at": "2026-04-23 14:48:40.123595",
     "sequence": {
         "Main": [
             {
-                "type": "JMP",
-                "name": "자동조건",
-                "target_idx": 2,
-                "condition": true,
-                "cond_type": "BIT",
-                "cond_value": 131,
-                "cond_on": true
-            },
-            {
                 "type": "CALL",
-                "name": "초기동작 호출",
-                "target_seq": "초기동작",
-                "parallel": false
-            },
-            {
-                "type": "IN",
-                "name": "초기동작 완료대기",
-                "port": 131,
-                "on": true,
-                "in_type": 2,
-                "timeout_enabled": false,
-                "timeout_action": "continue"
-            },
-            {
-                "type": "JMP",
-                "name": "확인운전 무시플래그",
-                "target_idx": 5,
-                "condition": true,
-                "cond_type": "STATE",
-                "cond_value": 2,
-                "cond_on": true
-            },
-            {
-                "type": "IN",
-                "name": "하강조건",
-                "port": 200,
-                "on": true,
-                "in_type": 3,
-                "timeout_enabled": false,
-                "timeout_action": "continue"
-            },
-            {
-                "type": "IN",
-                "name": "형개대기",
-                "port": 4,
-                "on": true,
-                "in_type": 0,
-                "timeout_enabled": false,
-                "timeout_action": "continue"
-            },
-            {
-                "type": "OUT",
-                "name": "싸이클 시작출력",
-                "port": 1,
-                "on": true,
-                "out_type": 2,
-                "delay_enable": false
-            },
-            {
-                "type": "CALL",
-                "name": "제품취출",
-                "target_seq": "취출동작",
-                "parallel": false
-            },
-            {
-                "type": "CALL",
-                "name": "제품검지 체크",
-                "target_seq": "제품검지확인",
-                "parallel": false
-            },
-            {
-                "type": "CALL",
-                "name": "안전도어 클리어",
-                "target_seq": "안전도어클리어",
-                "parallel": false
-            },
-            {
-                "type": "CALL",
-                "name": "제품개방 동작",
-                "target_seq": "개방동작",
-                "parallel": false
-            },
-            {
-                "type": "CALL",
-                "name": "복귀동작",
-                "target_seq": "주행복귀 동작",
+                "name": "호출_2",
+                "target_seq": "1_취출동작",
                 "parallel": false
             }
         ],
-        "Monitor": [],
+        "Monitor": [
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 3,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "1초",
+                "time": 1.0,
+                "timer_ref": "1초"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 3,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "1초",
+                "time": 1.0,
+                "timer_ref": "1초"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_1",
+                "target_idx": 0,
+                "condition": false
+            }
+        ],
         "취출동작": [
             {
                 "type": "OUT",
@@ -159,7 +111,7 @@
             {
                 "type": "TMR",
                 "name": "취출전진대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출전진대기"
             },
             {
@@ -180,7 +132,7 @@
             {
                 "type": "TMR",
                 "name": "제품척대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "제품척대기"
             },
             {
@@ -192,7 +144,7 @@
             {
                 "type": "TMR",
                 "name": "취출 후퇴대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출 후퇴대기"
             },
             {
@@ -213,7 +165,7 @@
             {
                 "type": "TMR",
                 "name": "취출 상승대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출 상승대기"
             },
             {
@@ -286,7 +238,7 @@
             {
                 "type": "TMR",
                 "name": "취출전진대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출전진대기"
             },
             {
@@ -307,7 +259,7 @@
             {
                 "type": "TMR",
                 "name": "제품척대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "제품척대기"
             },
             {
@@ -319,7 +271,7 @@
             {
                 "type": "TMR",
                 "name": "취출 후퇴대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출 후퇴대기"
             },
             {
@@ -340,7 +292,7 @@
             {
                 "type": "TMR",
                 "name": "취출 상승대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출 상승대기"
             },
             {
@@ -394,7 +346,7 @@
             {
                 "type": "TMR",
                 "name": "취출전진대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출전진대기"
             },
             {
@@ -427,7 +379,7 @@
             {
                 "type": "TMR",
                 "name": "취출 후퇴대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출 후퇴대기"
             },
             {
@@ -448,7 +400,7 @@
             {
                 "type": "TMR",
                 "name": "취출 상승대기",
-                "time": 1.0,
+                "time": 0.0,
                 "timer_ref": "취출 상승대기"
             },
             {
@@ -746,7 +698,7 @@
                 "timer_ref": "CycleStart",
                 "time": 1.0,
                 "delay_timer_ref": "CycleStart",
-                "delay_time": 1.0
+                "delay_time": 10.0
             },
             {
                 "type": "END",
@@ -843,7 +795,7 @@
                 "out_type": 0,
                 "delay_enable": true,
                 "delay_timer_ref": "CycleStart",
-                "delay_time": 1.0
+                "delay_time": 10.0
             },
             {
                 "type": "END",
@@ -877,7 +829,7 @@
                 "out_type": 0,
                 "delay_enable": true,
                 "delay_timer_ref": "CycleStart",
-                "delay_time": 1.0
+                "delay_time": 10.0
             },
             {
                 "type": "JMP",
@@ -1139,7 +1091,7 @@
             {
                 "type": "TMR",
                 "name": "제품개방대기",
-                "time": 0.5,
+                "time": 0.0,
                 "timer_ref": "제품개방대기"
             },
             {
@@ -1190,7 +1142,7 @@
             {
                 "type": "TMR",
                 "name": "제품 개방 상승대기",
-                "time": 0.5,
+                "time": 0.0,
                 "timer_ref": "제품 개방 상승대기"
             },
             {
@@ -1229,7 +1181,7 @@
             {
                 "type": "TMR",
                 "name": "제품 개방 상승대기",
-                "time": 0.5,
+                "time": 0.0,
                 "timer_ref": "제품 개방 상승대기"
             },
             {
@@ -1286,7 +1238,7 @@
             {
                 "type": "TMR",
                 "name": "제품개방대기",
-                "time": 0.5,
+                "time": 0.0,
                 "tmr_mode": "simple",
                 "timer_ref": "제품개방대기"
             },
@@ -1309,7 +1261,7 @@
             {
                 "type": "TMR",
                 "name": "제품 개방 상승대기",
-                "time": 0.5,
+                "time": 0.0,
                 "timer_ref": "제품 개방 상승대기"
             },
             {
@@ -2643,60 +2595,299 @@
                 "type": "END",
                 "name": "END"
             }
+        ],
+        "1_취출동작": [
+            {
+                "type": "CALL",
+                "name": "호출_1",
+                "target_seq": "밸브오프",
+                "parallel": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 8,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_4",
+                "point_name": "하강위치1",
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "TMR",
+                "name": "취출전진대기",
+                "time": 0.0,
+                "timer_ref": "취출전진대기"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_1",
+                "point_name": "취출위치",
+                "active_axes": [
+                    true,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 0,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": true,
+                "delay_timer_ref": "제품척대기",
+                "delay_time": 0.0
+            },
+            {
+                "type": "TMR",
+                "name": "취출 후퇴대기",
+                "time": 0.0,
+                "timer_ref": "취출 후퇴대기"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_2",
+                "point_name": "인발위치",
+                "active_axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "TMR",
+                "name": "취출 상승대기",
+                "time": 0.0,
+                "timer_ref": "취출 상승대기"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_3",
+                "point_name": "대기위치",
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "TMR",
+                "name": "제품개방대기",
+                "time": 0.0,
+                "timer_ref": "제품개방대기"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_5",
+                "point_name": "제품개방위치",
+                "active_axes": [
+                    true,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "pack_base": true
+            },
+            {
+                "type": "TMR",
+                "name": "제품개방 하강대기",
+                "time": 0.0,
+                "timer_ref": "제품개방 하강대기"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_6",
+                "point_name": "제품개방위치",
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "pack_base": true
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 0,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "제품 개방 상승대기",
+                "time": 0.0,
+                "timer_ref": "제품 개방 상승대기"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_7",
+                "point_name": "대기위치",
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_8",
+                "point_name": "대기위치",
+                "active_axes": [
+                    true,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            }
+        ],
+        "test": [
+            {
+                "type": "CALL",
+                "name": "호출_1",
+                "target_seq": "test2",
+                "parallel": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 3,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "1초",
+                "time": 1.0,
+                "timer_ref": "1초"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 3,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "1초",
+                "time": 1.0,
+                "timer_ref": "1초"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_1",
+                "target_idx": 1,
+                "condition": false
+            }
+        ],
+        "test2": [
+            {
+                "type": "CALL",
+                "name": "호출_1",
+                "target_seq": "test3",
+                "parallel": false
+            }
+        ],
+        "test3": [],
+        "밸브오프": [
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 0,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_5",
+                "port": 1,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 2,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 4,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 5,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            }
         ]
     },
     "position_points": {
-        "하강위치": {
-            "coords": [
-                86.882,
-                131.115,
-                550.756,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0
-            ],
-            "speeds": [
-                10,
-                10,
-                10,
-                10,
-                10,
-                100.0,
-                100.0,
-                100.0
-            ],
-            "visible_mode": []
-        },
-        "취출위치": {
-            "coords": [
-                86.882,
-                184.694,
-                550.756,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0
-            ],
-            "speeds": [
-                10,
-                10,
-                10,
-                10,
-                10,
-                100.0,
-                100.0,
-                100.0
-            ],
-            "visible_mode": []
-        },
         "대기위치": {
             "coords": [
-                86.882,
-                131.115,
-                0.0,
+                147.0,
+                100.747,
+                0.001,
                 0.0,
                 0.0,
                 0.0,
@@ -2704,11 +2895,11 @@
                 0.0
             ],
             "speeds": [
-                10,
-                10,
-                10,
-                10,
-                10,
+                100,
+                100,
+                100,
+                50,
+                50,
                 100.0,
                 100.0,
                 100.0
@@ -2717,9 +2908,9 @@
         },
         "인발위치": {
             "coords": [
-                86.882,
-                131.115,
-                550.756,
+                147.0,
+                100.747,
+                161.9,
                 0.0,
                 0.0,
                 0.0,
@@ -2727,11 +2918,11 @@
                 0.0
             ],
             "speeds": [
-                10,
-                10,
-                10,
-                10,
-                10,
+                100,
+                100,
+                100,
+                70,
+                70,
                 100.0,
                 100.0,
                 100.0
@@ -2750,11 +2941,11 @@
                 0.0
             ],
             "speeds": [
-                10,
-                10,
-                10,
-                10,
-                10,
+                30,
+                30,
+                30,
+                30,
+                30,
                 100.0,
                 100.0,
                 100.0
@@ -2776,7 +2967,7 @@
                 0.0
             ],
             "speeds": [
-                10,
+                30,
                 10,
                 10,
                 10,
@@ -2791,9 +2982,9 @@
         },
         "제품개방위치": {
             "coords": [
-                965.556,
-                232.333,
-                52.299,
+                500.0,
+                270.0,
+                200.0,
                 0.0,
                 0.0,
                 0.0,
@@ -2801,9 +2992,9 @@
                 0.0
             ],
             "speeds": [
-                10,
-                10,
-                10,
+                100,
+                100,
+                100,
                 10,
                 10,
                 100.0,
@@ -2847,9 +3038,9 @@
                 0.0
             ],
             "speeds": [
-                10,
-                10,
-                10,
+                50,
+                50,
+                50,
                 10,
                 10,
                 100.0,
@@ -2930,25 +3121,71 @@
                 100.0
             ],
             "visible_mode": []
+        },
+        "하강위치1": {
+            "coords": [
+                147.0,
+                100.747,
+                161.9,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100,
+                100,
+                100,
+                70,
+                70,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "취출위치": {
+            "coords": [
+                147.0,
+                141.0,
+                161.9,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100,
+                100,
+                100,
+                50,
+                50,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
         }
     },
     "timer_library": {
-        "취출전진대기": 1.0,
+        "취출전진대기": 0.0,
         "런너척대기": 0.0,
-        "제품척대기": 1.0,
-        "취출 후퇴대기": 1.0,
-        "취출 상승대기": 1.0,
+        "제품척대기": 0.0,
+        "취출 후퇴대기": 0.0,
+        "취출 상승대기": 0.0,
         "반전대기": 0.0,
         "런너개방대기": 0.0,
         "제품개방 하강대기": 0.0,
-        "제품개방대기": 0.5,
+        "제품개방대기": 0.0,
         "제품상승대기": 0.0,
         "제품흡착대기": 0.0,
-        "제품 개방 상승대기": 0.5,
-        "CycleStart": 6.0,
-        "이젝터지연": 0.0,
+        "제품 개방 상승대기": 0.0,
+        "CycleStart": 1.0,
         "런너개방 상승대기": 0.0,
-        "런너개방 하강대기": 0.0
+        "런너개방 하강대기": 0.0,
+        "1초": 1.0
     },
     "mode": [
         true,
@@ -2957,7 +3194,7 @@
         false,
         false,
         false,
-        true,
+        false,
         false,
         true,
         false,
@@ -2998,7 +3235,7 @@
     ],
     "view_order": [
         "취출위치",
-        "하강위치",
+        "하강위치1",
         "인발위치",
         "대기위치",
         "반전위치",
@@ -3010,7 +3247,19 @@
         "미사용 회피위치",
         "주행대기위치"
     ],
-    "speed_level": 10,
+    "speed_level": 2,
+    "packing_config": {
+        "x_count": 2,
+        "x_pitch": 20.0,
+        "x_dir": -1,
+        "y_count": 2,
+        "y_pitch": 10.0,
+        "y_dir": 1,
+        "z_count": 1,
+        "z_pitch": 10.0,
+        "stack_order": 4,
+        "enabled": false
+    },
     "user_modes": {
         "34": "User Mode 1"
     }

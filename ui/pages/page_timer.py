@@ -1,4 +1,5 @@
-from PySide6.QtCore import Qt, QEventLoop, QTimer
+import time
+from PySide6.QtCore import Qt, QEventLoop, QTimer, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QScrollArea, QGridLayout, QFrame, QSizePolicy,
@@ -199,6 +200,8 @@ class TimerEditDialog(QWidget):
 # [페이지] 타이머 라이브러리 관리
 # ==========================================================
 class PageTimer(GlassCard):
+    sig_timer_changed = Signal()   # 타이머 값 변경 시 발행 → main_window에서 auto_save 트리거
+
     def __init__(self, sequence_data=None, timer_library=None, plc_client=None):
         super().__init__("")
 
@@ -275,6 +278,15 @@ class PageTimer(GlassCard):
         self._blink_timer.setInterval(500)
         self._blink_timer.timeout.connect(self._on_blink)
 
+        # [NEW] 최소 하이라이트 유지 시간 (0초 타이머도 사용자가 인지하도록 보장)
+        # 깜빡임 주기(500ms)와 맞춰 최소 1회 on→off→on 이 보이도록 설정
+        self._highlight_min_sec = 0.5
+        self._active_min_end = 0.0    # 이 시점까지는 현재 하이라이트 유지
+        self._active_queue = []       # 대기 큐: 짧은 타이머 연속 발동 시 순차 표시
+        self._pending_clear = QTimer(self)
+        self._pending_clear.setSingleShot(True)
+        self._pending_clear.timeout.connect(self._on_hold_expired)
+
         if self.plc_client:
             self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
 
@@ -340,15 +352,28 @@ class PageTimer(GlassCard):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        # 상단 행: 이름
+        # 상단 행: 이름 + 기동중 인디케이터 (우측 정렬)
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(4)
+
         lbl_name = QLabel(name)
         lbl_name.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         lbl_name.setStyleSheet("color: #DDD; font-size: 17px; font-weight: bold; border: none; background: transparent;")
         lbl_name.setWordWrap(True)
-        layout.addWidget(lbl_name)
+        top_row.addWidget(lbl_name, 1)
 
-        # 시간 값 (버튼 - 클릭 시 편집)
-        btn_time = QPushButton(f"{time_sec:.1f}")
+        # 항상 표시하되 텍스트만 토글 (레이아웃 들썩임 방지 위해 고정폭)
+        lbl_run = QLabel("")
+        lbl_run.setFixedSize(60, 16)
+        lbl_run.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        lbl_run.setStyleSheet("color: #00FF7F; font-size: 11px; font-weight: bold; border: none; background: transparent;")
+        top_row.addWidget(lbl_run, 0)
+
+        layout.addLayout(top_row)
+
+        # 시간 값 (버튼 - 클릭 시 편집) — 시간 + SEC을 한 버튼에 표시
+        btn_time = QPushButton(f"{time_sec:.1f} SEC")
         btn_time.setFixedHeight(50)
         btn_time.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         btn_time.setStyleSheet("""
@@ -369,28 +394,6 @@ class PageTimer(GlassCard):
         btn_time.clicked.connect(lambda _, n=name, t=time_sec, b=btn_time: self._on_card_clicked(n, t, b))
         layout.addWidget(btn_time)
 
-        # 하단 행: SEC 단위 + 기동중 인디케이터
-        bottom_row = QHBoxLayout()
-        bottom_row.setContentsMargins(0, 0, 0, 0)
-        bottom_row.setSpacing(4)
-
-        lbl_unit = QLabel("SEC")
-        lbl_unit.setFixedHeight(16)
-        lbl_unit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        lbl_unit.setStyleSheet("color: #888; font-size: 11px; border: none; background: transparent;")
-        bottom_row.addWidget(lbl_unit)
-
-        bottom_row.addStretch(1)
-
-        lbl_run = QLabel("▶ 기동중")
-        lbl_run.setFixedHeight(16)
-        lbl_run.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        lbl_run.setStyleSheet("color: #00FF7F; font-size: 11px; font-weight: bold; border: none; background: transparent;")
-        lbl_run.setVisible(False)
-        bottom_row.addWidget(lbl_run)
-
-        layout.addLayout(bottom_row)
-
         # 참조 저장
         frame._btn_time_ref = btn_time
         frame._name_ref = name
@@ -404,10 +407,15 @@ class PageTimer(GlassCard):
         if dlg.exec() == TimerEditDialog.Accepted:
             new_ms = dlg.get_value_ms()
             new_sec = new_ms / 100.0
+            old_sec = self.timer_library.get(name, time_sec)
             self.timer_library[name] = new_sec
-            btn_widget.setText(f"{new_sec:.1f}")
+            btn_widget.setText(f"{new_sec:.1f} SEC")
             self._sync_steps_time(name, new_sec)
             print(f"[Timer Library] Updated '{name}': {new_sec} sec")
+            try:
+                from utils.op_history import record as op_record
+                op_record("TIMER", f"타이머 '{name}' {old_sec:.2f}s → {new_sec:.2f}s")
+            except Exception: pass
 
     def _sync_steps_time(self, timer_name, new_sec):
         """타이머 값 변경 시 해당 타이머를 참조하는 모든 시퀀스 스텝의 time 동기화 + PLC 패치"""
@@ -430,15 +438,25 @@ class PageTimer(GlassCard):
             for step in steps:
                 if step.get("type") == "COMMENT":
                     continue
+                # TMR 스텝 (단순 대기 / 신호 유지)
                 if step.get("type") == "TMR" and step.get("timer_ref") == timer_name:
                     step["time"] = new_sec
                     if plc and getattr(plc, 'is_connected', False) and slot_id is not None:
                         plc.patch_tmr_step_time(slot_id, plc_idx, new_sec)
                     patch_count += 1
+                # OUT 스텝의 타이머 기동후출력 (delay_timer_ref)
+                elif step.get("type") == "OUT" and step.get("delay_timer_ref") == timer_name:
+                    step["delay_time"] = new_sec
+                    if plc and getattr(plc, 'is_connected', False) and slot_id is not None:
+                        plc.patch_out_delay_step_time(slot_id, plc_idx, new_sec)
+                    patch_count += 1
                 plc_idx += 1
 
         if patch_count:
             print(f"[Timer Library] Synced+Patched {patch_count} step(s) referencing '{timer_name}'")
+
+        # 변경 사항이 있든 없든 타이머 라이브러리 자체는 변했으므로 저장 트리거
+        self.sig_timer_changed.emit()
 
     def _on_delete_timer(self, name):
         if DarkConfirmDialog:
@@ -450,6 +468,7 @@ class PageTimer(GlassCard):
             del self.timer_library[name]
             self.refresh_grid()
             print(f"[Timer Library] Deleted '{name}'")
+            self.sig_timer_changed.emit()
 
     def _on_add_timer_clicked(self):
         # 1. 타이머 이름 입력
@@ -469,6 +488,7 @@ class PageTimer(GlassCard):
         self.timer_library[timer_name] = timer_sec
         self.refresh_grid()
         print(f"[Timer Library] Added '{timer_name}': {timer_sec} sec")
+        self.sig_timer_changed.emit()
 
     def _ask_timer_name(self):
         """타이머 이름 입력 (텍스트 키보드 또는 폴백)"""
@@ -502,32 +522,78 @@ class PageTimer(GlassCard):
     def _on_monitor_data(self, data):
         if not isinstance(data, dict):
             return
-        op_status   = data.get('op_status', 0)
-        sub_seq_idx = data.get('sub_seq_idx', 0)
-        sub_step    = data.get('sub_step', 0)
+        op_status    = data.get('op_status', 0)
+        current_slot = data.get('sub_seq_idx', 0)   # DT132 = FB.i_CurrentSlot (Main=0, 서브=1~N, Monitor=39)
+        current_step = data.get('current_step', 0)  # DT131 = FB.i_CurrentStep (스택 top 기준)
 
-        if op_status in (1, 2) and sub_seq_idx > 0:
-            active = self._find_active_timer(sub_seq_idx, sub_step)
+        if op_status in (1, 2):
+            active = self._find_active_timer(current_slot, current_step)
         else:
             active = None
 
-        if active != self._active_timer_name:
-            self._active_timer_name = active
-            if active:
-                self._blink_state = True
-                self._blink_timer.start()
-            else:
-                self._blink_timer.stop()
-                self._blink_state = False
-            self._update_card_styles()
+        # [변경] 최소 유지 시간 + 큐잉 - 짧은 타이머 연속 발동도 각각 확실히 보임
+        self._handle_active_change(active)
 
-    def _find_active_timer(self, sub_seq_idx, step_idx):
-        """서브시퀀스 인덱스와 스텝 번호로 실행 중인 TMR의 timer_ref 반환"""
-        reserved = {"Main", "Monitor"}
-        subs = sorted([k for k in self.sequence_data.keys() if k not in reserved])
-        if sub_seq_idx < 1 or sub_seq_idx > len(subs):
-            return None
-        seq_name = subs[sub_seq_idx - 1]
+    def _handle_active_change(self, active):
+        """현재 스캔의 active 타이머 반영. 최소 유지 시간 내엔 큐에 쌓고,
+        시간이 지나면 순차적으로 표시."""
+        now = time.monotonic()
+        holding = now < self._active_min_end
+
+        if active == self._active_timer_name:
+            # 동일 active 유지 - 큐에 쌓였던 과거 active 는 무시
+            return
+
+        if holding:
+            # 현재 하이라이트 최소 유지 시간 내 → 큐에 담기 (중복/None 은 스킵)
+            if active is None:
+                return
+            if not self._active_queue or self._active_queue[-1] != active:
+                self._active_queue.append(active)
+            return
+
+        # 최소 유지 시간 지남 또는 아직 아무것도 표시 안함 → 즉시 반영
+        self._show_active(active)
+
+    def _show_active(self, active):
+        """active 타이머를 즉시 표시 (None 이면 해제)."""
+        self._pending_clear.stop()
+        self._active_timer_name = active
+        if active is not None:
+            self._active_min_end = time.monotonic() + self._highlight_min_sec
+            self._blink_state = True
+            self._blink_timer.start()
+            # 최소 유지 시간 후에 큐 소진 또는 클리어 결정
+            self._pending_clear.start(int(self._highlight_min_sec * 1000))
+        else:
+            self._active_min_end = 0.0
+            self._blink_timer.stop()
+            self._blink_state = False
+        self._update_card_styles()
+
+    def _on_hold_expired(self):
+        """최소 유지 시간 만료. 큐에 대기 중이면 다음 항목 표시, 없으면 클리어."""
+        if self._active_queue:
+            next_active = self._active_queue.pop(0)
+            self._show_active(next_active)
+        else:
+            self._show_active(None)
+
+    def _find_active_timer(self, current_slot, step_idx):
+        """현재 슬롯 + 스텝 번호로 실행 중인 TMR의 timer_ref 반환. Main/Monitor 포함."""
+        # 슬롯 번호 → 시퀀스 이름 매핑
+        if current_slot == 0:
+            seq_name = "Main"
+        elif current_slot == 39:
+            seq_name = "Monitor"
+        else:
+            reserved = {"Main", "Monitor"}
+            subs = sorted([k for k in self.sequence_data.keys() if k not in reserved])
+            idx = current_slot - 1
+            if idx < 0 or idx >= len(subs):
+                return None
+            seq_name = subs[idx]
+
         steps = self.sequence_data.get(seq_name, [])
         n = 0
         for step in steps:
@@ -558,7 +624,7 @@ class PageTimer(GlassCard):
                     }}
                 """)
                 if hasattr(frame, '_lbl_run'):
-                    frame._lbl_run.setVisible(self._blink_state)
+                    frame._lbl_run.setText("▶ 기동중")
             else:
                 frame.setStyleSheet("""
                     QFrame {
@@ -568,7 +634,7 @@ class PageTimer(GlassCard):
                     }
                 """)
                 if hasattr(frame, '_lbl_run'):
-                    frame._lbl_run.setVisible(False)
+                    frame._lbl_run.setText("")
 
     def _on_reorder_clicked(self):
         """타이머 순서 변경 다이얼로그 열기"""

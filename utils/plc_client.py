@@ -28,8 +28,8 @@ class PLCClient(QObject):
 
         # 1. 실시간 모니터링 블록 (PLC → HMI): DT100~
         self.MONITOR_ADDR  = 100
-        self.MONITOR_COUNT = 61
-        self.ADDR_SEQ_POPUP = 159   # DT159: 시퀀스 팝업 요청코드
+        self.MONITOR_COUNT = 64
+        self.ADDR_USER_ALARM = 159   # DT159: 사용자 알람 (IN 스텝에서 발동, w_UserAlarm)
 
         # 2. 제어 명령 블록 (HMI → PLC): DT200~
         self.ADDR_CTRL_CMD    = 200  # 운전 제어 명령
@@ -43,6 +43,7 @@ class PLCClient(QObject):
         self.ADDR_SOFT_ESTOP  = 213  # 소프트 비상정지 (0=정상, 1=비상정지)
         self.HEARTBEAT_ADDR   = 214  # 하트비트
         self.ADDR_JOG_MODE    = 215  # 수동조작 모드 선택 (0=앱솔루트기동, 1=JOG기동)
+        self.ADDR_SPEED_OVR   = 216  # 전체 속도 배율 (1~10 단계)
         self.heartbeat_value  = 0
         self._heartbeat_skip  = False
 
@@ -51,10 +52,15 @@ class PLCClient(QObject):
         self.SLOT_SIZE     = 1000   # 100스텝 × 10워드
         self.MAX_SLOTS     = 40
 
-        # 4. 포인트 데이터 블록: DT16000~ (100개 × 32 = DT16000~DT19199)
+        # 4. 포인트 데이터 블록: DT16000~ (60개 × 32 = DT16000~DT17919)
+        # RTEX 하드웨어 테이블 64개 중 60 일반/3 예약/1 패킹 스크래치(idx=63)로 배정
         self.POINT_BASE_ADDR = 16000
         self.POINT_SIZE      = 32
-        self.MAX_POINTS      = 100
+        self.MAX_POINTS      = 60
+
+        # 파렛타이징
+        self.ADDR_PACK_IDX = 161     # DT161~163 (pack_idx 공유, HMI·PLC 모두 R/W)
+        self.ADDR_PACK_CFG = 217     # DT217~230 (패킹 설정 HMI→PLC)
 
         # 5. 축 설정 블록: DT15000~ (50 Words)
         self.AXIS_PARAM_ADDR   = 15000
@@ -248,6 +254,19 @@ class PLCClient(QObject):
         print(f"[PLC] TMR 패치 Slot={slot_id} Step={step_idx} DT{addr} = {value} ({time_sec}s)")
         return result
 
+    def patch_out_delay_step_time(self, slot_id, step_idx, time_sec):
+        """OUT 스텝의 diParam3(타이머 기동후출력 시간)만 PLC에 직접 패치"""
+        if not self.is_connected:
+            return False
+        if not (0 <= slot_id < self.MAX_SLOTS) or not (0 <= step_idx < 100):
+            return False
+        # Word 오프셋: 스텝당 10Words, diParam3 = +6~7
+        addr = self.SEQ_BASE_ADDR + slot_id * self.SLOT_SIZE + step_idx * 10 + 6
+        value = int(round(time_sec * 100))
+        result = self.write_dint(0x09, addr, value)
+        print(f"[PLC] OUT 지연 패치 Slot={slot_id} Step={step_idx} DT{addr} = {value} ({time_sec}s)")
+        return result
+
     # =========================================================
     # 제어 명령 (HMI → PLC) - DT200~208
     # =========================================================
@@ -357,48 +376,142 @@ class PLCClient(QObject):
         print(f"[PLC] 수동조작 모드 → DT{self.ADDR_JOG_MODE} = {mode} ({'JOG' if mode else 'ABS'})")
         return self.write_words(0x09, self.ADDR_JOG_MODE, [mode])
 
+    def send_speed_override(self, level):
+        """
+        DT216: 전체 속도 배율 (1~10 단계)
+        - 자동/확인운전 시 전체 속도에 곱해지는 배율
+        """
+        level = max(1, min(10, int(level)))
+        print(f"[PLC] 전체 속도 배율 → DT{self.ADDR_SPEED_OVR} = {level}")
+        return self.write_words(0x09, self.ADDR_SPEED_OVR, [level])
+
+    def send_packing_config(self, cfg):
+        """
+        DT217~230 에 패킹 설정 전송 (HMI → PLC).
+
+        Commit pattern (중간 통신 끊김 시 부분 활성화 방지):
+          1) DT217 = 0  (먼저 비활성화 → PLC 가 부분 설정 상태에서 동작 안 함)
+          2) DT218~230 데이터 쓰기 (pitch/dir/count/order)
+          3) DT217 = 1  (최종 활성화)
+
+        cfg["enabled"] 가 False 면 DT217 = 0 으로 끝내고 나머지는 건드리지 않음.
+        pitch 는 float mm → int32 (0.001mm) 로 스케일.
+        """
+        if not self.is_connected:
+            return False
+        cfg = cfg or {}
+        if "enabled" in cfg:
+            enable = 1 if cfg.get("enabled") else 0
+        else:
+            enable = 1 if cfg else 0
+
+        def _s16(v):
+            return int(v) & 0xFFFF
+
+        # ── 1) 먼저 비활성화 ─────────────────────────────────────────
+        # 이 시점부터 다음 commit 완료 전까지 PLC 는 pack 카운터를 증가시키지 않음.
+        self.write_words(0x09, self.ADDR_PACK_CFG, [0])
+
+        if not enable:
+            print(f"[PLC] 패킹 미사용 → DT{self.ADDR_PACK_CFG} = 0")
+            return True
+
+        # ── 2) 나머지 설정 먼저 쓰기 ──────────────────────────────────
+        # DT218~223: pitches (DINT, ×1000)
+        for i, key in enumerate(("x_pitch", "y_pitch", "z_pitch")):
+            pitch_int = int(round(float(cfg.get(key, 0.0)) * 1000))
+            self.write_dint(0x09, self.ADDR_PACK_CFG + 1 + i * 2, pitch_int)
+
+        # DT224~226: directions (Z 는 기본 -1 = 위로 쌓기)
+        self.write_words(0x09, self.ADDR_PACK_CFG + 7, [
+            _s16(cfg.get("x_dir", 1)),
+            _s16(cfg.get("y_dir", 1)),
+            _s16(cfg.get("z_dir", -1)),
+        ])
+
+        # DT227~229: counts
+        self.write_words(0x09, self.ADDR_PACK_CFG + 10, [
+            max(1, int(cfg.get("x_count", 1))),
+            max(1, int(cfg.get("y_count", 1))),
+            max(1, int(cfg.get("z_count", 1))),
+        ])
+
+        # DT230: stack_order (0~5)
+        order = int(cfg.get("stack_order", 0)) % 6
+        self.write_words(0x09, self.ADDR_PACK_CFG + 13, [order])
+
+        # ── 3) 마지막으로 활성화 (commit) ────────────────────────────
+        self.write_words(0x09, self.ADDR_PACK_CFG, [1])
+
+        print(f"[PLC] 패킹 설정 전송 완료 (order={order}, cfg={cfg})")
+        return True
+
+    def write_pack_idx(self, axis, value):
+        """
+        사용자 수동 변경용: 특정 축의 현재 스택 인덱스(DT161~163)를 덮어씀.
+        axis: 'x' | 'y' | 'z'
+        value: 0-based index (0 = 첫 번째 칸)
+        """
+        if not self.is_connected:
+            return False
+        offsets = {"x": 0, "y": 1, "z": 2}
+        off = offsets.get(str(axis).lower())
+        if off is None:
+            return False
+        addr = self.ADDR_PACK_IDX + off
+        v = max(0, int(value)) & 0xFFFF
+        self.write_words(0x09, addr, [v])
+        print(f"[PLC] pack_idx {axis.upper()} 수동설정 → DT{addr} = {v}")
+        return True
+
     # =========================================================
     # 모니터링 (PLC → HMI) - DT100~141
     # =========================================================
     
     def _start_reconnect(self):
-        """자동 재연결 시작 (이미 실행 중이면 무시)"""
-        if self._reconnect_running or not self._last_ip:
-            return
-        self._reconnect_running = True
+        """자동 재연결 시작 (이미 실행 중이면 무시).
+        [S-2] self.lock 으로 보호 → 동시 에러 이벤트에서 중복 스레드 생성 방지."""
+        with self.lock:
+            if self._reconnect_running or not self._last_ip:
+                return
+            self._reconnect_running = True
         threading.Thread(target=self._reconnect_loop, daemon=True).start()
 
     def _reconnect_loop(self):
         """5초 간격으로 재연결 시도"""
         interval = 5
-        while not self.is_connected:
-            print(f"[PLC] {interval}초 후 재연결 시도... ({self._last_ip}:{self._last_port})")
-            time.sleep(interval)
-            if self.is_connected:
-                break
-            try:
-                if self.sock:
-                    try:
-                        self.sock.close()
-                    except OSError:
-                        pass
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock.settimeout(5.0)
-                self.sock.connect((self._last_ip, int(self._last_port)))
-                self.is_connected = True
-                self.sig_connected.emit(True)
-                print("[PLC] 재연결 성공!")
-                self.start_monitoring()
-            except Exception as e:
-                print(f"[PLC] 재연결 실패: {e}")
-        self._reconnect_running = False
+        try:
+            while not self.is_connected:
+                print(f"[PLC] {interval}초 후 재연결 시도... ({self._last_ip}:{self._last_port})")
+                time.sleep(interval)
+                if self.is_connected:
+                    break
+                try:
+                    if self.sock:
+                        try:
+                            self.sock.close()
+                        except OSError:
+                            pass
+                    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.sock.settimeout(5.0)
+                    self.sock.connect((self._last_ip, int(self._last_port)))
+                    self.is_connected = True
+                    self.sig_connected.emit(True)
+                    print("[PLC] 재연결 성공!")
+                    self.start_monitoring()
+                except Exception as e:
+                    print(f"[PLC] 재연결 실패: {e}")
+        finally:
+            # 예외가 루프를 끊어도 반드시 플래그 해제 → 다음 에러 이벤트에서 재시작 가능
+            with self.lock:
+                self._reconnect_running = False
 
     def start_monitoring(self):
         """실시간 모니터링 시작"""
         if self._monitor_running:
             return
         self._monitor_running = True
-        print("[PLC] 모니터링 시작 (DT100~DT140, 0.05초 주기)")
+        print("[PLC] 모니터링 시작 (DT100~DT160, 0.05초 주기)")
         t = threading.Thread(target=self._mon_loop, daemon=True)
         self._monitor_thread = t
         t.start()
@@ -459,42 +572,51 @@ class PLCClient(QObject):
         # INT: 현재 실행 중인 스텝 번호
         res['current_step'] = raw[31] if len(raw) > 31 else 0  # DT131
         
-        # ===== 9. 서브시퀀스 현재 스텝 (DT132~133) =====
-        # DT132: 서브시퀀스 인덱스 (0=없음, 1~N=sorted 서브시퀀스 순번)
-        # DT133: 해당 서브시퀀스 내 현재 스텝 번호
-        res['sub_seq_idx']  = raw[32] if len(raw) > 32 else 0  # DT132
-        res['sub_step']     = raw[33] if len(raw) > 33 else 0  # DT133
+        # ===== 9. 현재 실행 슬롯 + 콜 스택 깊이 (DT132~133) =====
+        # DT132: 현재 실행 중 슬롯 번호 (FB.i_CurrentSlot) - 스택 top이 가리키는 슬롯
+        #        Main=0, 서브시퀀스=1~N(이름 정렬), Monitor(병렬)=39
+        # DT133: 동기 CALL 스택 깊이 (FB.i_StackDepth) - 0~3
+        #        0=Main만 실행, 1=Main→Sub, 2=Main→Sub→SubSub, 3=최대 중첩
+        # ※ 키명 sub_seq_idx/sub_step은 구버전 호환 유지. 실제 의미는 위 주석 기준.
+        res['sub_seq_idx']  = raw[32] if len(raw) > 32 else 0  # DT132 = 현재 슬롯
+        res['sub_step']     = raw[33] if len(raw) > 33 else 0  # DT133 = 스택 깊이
 
-        # ===== 10. 총 취출 횟수 (DT134~135) =====
+        # ===== 10. Monitor(병렬) 실행 상태 (DT134~135) =====
+        # DT134: FB_Monitor.i_CurrentSlot (병렬 워커가 실행 중인 슬롯, 0=idle)
+        # DT135: FB_Monitor.i_CurrentStep (병렬 워커가 실행 중인 스텝)
+        res['monitor_slot'] = raw[34] if len(raw) > 34 else 0  # DT134
+        res['monitor_step'] = raw[35] if len(raw) > 35 else 0  # DT135
+
+        # ===== 11. 총 취출 횟수 (DT136~137) =====
         # DINT: 완료된 사이클 수
-        if len(raw) > 35:
-            res['total_count'] = raw[34] | (raw[35] << 16)  # DT134-135
+        if len(raw) > 37:
+            res['total_count'] = raw[36] | (raw[37] << 16)  # DT136-137
         else:
             res['total_count'] = 0
 
-        # ===== 11. 현재 성형 시간 (DT136~137) =====
+        # ===== 12. 현재 성형 시간 (DT138~139) =====
         # DINT: 사이클 타임 (0.1초 단위)
-        if len(raw) > 37:
-            v = raw[36] | (raw[37] << 16)
+        if len(raw) > 39:
+            v = raw[38] | (raw[39] << 16)
             res['mold_time'] = v / 10.0  # 0.1초 → 초 변환
         else:
             res['mold_time'] = 0.0
 
-        # ===== 12. 현재 취출 시간 (DT138~139) =====
+        # ===== 13. 현재 취출 시간 (DT140~141) =====
         # DINT: 로봇 동작 타임 (0.1초 단위)
-        if len(raw) > 39:
-            v = raw[38] | (raw[39] << 16)
+        if len(raw) > 41:
+            v = raw[40] | (raw[41] << 16)
             res['takeout_time'] = v / 10.0  # 0.1초 → 초 변환
         else:
             res['takeout_time'] = 0.0
 
-        # ===== 13. 축 알람 상태 (DT141) + 축별 에러코드 (DT143~DT158) =====
-        # DT141: 비트0=1축, 비트1=2축, ... 비트7=8축
+        # ===== 14. 축 알람 상태 (DT142) + 축별 에러코드 (DT143~DT158) =====
+        # DT142: 비트0=1축, 비트1=2축, ... 비트7=8축, 비트8=비상정지
         # DT143~158: 축별 에러코드 (DINT, 2워드씩)
         res['axis_alarms'] = []
         res['axis_error_codes'] = [0] * 8  # 8축 에러코드
-        if len(raw) > 41:
-            alarm_word = raw[41]
+        if len(raw) > 42:
+            alarm_word = raw[42]
             for i in range(8):
                 if alarm_word & (1 << i):
                     res['axis_alarms'].append(i + 1)  # 축 번호 (1~8)
@@ -505,13 +627,23 @@ class PLCClient(QObject):
             if len(raw) > idx + 1:
                 res['axis_error_codes'][i] = raw[idx] | (raw[idx + 1] << 16)
 
-        # ===== 15. 시퀀스 팝업 요청 (DT159) =====
-        # 0=없음, 1=입력대기 타임아웃 팝업
-        res['seq_popup'] = raw[59] if len(raw) > 59 else 0
+        # ===== 15. 사용자 알람 (DT159) =====
+        # new_plc_fb.st의 w_UserAlarm - IN 스텝 P3=1/2 에서 세팅
+        # 0=없음, N=알람번호, N+1000=알람+진행
+        res['user_alarm'] = raw[59] if len(raw) > 59 else 0
 
-        # ===== 16. 작업자 응답 (DT160) =====
-        # 0=대기, 1=계속, 2=정지
-        res['popup_response'] = raw[60] if len(raw) > 60 else 0
+        # ===== 16. 스텝 알람 ID (DT160) =====
+        # new_plc_fb.st의 i_StepAlarmID (VAR_IN_OUT, 공유 변수 → g_StepAlarmID)
+        # 0=없음, 21/50/93~99=스텝 진행 에러
+        res['step_alarm_id'] = raw[60] if len(raw) > 60 else 0
+
+        # ===== 17. 패킹 스택 인덱스 (DT161~163) =====
+        # PLC FB가 사이클 완료 시 증가시키는 x/y/z 현재 적층 위치 (0-based)
+        res['pack_idx'] = [
+            raw[61] if len(raw) > 61 else 0,
+            raw[62] if len(raw) > 62 else 0,
+            raw[63] if len(raw) > 63 else 0,
+        ]
 
         return res
 
@@ -582,11 +714,21 @@ class PLCClient(QObject):
         if step_type == "POS":
             cmd = 10
             p1 = int(step_data.get("point_index", 0))
-            
-            # ★ 사용축 비트를 opt에 저장
+            # [D-1 방어] point_index 범위 검증 (0..59). 범위 밖이면 0 으로 강제 + 경고.
+            # 포인트 rename/삭제 후 점인덱스 재계산 누락 시 잘못된 위치로 이동 방지.
+            if p1 < 0 or p1 > 59:
+                print(f"    [!] POS point_index={p1} 범위 밖 (0..59). "
+                      f"point_name='{step_data.get('point_name', '')}' → 0 으로 fallback")
+                p1 = 0
+
+            # ★ 사용축 비트를 opt에 저장 (bit 0~7)
             active_axes = step_data.get("active_axes", [True] * 8)
             opt = self._convert_active_axes_to_word(active_axes)
-            
+
+            # ★ 파렛타이징 베이스 플래그 (bit 8 = 0x0100)
+            if step_data.get("pack_base"):
+                opt |= 0x0100
+
             # 디버그 출력
             axes_str = "".join(["X" if active_axes[0] else "-",
                                "Y" if active_axes[1] else "-",
@@ -596,7 +738,8 @@ class PLCClient(QObject):
                                "θ" if active_axes[5] else "-",
                                "R1" if active_axes[6] else "-",
                                "R2" if active_axes[7] else "-"])
-            print(f"    → 사용축: {axes_str} (0x{opt:04X})")
+            pb = " [PB]" if step_data.get("pack_base") else ""
+            print(f"    → 사용축: {axes_str} (0x{opt:04X}){pb}")
             
         elif step_type == "OUT":
             cmd = 20
@@ -625,11 +768,8 @@ class PLCClient(QObject):
             print(f"[DEBUG IN] port={port}, on={on_value}")
             
             # ★ 포트 종류별 처리
-            if 200 <= port <= 215:
-                p1 = port  # R입력 (DT126 비트, PLC FB에서 200~215로 판별)
-                print(f"[DEBUG IN] R입력 R{port-200:02X} (DT126.{port-200}) → P1={p1}")
-            elif 100 <= port <= 131:
-                p1 = port  # 내부 비트
+            if 100 <= port <= 131:
+                p1 = port  # 내부 비트 M00~M31
                 print(f"[DEBUG IN] 내부비트 M{port-100:02d} → P1={p1}")
             else:
                 p1 = port  # 시스템/밸브 입력 X

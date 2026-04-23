@@ -1,8 +1,50 @@
 from PySide6.QtCore import Qt, Signal, QEventLoop
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush
 from PySide6.QtWidgets import (
     QLabel, QHBoxLayout, QVBoxLayout, QGridLayout,
     QPushButton, QWidget, QFrame, QSizePolicy, QApplication
 )
+
+
+class StaircaseBar(QWidget):
+    """10단계 속도를 오르막 막대 그래프로 시각화."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._level = 10
+        self.setMinimumSize(180, 70)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+    def set_level(self, level):
+        self._level = max(1, min(10, level))
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        w = self.width()
+        h = self.height()
+        bar_count = 10
+        gap = 3
+        bar_w = (w - gap * (bar_count - 1)) / bar_count
+
+        if self._level <= 3:
+            active_color = QColor("#E74C3C")
+        elif self._level <= 6:
+            active_color = QColor("#F1C40F")
+        else:
+            active_color = QColor("#2ECC71")
+
+        for i in range(bar_count):
+            bar_h = h * (i + 1) / bar_count
+            x = i * (bar_w + gap)
+            y = h - bar_h
+            if i < self._level:
+                painter.setBrush(QBrush(active_color))
+                painter.setPen(Qt.NoPen)
+            else:
+                painter.setBrush(QBrush(QColor(40, 48, 60)))
+                painter.setPen(QPen(QColor(80, 90, 100), 1))
+            painter.drawRoundedRect(int(x), int(y), int(bar_w), int(bar_h), 3, 3)
 
 from widgets.glass_card import GlassCard
 from widgets.io_panel import IOPanel
@@ -167,14 +209,19 @@ class InfoPanel(QWidget):
 
 # [메인 페이지] PageAuto
 class PageAuto(GlassCard):
-    def __init__(self, plc_client=None):
+    sig_speed_changed = Signal(int)  # 전체속도 변경 → main_window 자동저장 트리거
+
+    def __init__(self, plc_client=None, speed_state=None):
         super().__init__("")
         if hasattr(self, 'title_label'): self.title_label.hide()
         if self.layout(): self.layout().setContentsMargins(10, 5, 10, 10)
-        
+
         self.plc_client = plc_client
         self.current_mode = 0  # 현재 운전 모드 (0:정지, 1:자동, 2:확인)
         self._prev_op_status = 0
+        # 레시피 공유 state (main_window에서 주입). 키: "speed_level" (1~10)
+        self.speed_state = speed_state if speed_state is not None else {"speed_level": 10}
+        self.speed_level = int(self.speed_state.get("speed_level", 10))
         
         # UI 레이아웃 구성
         main_layout = QHBoxLayout()
@@ -212,6 +259,55 @@ class PageAuto(GlassCard):
             b.setStyleSheet(STYLE_GRAY_OFF)
             ctrl_lay.addWidget(b)
             
+        # 전체 속도 조절 (1~10단계, 계단형 그래프)
+        self.speed_box = QFrame()
+        self.speed_box.setStyleSheet("""
+            QFrame#speedBox {
+                background: rgba(255,255,255,0.05);
+                border-radius: 10px;
+                border: 1px solid #444;
+            }
+            QLabel { background: transparent; border: none; color: #DDD; }
+            QPushButton {
+                background: #34495E; color: white;
+                border: 1px solid #555; border-radius: 8px;
+                font-size: 26px; font-weight: 900;
+            }
+            QPushButton:pressed { background: #2C3E50; }
+        """)
+        self.speed_box.setObjectName("speedBox")
+        spd_outer = QVBoxLayout(self.speed_box)
+        spd_outer.setContentsMargins(15, 10, 15, 10)
+        spd_outer.setSpacing(8)
+
+        # 상단: 타이틀 + 현재 단계 숫자
+        top_row = QHBoxLayout()
+        self.lbl_speed_title = QLabel("전체속도")
+        self.lbl_speed_title.setStyleSheet("color: #DDD; font-size: 16px; font-weight: bold;")
+        self.lbl_speed_value = QLabel(f"{self.speed_level} / 10")
+        self.lbl_speed_value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_speed_value.setStyleSheet("color: #2ECC71; font-size: 22px; font-weight: 900;")
+        top_row.addWidget(self.lbl_speed_title)
+        top_row.addStretch(1)
+        top_row.addWidget(self.lbl_speed_value)
+        spd_outer.addLayout(top_row)
+
+        # 중단: − 버튼 + 계단 그래프 + + 버튼
+        graph_row = QHBoxLayout()
+        graph_row.setSpacing(10)
+        self.btn_spd_minus = QPushButton("−")
+        self.btn_spd_minus.setFixedSize(55, 70)
+        self.btn_spd_plus = QPushButton("+")
+        self.btn_spd_plus.setFixedSize(55, 70)
+
+        self.speed_bar = StaircaseBar()
+        self.speed_bar.set_level(self.speed_level)
+
+        graph_row.addWidget(self.btn_spd_minus)
+        graph_row.addWidget(self.speed_bar, 1)
+        graph_row.addWidget(self.btn_spd_plus)
+        spd_outer.addLayout(graph_row)
+
         # 확인운전 전용 서브 버튼
         self.sub_box = QFrame()
         self.sub_box.setStyleSheet("background: rgba(255,255,255,0.05); border-radius: 10px; border: 1px solid #444;")
@@ -226,10 +322,15 @@ class PageAuto(GlassCard):
         
         right_layout.addWidget(ctrl_widget, 0, Qt.AlignTop)
         right_layout.addWidget(self.sub_box, 0, Qt.AlignTop)
+        sp = self.sub_box.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        self.sub_box.setSizePolicy(sp)
         self.sub_box.hide()
-        
+
         right_layout.addStretch(1)
-        
+        right_layout.addWidget(self.speed_box, 0, Qt.AlignVCenter)
+        right_layout.addStretch(1)
+
         # 정보 패널
         self.info_panel = InfoPanel()
         right_layout.addWidget(self.info_panel, 0, Qt.AlignBottom)
@@ -250,10 +351,43 @@ class PageAuto(GlassCard):
         self.btn_stop.clicked.connect(self._on_stop_clicked)
         self.btn_sub_start.clicked.connect(lambda: self._send_check_state(1))
         self.btn_sub_pause.clicked.connect(lambda: self._send_check_state(0))
+        self.btn_spd_minus.clicked.connect(lambda: self._change_speed(-1))
+        self.btn_spd_plus.clicked.connect(lambda: self._change_speed(1))
 
         if self.plc_client:
             self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
         self.update_language()
+
+    def _change_speed(self, delta):
+        new_val = max(1, min(10, self.speed_level + delta))
+        if new_val == self.speed_level:
+            return
+        old_val = self.speed_level
+        self.speed_level = new_val
+        self.speed_state["speed_level"] = new_val
+        self._refresh_speed_widgets()
+        if self.plc_client:
+            self.plc_client.send_speed_override(self.speed_level)
+        self.sig_speed_changed.emit(self.speed_level)
+        try:
+            from utils.op_history import record as op_record
+            op_record("SPEED", f"전체속도 {old_val} → {new_val}")
+        except Exception: pass
+
+    def _refresh_speed_widgets(self):
+        self.lbl_speed_value.setText(f"{self.speed_level} / 10")
+        color = "#E74C3C" if self.speed_level <= 3 else "#F1C40F" if self.speed_level <= 6 else "#2ECC71"
+        self.lbl_speed_value.setStyleSheet(f"color: {color}; font-size: 22px; font-weight: 900;")
+        self.speed_bar.set_level(self.speed_level)
+
+    def refresh_speed_from_state(self):
+        """레시피 로드 후 외부 state에서 속도 값을 다시 읽어 UI/PLC 동기화."""
+        new_val = max(1, min(10, int(self.speed_state.get("speed_level", 10))))
+        self.speed_level = new_val
+        self.speed_state["speed_level"] = new_val
+        self._refresh_speed_widgets()
+        if self.plc_client:
+            self.plc_client.send_speed_override(self.speed_level)
 
     def _send_mode(self, mode):
         if self.plc_client:
@@ -262,9 +396,13 @@ class PageAuto(GlassCard):
     def _on_stop_clicked(self):
         self._send_mode(0)
         self._send_check_state(0)  # DT202 = 0 리셋
+        try:
+            from utils.op_history import record as op_record
+            op_record("RUN", "정지 버튼")
+        except Exception: pass
 
     def _send_check_state(self, state):
-        if self.plc_client: 
+        if self.plc_client:
             self.plc_client.send_check_run_command(state)
 
     def _on_auto_clicked(self):
@@ -274,6 +412,10 @@ class PageAuto(GlassCard):
 
         if AutoConfirmOverlay("자동 운전", "자동 운전을 시작하시겠습니까?", self.window()).exec():
             self._send_mode(1)
+            try:
+                from utils.op_history import record as op_record
+                op_record("RUN", "자동 운전 시작")
+            except Exception: pass
 
     def _on_check_clicked(self):
         # [수정] 이미 운전 중이면 팝업 차단
@@ -282,6 +424,10 @@ class PageAuto(GlassCard):
 
         if AutoConfirmOverlay("확인 운전", "확인 운전을 시작하시겠습니까?", self.window()).exec():
             self._send_mode(2)
+            try:
+                from utils.op_history import record as op_record
+                op_record("RUN", "확인 운전 시작")
+            except Exception: pass
 
     def _on_monitor_data(self, data):
         mode = data.get('op_status', 0)

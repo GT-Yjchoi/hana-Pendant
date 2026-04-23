@@ -91,10 +91,20 @@ class StepUIGenerator:
         point_layout.addWidget(btn_new)
         point_layout.addWidget(btn_rename)
         point_layout.addWidget(btn_del)
-        
+
         # ★ 포인트 그룹 (높이 고정 안함)
         lay.addWidget(gb_point)
-        
+
+        # 파렛타이징 베이스 체크박스 (X/Y/Z를 스택 인덱스에 따라 가감산)
+        dlg.chk_pack_base = QCheckBox("파렛타이징 베이스 (X/Y/Z 스택 가감산)")
+        dlg.chk_pack_base.setStyleSheet(
+            "QCheckBox { color: #64FFDA; font-size: 14px; font-weight: bold; padding: 4px; } "
+            "QCheckBox::indicator { width: 22px; height: 22px; border: 2px solid #64FFDA; "
+            "border-radius: 4px; background: transparent; } "
+            "QCheckBox::indicator:checked { background-color: #64FFDA; border: 2px solid #64FFDA; }"
+        )
+        lay.addWidget(dlg.chk_pack_base)
+
         # 축/속도 설정 그룹
         gb_axes = QGroupBox("축 선택 및 속도")
         gb_axes.setStyleSheet(StepUIGenerator._groupbox_style())
@@ -239,14 +249,12 @@ class StepUIGenerator:
         dlg.rb_in_sys      = QRadioButton("시스템 입력")
         dlg.rb_in_valve    = QRadioButton("밸브 입력")
         dlg.rb_in_internal = QRadioButton("내부 비트")
-        dlg.rb_in_r        = QRadioButton("R입력")
         dlg.rb_in_sys.setChecked(True)
         dlg.in_type_grp = QButtonGroup(dlg.in_type_frame)
         dlg.in_type_grp.addButton(dlg.rb_in_sys,      0)
         dlg.in_type_grp.addButton(dlg.rb_in_valve,    1)
         dlg.in_type_grp.addButton(dlg.rb_in_internal, 2)
-        dlg.in_type_grp.addButton(dlg.rb_in_r,        3)
-        for rb in [dlg.rb_in_sys, dlg.rb_in_valve, dlg.rb_in_internal, dlg.rb_in_r]:
+        for rb in [dlg.rb_in_sys, dlg.rb_in_valve, dlg.rb_in_internal]:
             rb_itype_layout.addWidget(rb)
         rb_itype_layout.addStretch()
         in_type_layout.addWidget(rb_itype_row)

@@ -11,14 +11,14 @@ TRANSLATIONS = {
     "nav_pos":      {"KR": "위치설정", "EN": "POSITION"},
     "nav_timer":    {"KR": "타이머",   "EN": "TIMER"},
     "nav_packing":  {"KR": "패킹",     "EN": "PACKING"},
-    "nav_data":     {"KR": "금형데이터", "EN": "MOLD DATA"},
+    "nav_data":     {"KR": "데이터",     "EN": "DATA"},
     "nav_setting":  {"KR": "설정",     "EN": "SETTING"},
 
     # --- 상단바 ---
     "lbl_mode":     {"KR": "모드: ",   "EN": "MODE: "},
     "lbl_comm":     {"KR": "통신: ",   "EN": "COMM: "},
     "lbl_alarm":    {"KR": "알람: ",   "EN": "ALARM: "},
-    "lbl_mold":     {"KR": "금형데이터: ", "EN": "MOLD: "},
+    "lbl_mold":     {"KR": "데이터: ",  "EN": "DATA: "},
 
     # --- 공통 버튼 (예/아니오) ---
     "btn_yes":      {"KR": "예 (Yes)",   "EN": "Yes"},
@@ -74,7 +74,7 @@ TRANSLATIONS = {
     "sim_title":    {"KR": " 적재 시뮬레이션 (Simulation)", "EN": " Stacking Simulation"},
     "sim_mc":       {"KR": " Injection MC (사출기)", "EN": " Injection MC"},
     "sim_head":     {"KR": "HEAD", "EN": "HEAD"},
-    "z_level":      {"KR": "Z-Lev", "EN": "Z-Lev"},
+    "z_level":      {"KR": "Z",     "EN": "Z"},
     "btn_x_first":    {"KR": "순서: X → Y → Z (행 우선)", "EN": "Order: X → Y → Z (Row)"},
     "btn_y_first":    {"KR": "순서: Y → X → Z (열 우선)", "EN": "Order: Y → X → Z (Col)"},
     "btn_z_first_x":  {"KR": "순서: Z → X → Y (기둥-행)", "EN": "Order: Z → X → Y (Stack-Row)"},

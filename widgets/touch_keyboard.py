@@ -314,6 +314,17 @@ class TouchKeyboard(QDialog):
         self.btn_shift_kor.toggled.connect(self._toggle_kor_shift)
         self.layout_kor.addWidget(self.btn_shift_kor, 3, 0)
 
+        # [NEW] 특수문자: Shift 옆 비는 자리(3,8)(3,9)에 '_' 과 '.' 배치
+        btn_under_kor = QPushButton("_")
+        btn_under_kor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        btn_under_kor.clicked.connect(lambda _, ch="_": self._on_number_click(ch))
+        self.layout_kor.addWidget(btn_under_kor, 3, 8)
+
+        btn_dot_kor = QPushButton(".")
+        btn_dot_kor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        btn_dot_kor.clicked.connect(lambda _, ch=".": self._on_number_click(ch))
+        self.layout_kor.addWidget(btn_dot_kor, 3, 9)
+
         # 나머지 자음: (3, 1) 부터 시작
         for c, char in enumerate(row3):
             btn = QPushButton(char)
@@ -363,6 +374,17 @@ class TouchKeyboard(QDialog):
             btn.clicked.connect(self._on_eng_char_click)
             self.layout_eng.addWidget(btn, 3, c+1)
             self.eng_btns.append(btn)
+
+        # [NEW] 특수문자: '_' 과 '.' 배치 (영어 레이아웃 3행 col 8, 9)
+        btn_under_eng = QPushButton("_")
+        btn_under_eng.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        btn_under_eng.clicked.connect(lambda _, ch="_": self._on_number_click(ch))
+        self.layout_eng.addWidget(btn_under_eng, 3, 8)
+
+        btn_dot_eng = QPushButton(".")
+        btn_dot_eng.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        btn_dot_eng.clicked.connect(lambda _, ch=".": self._on_number_click(ch))
+        self.layout_eng.addWidget(btn_dot_eng, 3, 9)
 
     def _toggle_eng_shift(self, checked):
         for btn in self.eng_btns:
