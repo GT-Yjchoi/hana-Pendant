@@ -755,6 +755,20 @@ vt.global_cursor_default=0 consoleblank=0 fbcon=map:2 logo.nologo
 HMI 폴링 주기(50ms)가 PLC 스캔(1~5ms)보다 느려 0초 TMR 스텝이 `i_CurrentStep` 에 1스캔만 나타나 HMI 가 놓칠 수 있습니다.
 현재는 **관측된 경우**에만 최소 500ms 하이라이트 + 큐잉으로 보정합니다. 완벽한 감지가 필요하면 PLC 에 TMR 진입 이벤트 래치 + 핸드셰이크 레지스터를 추가해야 합니다 (미구현).
 
+### 시퀀스 편집기 — 클릭 안 한 스텝이 옛 필드로 PLC 에 전송됨 (해결)
+HMI 업데이트로 스텝 데이터 스키마가 바뀐 뒤 (예: POS `axes` → `active_axes`, IN `in_type` 신설, TMR/OUT 의 `timer_ref`/`delay_timer_ref` 라이브러리 동기화) 마이그레이션 변환이 `_load_data_to_ui` 안에서만 수행됐습니다. 즉, 사용자가 편집기에서 **그 스텝을 한 번이라도 클릭해야** 새 필드가 채워졌고, 미클릭 스텝은 옛 필드 그대로 PLC 에 송신됐습니다.
+
+- 증상: 편집기 열어 저장·닫기로 송신해도 PLC 가 의도와 다르게 동작 (예: POS 가 모든 축을 움직이거나, IN 이 잘못된 영역을 감시). 해당 스텝을 클릭한 뒤 다시 저장·닫기하면 정상.
+- 원인: PLC 인코더(`utils/plc_client.py`)가 `active_axes` 가 없으면 `[True]*8` 로 폴백해 전 축 이동, `in_type` 누락 시 영역 추론 불일치.
+- 수정: `ui/dialogs/sequence_editor_dialog.py` 에 `normalize_step` / `normalize_all_sequences` 모듈 함수 추가. **송신 직전** 클릭 여부와 무관하게 전 스텝을 in-place 정규화. 편집기의 "저장 후 닫기" (`_send_all_sequences_to_plc`) 와 PLC 재연결 시 자동 재전송 (`main_window._send_full_recipe_to_plc`) 양쪽에서 호출.
+
+### 시퀀스 편집기 — JMP 스텝 라벨의 `(타겟이름)` 이 실제 설정과 어긋남 (해결)
+JMP 스텝의 `target_idx` 는 콤보 인덱스 = **원본 리스트 인덱스 (COMMENT 포함)** 로 저장됩니다 (`_on_jmp_value_changed`, `_fix_jmp_targets`, `plc_idx_map[orig_idx]→plc_step` 모두 동일 규약). 그런데 스텝 목록 라벨의 `(target_name)` 표시 함수 `_get_jmp_target_name` 만 `target_idx` 를 **비-COMMENT 카운트** 로 잘못 해석해 COMMENT 가 끼어 있으면 다른 스텝 이름(또는 `스텝N` 플레이스홀더) 이 표시됐습니다.
+
+- 영향 범위: **표시값만** 어긋남. 콤보 선택 / 저장 / PLC 전송 / `_fix_jmp_targets` 는 처음부터 일관된 orig-idx 규약이라 실제 점프 동작은 정상이었음.
+- 마이그레이션: 저장된 데이터는 그대로 유효 — 별도 변환 불필요.
+- 수정: `_get_jmp_target_name` 이 `current_list[target_idx]` 를 직접 인덱싱하도록 변경 (COMMENT 도 `// text` 로 표시).
+
 ---
 
 ## 네트워크 탭 (설정 > 네트워크)

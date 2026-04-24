@@ -21,7 +21,7 @@ from ui.pages.page_position import PagePosition
 from ui.pages.page_timer import PageTimer
 from ui.pages.page_packing import PagePacking
 from ui.pages.page_data import PageData
-from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY
+from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY, normalize_all_sequences
 from ui.pages.page_manual import PageManual
 from ui.pages.page_auto import PageAuto
 from ui.pages.page_settings import PageSettings
@@ -419,6 +419,10 @@ class MainWindow(QWidget):
         try:
             points = self.master_position_points
             sequences = self.master_sequence_data
+
+            # ★ 옛/누락 필드 보정 (편집기에서 미클릭 스텝도 정확히 송신되도록)
+            timer_lib = getattr(self, "master_timer_library", None)
+            normalize_all_sequences(sequences, timer_lib)
 
             sorted_p_names = sorted(points.keys())
             point_map = {name: i for i, name in enumerate(sorted_p_names)}

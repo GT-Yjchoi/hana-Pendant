@@ -20,6 +20,52 @@ except ImportError as e:
     from PySide6.QtWidgets import QLineEdit as ClickableLineEdit, QComboBox as TouchComboBox
     StepUIGenerator = None
 
+
+def normalize_step(step, timer_library=None):
+    """레거시/누락 필드 보정 (in-place). 클릭 여부와 무관하게 송신 직전에 적용.
+    _load_data_to_ui 안에서 클릭 시 일어나던 변환과 동일.
+    - POS: 'axes' → 'active_axes' (8개로 패딩)
+    - IN : 'in_type' 누락 시 port 값으로 추론
+    - TMR: timer_ref 가 라이브러리에 있으면 'time' 동기화
+    - OUT: delay_enable 이고 delay_timer_ref 가 라이브러리에 있으면 'delay_time' 동기화
+    """
+    t = step.get("type")
+    if t == "POS":
+        axes = step.get("active_axes", step.get("axes"))
+        if not isinstance(axes, list):
+            axes = [False] * 8
+        if len(axes) < 8:
+            axes = list(axes) + [False] * (8 - len(axes))
+        step["active_axes"] = axes
+    elif t == "IN":
+        if "in_type" not in step:
+            p = step.get("port", 0)
+            if   p >= 200: step["in_type"] = 3
+            elif p >= 100: step["in_type"] = 2
+            elif p >= 32:  step["in_type"] = 1
+            else:          step["in_type"] = 0
+    elif t == "TMR":
+        ref = step.get("timer_ref", "")
+        if ref and timer_library and ref in timer_library:
+            step["time"] = float(timer_library[ref])
+    elif t == "OUT":
+        if step.get("delay_enable", False):
+            ref = step.get("delay_timer_ref", "")
+            if ref and timer_library and ref in timer_library:
+                step["delay_time"] = float(timer_library[ref])
+
+
+def normalize_all_sequences(sequences, timer_library=None):
+    """sequences dict (slot_name → [step,...]) 내 전 스텝을 정규화."""
+    if not isinstance(sequences, dict):
+        return
+    for steps in sequences.values():
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if isinstance(step, dict):
+                normalize_step(step, timer_library)
+
 try:
     from ui.dialogs.sequence_utils import (
         DarkConfirmDialog, RenameDialog, NumericKeypad, NewPointDialog,
@@ -1100,16 +1146,15 @@ class SequenceEditorDialog(QDialog):
         return f"[{step_num:02d}] {label}"
 
     def _get_jmp_target_name(self, target_idx):
-        """JMP 타겟 스텝의 표시 이름 반환 (없으면 빈 문자열)."""
+        """JMP 타겟 스텝의 표시 이름 반환 (없으면 빈 문자열).
+        target_idx 는 콤보/저장/_fix_jmp_targets 와 동일하게 원본 리스트 인덱스
+        (COMMENT 포함) 기준이다."""
         current_list = self.sequences.get(self.current_seq_key, [])
-        # target_idx 는 COMMENT 제외한 step 번호 기준 (1-based PLC 스텝 번호와 같은 규칙)
-        n = 0
-        for step in current_list:
+        if 0 <= target_idx < len(current_list):
+            step = current_list[target_idx]
             if step.get("type") == "COMMENT":
-                continue
-            if n == target_idx:
-                return step.get("name", f"스텝{target_idx}")
-            n += 1
+                return f"// {step.get('text', '')}"
+            return step.get("name", f"스텝{target_idx}")
         return f"스텝{target_idx}"
 
     def _load_step_list_from_memory(self):
@@ -1315,7 +1360,10 @@ class SequenceEditorDialog(QDialog):
 
     def _send_all_sequences_to_plc(self):
         if not self.plc_client or not self.plc_client.is_connected: return False
-        
+
+        # ★ 클릭 여부와 무관하게 전 스텝 정규화 (옛 필드/누락 필드 보정)
+        normalize_all_sequences(self.sequences, self.timer_library)
+
         # ★ 디버그: 전송할 시퀀스 데이터 확인
         print(f"\n[시퀀스 전송] 전송할 시퀀스 데이터:")
         for seq_name, steps in self.sequences.items():
@@ -1323,7 +1371,7 @@ class SequenceEditorDialog(QDialog):
             for i, step in enumerate(steps):
                 if step.get("type") in ["OUT", "IN"]:
                     print(f"    Step {i}: {step.get('type')} - port={step.get('port', 'NONE')}, on={step.get('on', 'NONE')}, name={step.get('name', 'NONE')}")
-        
+
         sorted_p_names = sorted(list(self.points_library.keys()))
         point_map = {name: i for i, name in enumerate(sorted_p_names)}
         seq_map = {"Main": 0, MONITOR_SEQ_KEY: 39}
