@@ -2067,7 +2067,13 @@ class PageSettings(GlassCard):
                 padding: 7px 16px; font-size: 14px; font-weight: bold;
             }
             QPushButton:pressed { background: rgba(255, 70, 70, 0.3); }
+            QPushButton:disabled { color: #888; border-color: #555; background: rgba(255,255,255,0.05); }
         """
+        # 토글 버튼 스타일 재사용을 위해 self 에 보관
+        self._wifi_btn_primary_style = btn_style
+        self._wifi_btn_danger_style = btn_danger
+        # 마지막으로 연결되었던 SSID — disconnected 상태에서 '연결' 클릭 시 재접속 대상
+        self._last_wifi_ssid = ""
 
         outer = QVBoxLayout(self.tab_wifi)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -2121,7 +2127,7 @@ class PageSettings(GlassCard):
         self.btn_wifi_scan.clicked.connect(self._scan_wifi)
         self.btn_wifi_disconnect = QPushButton("연결 해제")
         self.btn_wifi_disconnect.setStyleSheet(btn_danger)
-        self.btn_wifi_disconnect.clicked.connect(self._disconnect_wifi)
+        self.btn_wifi_disconnect.clicked.connect(self._toggle_wifi_connection)
         btn_row.addWidget(self.btn_wifi_refresh)
         btn_row.addWidget(self.btn_wifi_scan)
         btn_row.addStretch(1)
@@ -2249,6 +2255,28 @@ class PageSettings(GlassCard):
         self.lbl_wifi_ip_val.setText(info["ip"] or "-")
         self.lbl_wifi_signal_val.setText(f"{info['signal']}%" if info["signal"] else "-")
         self.lbl_wifi_iface_val.setText(info["iface"] or "-")
+        self._update_wifi_toggle_button(connected=bool(info["ssid"]), ssid=info["ssid"])
+
+    def _update_wifi_toggle_button(self, connected: bool, ssid: str = ""):
+        """연결 상태에 따라 토글 버튼 텍스트/스타일을 갱신.
+
+        - 연결됨: '연결 해제' (붉은 스타일), 누르면 끊기
+        - 끊김 & 마지막 SSID 있음: '연결' (파란 스타일), 누르면 마지막 SSID 재접속
+        - 끊김 & 마지막 SSID 없음: '연결' (비활성화)
+        """
+        btn = getattr(self, "btn_wifi_disconnect", None)
+        if btn is None:
+            return
+        if connected:
+            if ssid:
+                self._last_wifi_ssid = ssid
+            btn.setText("연결 해제")
+            btn.setStyleSheet(self._wifi_btn_danger_style)
+            btn.setEnabled(True)
+        else:
+            btn.setText("연결")
+            btn.setStyleSheet(self._wifi_btn_primary_style)
+            btn.setEnabled(bool(self._last_wifi_ssid))
 
     def _scan_wifi(self, silent: bool = False):
         """WiFi 스캔을 백그라운드 스레드에서 실행 (UI 블로킹 방지)."""
@@ -2341,12 +2369,35 @@ class PageSettings(GlassCard):
             self._show_wifi_msg("연결 실패", res.get("error", "알 수 없는 오류"))
         self._refresh_wifi_status()
 
-    def _disconnect_wifi(self):
+    def _toggle_wifi_connection(self):
+        """현재 SSID 라벨로 연결 상태를 판단해 disconnect 또는 마지막 SSID 재접속."""
         if not getattr(self, "_wifi", None) or not self._wifi.is_available():
             return
-        res = self._wifi.disconnect()
-        if res.get("ok") != "1":
-            self._show_wifi_msg("해제 실패", res.get("error", "알 수 없는 오류"))
+        connected = self.lbl_wifi_ssid_val.text() not in ("", "-", "(미연결)", "nmcli 없음")
+        if connected:
+            res = self._wifi.disconnect()
+            if res.get("ok") != "1":
+                self._show_wifi_msg("해제 실패", res.get("error", "알 수 없는 오류"))
+        else:
+            ssid = self._last_wifi_ssid
+            if not ssid:
+                self._show_wifi_msg(
+                    "재접속 불가",
+                    "마지막으로 연결됐던 SSID 정보가 없습니다.\n아래 목록에서 더블클릭으로 연결하세요.",
+                )
+                return
+            self.btn_wifi_disconnect.setEnabled(False)
+            QApplication.processEvents()
+            try:
+                res = self._wifi.connect_saved(ssid)
+            finally:
+                self.btn_wifi_disconnect.setEnabled(True)
+            if res.get("ok") != "1":
+                self._show_wifi_msg(
+                    "연결 실패",
+                    f"'{ssid}' 재접속 실패: {res.get('error', '알 수 없는 오류')}\n"
+                    "아래 목록에서 직접 선택해 비밀번호를 다시 입력해 보세요.",
+                )
         self._refresh_wifi_status()
 
     def _show_wifi_msg(self, title, message):

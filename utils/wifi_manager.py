@@ -90,8 +90,19 @@ def scan(rescan: bool = True, timeout: float = 15.0) -> List[Dict[str, str]]:
     return sorted(networks.values(), key=lambda x: int(x["signal"] or 0), reverse=True)
 
 
+def _delete_connection_profile(name: str) -> None:
+    """동일 이름의 NM 연결 프로파일이 있으면 모두 삭제. (key-mgmt 누락 등 손상된 프로파일 방어)"""
+    try:
+        _run(["nmcli", "connection", "delete", "id", name], timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def connect(ssid: str, password: Optional[str] = None, timeout: float = 30.0) -> Dict[str, str]:
     """WiFi 접속. 성공 시 {'ok': '1'}, 실패 시 {'ok': '0', 'error': 메시지}"""
+    # 비밀번호로 새로 접속할 때는 기존 프로파일을 정리해 NM 상태 손상(예: key-mgmt 누락) 회피
+    if password:
+        _delete_connection_profile(ssid)
     args = ["nmcli", "device", "wifi", "connect", ssid]
     if password:
         args += ["password", password]
@@ -103,6 +114,17 @@ def connect(ssid: str, password: Optional[str] = None, timeout: float = 30.0) ->
         return {"ok": "1"}
     msg = (r.stderr or r.stdout or "알 수 없는 오류").strip()
     return {"ok": "0", "error": msg}
+
+
+def connect_saved(ssid: str, timeout: float = 30.0) -> Dict[str, str]:
+    """저장된 NM 프로파일로 재접속 시도. 비밀번호 없이 SSID 만으로."""
+    try:
+        r = _run(["nmcli", "connection", "up", "id", ssid], timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"ok": "0", "error": "연결 시간 초과"}
+    if r.returncode == 0:
+        return {"ok": "1"}
+    return {"ok": "0", "error": (r.stderr or r.stdout or "알 수 없는 오류").strip()}
 
 
 def disconnect() -> Dict[str, str]:
