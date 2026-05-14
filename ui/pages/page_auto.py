@@ -170,12 +170,11 @@ class InfoPanel(QWidget):
         self.info_labels = {}
         self.name_labels = {}
         
-        # 항목: 취출횟수, 예약알람, 성형시간, 취출시간
+        # 항목: 포장횟수, 예약알람, 포장시간
         items = [
             ("lbl_extract_cnt", "cnt", "0"),
             ("lbl_reserve_cnt", "rsv", "0"), # 예약알람 추가
             ("lbl_mold_time", "mold", "0.0"),
-            ("lbl_extract_time", "ext", "0.0")
         ]
         
         for lang_key, data_key, def_val in items:
@@ -190,11 +189,10 @@ class InfoPanel(QWidget):
         box_layout.addStretch(1)
         self.update_language()
     
-    def update_data(self, count, rsv_count, mold_t, ext_t):
+    def update_data(self, count, rsv_count, mold_t):
         self.info_labels["cnt"].setText(f"{count} 회")
         self.info_labels["rsv"].setText(f"{rsv_count} 회")
         self.info_labels["mold"].setText(f"{mold_t:.1f} 초")
-        self.info_labels["ext"].setText(f"{ext_t:.1f} 초")
 
     def update_language(self):
         lm = LanguageManager.instance()
@@ -462,7 +460,6 @@ class PageAuto(GlassCard):
             data.get('total_count', 0),
             reserve_cnt,
             data.get('mold_time', 0.0),
-            data.get('takeout_time', 0.0)
         )
 
     def update_language(self, lang_code=None):

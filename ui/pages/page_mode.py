@@ -32,35 +32,8 @@ try:
 except ImportError:
     DarkMessageDialog = None
 
-# [상수] 기본 모드 키값 목록 (0~33번)
-DEFAULT_MODE_KEYS = [
-    "mode_prod_takeout", "mode_runner_takeout", "mode_wait_move", "mode_wait_down",
-    "mode_open_move", "mode_open_ret", "mode_safety_1", "mode_safety_2",
-    "mode_inv_drop", "mode_inv_move", "mode_inv_wait", "mode_fix_side",
-    "mode_open_prod", "mode_open_run", "mode_eject_link", "mode_undercut",
-    "mode_chuck1_use", "mode_chuck1_sens", "mode_chuck2_use", "mode_chuck2_sens",
-    "mode_chuck3_use", "mode_chuck3_sens", "mode_chuck4_use", "mode_chuck4_sens",
-    "mode_vac1_use", "mode_vac1_sens", "mode_vac2_use", "mode_vac2_sens",
-    "mode_vac3_use", "mode_vac3_sens", "mode_vac4_use", "mode_vac4_sens",
-    "mode_2point_open", "mode_process_mon"
-]
-
-# [백업용] 기본 한글 이름
-DEFAULT_KOREAN_NAMES = [
-    "제품측 취출", "런너측 취출", "주행 대기", "하강 대기",
-    "주행도중개방", "복귀도중개방", "안전도어 회피", "안전도어 회피2",
-    "낙하측 반전", "주행도중 반전", "취출대기 반전", "고정측 취출",
-    "제품 형내개방", "런너 형내개방", "에젝터 연동", "언더컷 취출모드",
-    "척1 사용", "척1 감지", "척2 사용", "척2 감지",
-    "척3 사용", "척3 감지", "척4 사용", "척4 감지",
-    "흡착1 사용", "흡착1 감지", "흡착2 사용", "흡착2 감지",
-    "흡착3 사용", "흡착3 감지", "흡착4 사용", "흡착4 감지",
-    "2포인트 개방", "공정감시 모드",
-]
-
-# 전체 슬롯 개수 (기본 34개 + 사용자 모드 10개 = 44개)
+# 전체 슬롯 개수 (44개) — 범용 빌드: 전 인덱스가 사용자 편집 가능한 이름
 TOTAL_SLOTS = 44
-USER_MODE_START_IDX = 34
 
 # =========================================================
 # [커스텀 위젯] 롱 프레스(꾹 누르기) 감지 버튼
@@ -155,31 +128,29 @@ class PageMode(GlassCard):
             r = i // cols
             c = i % cols
 
-            if i >= USER_MODE_START_IDX:
-                btn = LongPressButton(index=i)
-                btn.sig_long_press.connect(self._on_btn_long_pressed)
-            else:
-                btn = QPushButton()
+            # 범용 빌드: 모든 모드를 LongPressButton 으로 (꾹 눌러 이름 변경)
+            btn = LongPressButton(index=i)
+            btn.sig_long_press.connect(self._on_btn_long_pressed)
 
             btn.setCheckable(True)
             btn.setProperty("class", "ModeTileBtn")
             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            btn.setMinimumHeight(80) 
+            btn.setMinimumHeight(80)
 
             btn_layout = QVBoxLayout(btn)
             btn_layout.setContentsMargins(0,0,0,0)
             btn_layout.setSpacing(0)
-            
+
             lbl = QLabel()
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setTextFormat(Qt.RichText)
             lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
             lbl.setStyleSheet("background: transparent; border: none;")
-            
-            btn.inner_label = lbl 
+
+            btn.inner_label = lbl
             btn_layout.addWidget(lbl)
 
-            btn.setStyleSheet(self._get_btn_stylesheet(i >= USER_MODE_START_IDX))
+            btn.setStyleSheet(self._get_btn_stylesheet(True))
 
             is_on = self.mode_data[i]
             btn.setChecked(is_on)
@@ -220,24 +191,10 @@ class PageMode(GlassCard):
         """
 
     def _get_mode_name(self, idx):
-        # 1. 사용자 모드
-        if idx >= USER_MODE_START_IDX:
-            if ModeManager:
-                return ModeManager.instance().get_name(idx)
-            return f"User Mode {idx - USER_MODE_START_IDX + 1}"
-        
-        # 2. 기본 모드
-        if idx < len(DEFAULT_MODE_KEYS):
-            key = DEFAULT_MODE_KEYS[idx]
-            default_kr = DEFAULT_KOREAN_NAMES[idx] if idx < len(DEFAULT_KOREAN_NAMES) else key
-            
-            if LanguageManager:
-                val = LanguageManager.instance().get_text(key)
-                if val and val != key:
-                    return val
-            return default_kr
-            
-        return "Unknown"
+        # 범용 빌드: 전 인덱스 ModeManager 일원화 (custom_names → DEFAULT_MODES → "User Mode N")
+        if ModeManager:
+            return ModeManager.instance().get_name(idx)
+        return f"Mode {idx + 1}"
 
     def _format_text(self, name: str, checked: bool) -> str:
         state_text = "ON" if checked else "OFF"
@@ -301,7 +258,7 @@ class PageMode(GlassCard):
         
         current_name = ModeManager.instance().get_name(idx)
         
-        dlg = TouchKeyboard("사용자 모드 이름 변경", parent=self)
+        dlg = TouchKeyboard("모드 이름 변경", parent=self)
         
         # 키보드 언어 설정
         if hasattr(dlg, "set_language"):

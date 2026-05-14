@@ -13,8 +13,8 @@ DEFAULT_MODES = [
     "2포인트 개방", "공정감시 모드"
 ]
 
-# 사용자 모드 시작 인덱스 (34번부터)
-USER_MODE_START_INDEX = len(DEFAULT_MODES)
+# 모든 인덱스를 사용자 편집 가능하게(범용). 0~33번도 이름 변경 허용.
+USER_MODE_START_INDEX = 0
 
 # [수정] 전체 모드 개수: 40 -> 44 (사용자 모드 10개)
 TOTAL_MODE_COUNT = 44
@@ -41,26 +41,24 @@ class ModeManager(QObject):
         
         if 0 <= idx < len(DEFAULT_MODES):
             return DEFAULT_MODES[idx]
-            
-        return f"User Mode {idx - USER_MODE_START_INDEX + 1}"
+
+        return f"User Mode {idx - len(DEFAULT_MODES) + 1}"
 
     def set_name(self, idx, name):
-        """ 사용자 모드 이름 설정 """
-        if idx < USER_MODE_START_INDEX:
-            print(f"[ModeManager] {idx}번은 기본 모드이므로 변경 불가")
+        """ 모드 이름 설정. 빈 문자열로 확인하면 순번 기반(User Mode N)으로 자동 설정. """
+        if not (0 <= idx < TOTAL_MODE_COUNT):
             return
-        
-        if not name: 
-            if idx in self.custom_names:
-                del self.custom_names[idx]
+        # 공백만 입력해도 빈 칸으로 간주
+        name = (name or "").strip()
+        if not name:
+            self.custom_names[idx] = f"User Mode {idx + 1}"
         else:
             self.custom_names[idx] = name
-            
         self.sig_names_changed.emit()
 
     def is_user_mode(self, idx):
-        """ 해당 인덱스가 사용자 변경 가능한 모드인지 확인 """
-        return idx >= USER_MODE_START_INDEX and idx < TOTAL_MODE_COUNT
+        """ 해당 인덱스가 사용자 변경 가능한 모드인지 확인 (범용 빌드: 전 인덱스) """
+        return 0 <= idx < TOTAL_MODE_COUNT
 
     def to_dict(self):
         return {str(k): v for k, v in self.custom_names.items()}
