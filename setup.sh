@@ -14,7 +14,7 @@ USER_NAME="${SUDO_USER:-$USER}"
 HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6)
 cd "$PROJECT_DIR"
 
-echo "=== [1/5] 사전 점검 (m1s-bootstrap 결과) ==="
+echo "=== [1/6] 사전 점검 (m1s-bootstrap 결과) ==="
 if [ ! -x "$HOME_DIR/pyside-env/bin/python" ]; then
     echo "FATAL: $HOME_DIR/pyside-env 없음."
     echo "       먼저 bash scripts/m1s-bootstrap.sh 실행."
@@ -35,7 +35,7 @@ if ! grep -qE '^overlays=.*\bdisplay_vu8s\b' /boot/config.ini 2>/dev/null; then
 fi
 
 echo
-echo "=== [2/5] 사용자 그룹 ==="
+echo "=== [2/6] 사용자 그룹 ==="
 # i2c/spi 그룹은 디바이스 등장 후에만 생김 — 있을 때만 추가
 for g in video render input dialout gpio netdev i2c spi; do
     if getent group "$g" >/dev/null; then
@@ -47,7 +47,7 @@ for g in video render input dialout gpio netdev i2c spi; do
 done
 
 echo
-echo "=== [3/5] apt 패키지 (NetworkManager + lgpio) ==="
+echo "=== [3/6] apt 패키지 (NetworkManager + lgpio) ==="
 APT_NEED=()
 dpkg -s network-manager >/dev/null 2>&1 || APT_NEED+=(network-manager)
 dpkg -s python3-lgpio    >/dev/null 2>&1 || APT_NEED+=(python3-lgpio)
@@ -70,7 +70,7 @@ sudo systemctl restart polkit 2>/dev/null || true
 echo "  polkit netdev 규칙 적용"
 
 echo
-echo "=== [4/5] 이더넷 never-default (PLC 전용 LAN 가정) ==="
+echo "=== [4/6] 이더넷 never-default (PLC 전용 LAN 가정) ==="
 if systemctl is-active --quiet NetworkManager; then
     ETH_CONN=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \
                | awk -F: '$2=="802-3-ethernet"{print $1; exit}')
@@ -87,7 +87,24 @@ else
 fi
 
 echo
-echo "=== [5/5] systemd 서비스 등록 ==="
+echo "=== [5/6] 백라이트 최대 밝기 고정 (udev) ==="
+BL_RULE_SRC="$PROJECT_DIR/99-pendant-backlight.rules"
+BL_RULE_DST=/etc/udev/rules.d/99-pendant-backlight.rules
+if [ -f "$BL_RULE_SRC" ]; then
+    sudo cp "$BL_RULE_SRC" "$BL_RULE_DST"
+    sudo udevadm control --reload-rules
+    # 지금 즉시도 최대로 (다음 부팅부터는 udev 가 자동)
+    for bl in /sys/class/backlight/*/; do
+        [ -e "$bl/max_brightness" ] || continue
+        sudo sh -c "cat '$bl/max_brightness' > '$bl/brightness'" 2>/dev/null || true
+        echo "  $(basename "$bl"): $(cat "$bl/actual_brightness" 2>/dev/null)/$(cat "$bl/max_brightness" 2>/dev/null)"
+    done
+else
+    echo "  $BL_RULE_SRC 없음 — 건너뜀"
+fi
+
+echo
+echo "=== [6/6] systemd 서비스 등록 ==="
 SERVICE_SRC="$PROJECT_DIR/pendant.service"
 SERVICE_DST=/etc/systemd/system/pendant.service
 if [ -f "$SERVICE_SRC" ]; then

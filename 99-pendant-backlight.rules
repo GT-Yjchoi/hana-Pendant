@@ -1,0 +1,4 @@
+# Pendant 키오스크: 부팅 시 백라이트를 항상 최대 밝기로 고정.
+# systemd-backlight 의 save/restore 와 무관하게 결정론적으로 max 로 설정.
+# setup.sh 가 /etc/udev/rules.d/ 로 설치.
+ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="backlight", RUN+="/bin/sh -c 'cat /sys/class/backlight/%k/max_brightness > /sys/class/backlight/%k/brightness'"
