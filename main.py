@@ -17,7 +17,8 @@ os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
 from datetime import datetime
 from PySide6.QtWidgets import QApplication, QLabel
 from PySide6.QtCore import Qt, QTimer, QObject, QEvent
-from PySide6.QtGui import QFont, QFontDatabase, QShortcut, QKeySequence
+from PySide6.QtGui import (QFont, QFontDatabase, QShortcut, QKeySequence,
+                           QSurfaceFormat)
 from ui.main_window import MainWindow
 from ui.theme import APP_STYLESHEET
 from utils.plc_client import PLCClient
@@ -115,6 +116,21 @@ def _load_bundled_fonts(app: QApplication) -> None:
 
 
 def main():
+    # [Mali/Wayland] QQuickWidget(QML GPU 페이지)용 EGL 설정.
+    # Mali wayland EGL config = rgba 8/8/8/0 dep0 stcl0. QML 씬그래프는
+    # SHM 폴백이 없어 이 포맷을 기본값으로 깔아야 EGLConfig 매칭됨.
+    # 일반 QWidget 에는 영향 없음.
+    _fmt = QSurfaceFormat()
+    _fmt.setRenderableType(QSurfaceFormat.OpenGLES)
+    _fmt.setVersion(3, 1)
+    _fmt.setRedBufferSize(8)
+    _fmt.setGreenBufferSize(8)
+    _fmt.setBlueBufferSize(8)
+    _fmt.setAlphaBufferSize(0)
+    _fmt.setDepthBufferSize(0)
+    _fmt.setStencilBufferSize(0)
+    QSurfaceFormat.setDefaultFormat(_fmt)
+
     # 1. 앱 생성
     app = QApplication(sys.argv)
 

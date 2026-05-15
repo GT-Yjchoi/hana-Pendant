@@ -16,7 +16,7 @@ from widgets.nav_button import NavButton
 from ui.top_bar import TopBar
 
 # 페이지들 임포트
-from ui.pages.page_mode import PageMode
+from ui.pages.page_mode_qml import PageModeQml
 from ui.pages.page_position import PagePosition
 from ui.pages.page_timer import PageTimer
 from ui.pages.page_packing import PagePacking
@@ -206,7 +206,7 @@ class MainWindow(QWidget):
         self.pages["manual"] = PageManual(plc_client=self.plc_client)
         self.pages["auto"] = PageAuto(plc_client=self.plc_client, speed_state=self.master_speed_state)
         
-        self.pages["mode"] = PageMode(mode_data=self.master_mode_data, plc_client=self.plc_client)
+        self.pages["mode"] = PageModeQml(mode_data=self.master_mode_data, plc_client=self.plc_client)
         
         self.pages["position"] = PagePosition(
             sequence_data=self.master_sequence_data,
