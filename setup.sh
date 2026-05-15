@@ -1,75 +1,63 @@
 #!/bin/bash
+# Pendant 초기 설치 스크립트 (ODROID-M1S, Ubuntu 24.04 server)
 #
-# Pendant 초기 설치 스크립트
-# 새 라즈베리파이(Lite, Trixie+)에서 git clone 후 한 번 실행.
+# 전제: scripts/m1s-bootstrap.sh 가 먼저 실행돼서
+#       libmali g24p0 + DSI overlay + weston + ~/pyside-env (PySide6) 가 준비된 상태.
 #
-#   ./setup.sh
-#
-# 여러 번 실행해도 안전 (idempotent).
-# 필요한 경우 sudo 비밀번호를 물어봅니다.
+# 사용: bash setup.sh   (sudo 비번 한 번 물어봄)
+# Idempotent — 다시 돌려도 안전.
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 USER_NAME="${SUDO_USER:-$USER}"
+HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6)
 cd "$PROJECT_DIR"
 
-echo "=== [1/6] apt 시스템 패키지 ==="
-sudo apt-get update
-sudo apt-get install -y \
-    python3 python3-venv \
-    python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets \
-    python3-pyside6.qtqml python3-pyside6.qtquick \
-    libegl1 libgl1 libfontconfig1 libdbus-1-3 libxkbcommon0 \
-    network-manager
-# 위 pyside6 의존성으로 libQt6EglFsKmsGbmSupport 등 KMS/GBM 라이브러리 자동 설치됨.
-
-echo ""
-echo "=== [2/6] Python venv (--system-site-packages) ==="
-# 시스템 apt PySide6 를 공유하는 venv. pip 패키지 설치는 하지 않음.
-if [ -d "$PROJECT_DIR/.venv" ] && \
-   ! grep -q '^include-system-site-packages = true' "$PROJECT_DIR/.venv/pyvenv.cfg" 2>/dev/null; then
-    echo "  → 기존 .venv 가 system-site-packages 모드가 아님. 재생성합니다."
-    rm -rf "$PROJECT_DIR/.venv"
+echo "=== [1/5] 사전 점검 (m1s-bootstrap 결과) ==="
+if [ ! -x "$HOME_DIR/pyside-env/bin/python" ]; then
+    echo "FATAL: $HOME_DIR/pyside-env 없음."
+    echo "       먼저 bash scripts/m1s-bootstrap.sh 실행."
+    exit 1
 fi
-if [ ! -d "$PROJECT_DIR/.venv" ]; then
-    python3 -m venv --system-site-packages "$PROJECT_DIR/.venv"
+PYSIDE_VER=$("$HOME_DIR/pyside-env/bin/python" -c 'import PySide6; print(PySide6.__version__)' 2>/dev/null) \
+    || { echo "FATAL: PySide6 import 실패"; exit 1; }
+echo "  PySide6 ${PYSIDE_VER} 확인"
+
+if ! command -v weston >/dev/null; then
+    echo "FATAL: weston 없음 — m1s-bootstrap.sh 다시 실행"
+    exit 1
+fi
+echo "  weston $(weston --version 2>&1 | head -1 | awk '{print $2}') 확인"
+
+if ! grep -qE '^overlays=.*\bdisplay_vu8s\b' /boot/config.ini 2>/dev/null; then
+    echo "WARN: /boot/config.ini 에 display_vu8s overlay 없음. DSI 안 뜰 수 있음."
 fi
 
-echo ""
-echo "=== [3/6] 부트 커맨드라인 (콘솔/로고 정리 + DSI 회전) ==="
-CMDLINE=/boot/firmware/cmdline.txt
-if [ -f "$CMDLINE" ]; then
-    # vt.global_cursor_default=0  : 콘솔 커서 깜빡임 끔
-    # consoleblank=0              : 콘솔 블랭크(꺼짐) 끔
-    # fbcon=map:2                 : fbcon 을 존재하지 않는 FB 로 매핑 → 콘솔 텍스트 비표시
-    # logo.nologo                 : 부팅 로고 제거
-    # video=DSI-1:800x1280e,rotate=270 : Waveshare 10.1" DSI 패널 270° 회전
-    FLAGS="vt.global_cursor_default=0 consoleblank=0 fbcon=map:2 logo.nologo video=DSI-1:800x1280e,rotate=270"
-    CURRENT=$(cat "$CMDLINE")
-    NEW="$CURRENT"
-    for flag in $FLAGS; do
-        key="${flag%%=*}"
-        if echo "$NEW" | grep -qE "(^| )${key}="; then
-            NEW=$(echo "$NEW" | sed -E "s|(^| )${key}=[^ ]*|\1${flag}|")
-        else
-            NEW="$NEW $flag"
+echo
+echo "=== [2/5] 사용자 그룹 ==="
+# i2c/spi 그룹은 디바이스 등장 후에만 생김 — 있을 때만 추가
+for g in video render input dialout gpio netdev i2c spi; do
+    if getent group "$g" >/dev/null; then
+        if ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx "$g"; then
+            sudo usermod -aG "$g" "$USER_NAME"
+            echo "  +$g"
         fi
-    done
-    NEW=$(echo "$NEW" | tr -s ' ' | sed 's/^ //; s/ $//')
-    if [ "$NEW" != "$CURRENT" ]; then
-        sudo cp "$CMDLINE" "${CMDLINE}.bak.$(date +%Y%m%d%H%M%S)"
-        echo "$NEW" | sudo tee "$CMDLINE" > /dev/null
-        echo "  → cmdline.txt 업데이트. 재부팅 후 반영됩니다."
-    else
-        echo "  → 이미 적용됨. 건너뜀."
     fi
-else
-    echo "  → $CMDLINE 없음. 이 단계 건너뜀 (비-라즈파 환경?)."
-fi
+done
 
-echo ""
-echo "=== [4/6] WiFi 관리 권한(polkit) + netdev 그룹 ==="
+echo
+echo "=== [3/5] apt 패키지 (NetworkManager + lgpio) ==="
+APT_NEED=()
+dpkg -s network-manager >/dev/null 2>&1 || APT_NEED+=(network-manager)
+dpkg -s python3-lgpio    >/dev/null 2>&1 || APT_NEED+=(python3-lgpio)
+if [ ${#APT_NEED[@]} -gt 0 ]; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${APT_NEED[@]}" 2>&1 | tail -3
+else
+    echo "  이미 모두 설치됨"
+fi
+# python3-lgpio 는 /usr/lib/python3/dist-packages 에 들어감 — pyside-env 가 sys.path 에 추가하도록 utils/gpio_estop.py 가 처리
+
 sudo tee /etc/polkit-1/rules.d/50-netdev-wifi.rules > /dev/null <<'RULE'
 polkit.addRule(function(action, subject) {
     if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
@@ -78,49 +66,52 @@ polkit.addRule(function(action, subject) {
     }
 });
 RULE
-sudo systemctl restart polkit
-if ! groups "$USER_NAME" | grep -qw netdev; then
-    sudo usermod -aG netdev "$USER_NAME"
-    echo "  → $USER_NAME 를 netdev 그룹에 추가. 재로그인 필요."
-fi
+sudo systemctl restart polkit 2>/dev/null || true
+echo "  polkit netdev 규칙 적용"
 
-echo ""
-echo "=== [5/6] 유선 이더넷 never-default ==="
-# LAN 전용(인터넷 없는 PLC 네트워크)인 경우 유선이 디폴트 라우트로 승격되는 것을 차단.
-ETH_CONN=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '$2=="802-3-ethernet"{print $1; exit}')
-if [ -n "$ETH_CONN" ]; then
-    sudo nmcli connection modify "$ETH_CONN" ipv4.never-default yes ipv6.never-default yes || true
-    echo "  → '$ETH_CONN' 프로파일에 never-default 적용."
+echo
+echo "=== [4/5] 이더넷 never-default (PLC 전용 LAN 가정) ==="
+if systemctl is-active --quiet NetworkManager; then
+    ETH_CONN=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \
+               | awk -F: '$2=="802-3-ethernet"{print $1; exit}')
+    if [ -n "$ETH_CONN" ]; then
+        sudo nmcli connection modify "$ETH_CONN" \
+            ipv4.never-default yes ipv6.never-default yes || true
+        echo "  '$ETH_CONN' → never-default"
+    else
+        echo "  이더넷 NM 프로파일 없음 — 랜선 연결 후 수동:"
+        echo "    sudo nmcli connection modify \"<프로파일명>\" ipv4.never-default yes ipv6.never-default yes"
+    fi
 else
-    echo "  → 이더넷 프로파일 없음. 랜선 연결 후 수동 적용 필요:"
-    echo "    sudo nmcli connection modify \"<프로파일명>\" ipv4.never-default yes ipv6.never-default yes"
+    echo "  NetworkManager inactive — 부팅 후 자동 시작될 예정"
 fi
 
-echo ""
-echo "=== [6/6] systemd 서비스 등록 ==="
+echo
+echo "=== [5/5] systemd 서비스 등록 ==="
 SERVICE_SRC="$PROJECT_DIR/pendant.service"
 SERVICE_DST=/etc/systemd/system/pendant.service
 if [ -f "$SERVICE_SRC" ]; then
     sudo cp "$SERVICE_SRC" "$SERVICE_DST"
     sudo systemctl daemon-reload
     sudo systemctl enable pendant.service
-    echo "  → pendant.service 등록·enable. 재부팅 시 자동 실행."
-    echo ""
-    echo "  ⚠ 터치 장치 경로 확인 필요:"
-    echo "    pendant.service 의 QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS 에 /dev/input/event1 이 하드코딩됨."
-    echo "    다른 번호라면 아래로 확인 후 서비스 파일 수정:"
-    echo "      for d in /dev/input/event*; do udevadm info --query=property --name=\"\$d\" | grep -q TOUCHSCREEN && echo \"\$d\"; done"
+    echo "  pendant.service 등록 + enable"
 else
-    echo "  → $SERVICE_SRC 없음. 건너뜀."
+    echo "FATAL: $SERVICE_SRC 없음"; exit 1
 fi
 
-echo ""
+echo
 echo "=== 완료 ==="
-echo ""
-echo "재부팅으로 자동 실행:"
-echo "  sudo reboot"
-echo ""
-echo "수동 제어:"
-echo "  sudo systemctl start pendant.service"
-echo "  sudo systemctl stop pendant.service"
+echo
+echo "수동 시작 (지금):"
+echo "  sudo systemctl start pendant"
+echo
+echo "부팅 자동 시작:"
+echo "  이미 enable 됨. sudo reboot 하면 tty1 점유하고 풀스크린으로 떠야 함."
+echo
+echo "로그:"
 echo "  journalctl -u pendant -f"
+echo "  tail -f /tmp/pendant-weston.log"
+echo
+echo "디버그 (서비스 정지하고 콘솔로 돌아가기):"
+echo "  sudo systemctl stop pendant"
+echo "  sudo systemctl start getty@tty1"

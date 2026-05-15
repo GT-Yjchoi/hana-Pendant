@@ -1,26 +1,19 @@
 [Unit]
-Description=Pendant HMI
-After=multi-user.target
+Description=Pendant HMI (M1S, weston kiosk)
+After=multi-user.target systemd-user-sessions.service
 Conflicts=getty@tty1.service
 
 [Service]
 Type=simple
-User=yjchoi
-Group=yjchoi
-SupplementaryGroups=gpio video render input dialout i2c spi
-WorkingDirectory=/home/yjchoi/Pendant
+User=odroid
+Group=odroid
+SupplementaryGroups=video render input dialout gpio netdev
+WorkingDirectory=/home/odroid/hana-Pendant
 
-Environment=HOME=/home/yjchoi
+Environment=HOME=/home/odroid
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-Environment=QT_QPA_PLATFORM=eglfs
-Environment=QT_QPA_EGLFS_INTEGRATION=eglfs_kms
-Environment=QT_QPA_EGLFS_KMS_ATOMIC=1
-Environment=QT_QPA_EGLFS_KMS_DEVICE=/dev/dri/card0
-Environment=QT_QPA_EGLFS_ROTATION=-90
-Environment=QT_QPA_EGLFS_HIDECURSOR=1
-Environment=QT_QPA_EGLFS_NO_LIBINPUT=1
-Environment=QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS=/dev/input/event1:rotate=270
 
+; tty1 점유 + 콘솔 cleanup (getty 와 충돌)
 TTYPath=/dev/tty1
 StandardInput=tty
 StandardOutput=journal
@@ -29,7 +22,11 @@ TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
 
-ExecStart=/home/yjchoi/Pendant/.venv/bin/python /home/yjchoi/Pendant/main.py
+# systemd-logind 세션 생성 → seat0 활성 → weston 이 DRM/input takeover 가능
+# (이 옵션이 launch.sh stdout 을 tty 로 뺏아가므로 launch.sh 가 자체 파일로 redirect)
+PAMName=login
+
+ExecStart=/home/odroid/hana-Pendant/launch.sh
 Restart=on-failure
 RestartSec=3
 

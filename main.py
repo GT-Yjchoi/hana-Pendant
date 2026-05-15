@@ -134,12 +134,10 @@ def main():
     # (ui/main_window.py의 __init__도 이에 맞춰 수정되어 있어야 합니다)
     window = MainWindow(plc_client)
 
-    # 시스템 패널/태스크바가 앱 위를 가리지 않도록 항상 최상단 유지
-    window.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-
-    # 빌드 환경에서 화면 geometry를 명시적으로 지정해 하단 잘림 방지
-    screen = app.primaryScreen()
-    window.setGeometry(screen.geometry())
+    # weston kiosk-shell: 패널/태스크바가 없고 컴포지터가 단일 클라이언트를
+    # 출력 크기에 맞춰 풀스크린으로 띄움. X11 시절의 WindowStaysOnTopHint /
+    # 수동 setGeometry 는 Wayland 에서 surface role 을 깨뜨려 창이 안 뜸 →
+    # showFullScreen() 만 호출.
     window.showFullScreen()
 
     # 스크린샷 트리거 — F12 키 + 우상단 100×100 코너 3초 롱프레스

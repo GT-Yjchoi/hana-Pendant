@@ -1,16 +1,20 @@
 """
-GPIO 비상정지 모니터
+GPIO 비상정지 모니터 (ODROID-M1S)
 
 배선:
-    3.3V ──[3kΩ]──┬── GPIO22 (물리핀 15)
+    3.3V ──[3kΩ]──┬── 물리핀 15 (=DTS PIN_15)
                   │
                [NC버튼]
                   │
                  GND
 
+M1S 핀 매핑:
+    물리핀 15  →  /dev/gpiochip0 line 18  (DTS 라벨 "PIN_15")
+    `gpioinfo /dev/gpiochip0 | grep PIN_15` 로 검증 가능.
+
 동작:
-    - 정상: GPIO22 LOW  (0V)  → DT213 = 0
-    - 비상: GPIO22 HIGH (3.3V) → DT213 = 1
+    - 정상: line LOW  (0V)   → DT213 = 0
+    - 비상: line HIGH (3.3V) → DT213 = 1
 
 방식: QTimer 폴링 (20ms 주기) + lgpio 사용
 """
@@ -19,21 +23,22 @@ import sys
 import os
 from PySide6.QtCore import QObject, Signal, QTimer
 
-ESTOP_PIN    = 22   # GPIO22 (물리핀 15)
+ESTOP_CHIP   = 0    # /dev/gpiochip0
+ESTOP_PIN    = 18   # gpiochip0 line 18 = 40핀 헤더 물리핀 15 (M1S)
 POLL_MS      = 20   # 폴링 주기 (ms)
 DEBOUNCE_CNT = 3    # 연속 N회 같은 값 → 상태 확정 (20ms × 3 = 60ms)
 
-# 시스템 Python dist-packages 경로 추가 (lgpio는 시스템에만 설치됨)
+# 시스템 Python dist-packages 경로 추가 (lgpio가 시스템에만 깔린 경우)
 _SYS_DIST = "/usr/lib/python3/dist-packages"
 if _SYS_DIST not in sys.path:
     sys.path.insert(0, _SYS_DIST)
 
 try:
     import lgpio
-    _h = lgpio.gpiochip_open(0)
+    _h = lgpio.gpiochip_open(ESTOP_CHIP)
     lgpio.gpio_claim_input(_h, ESTOP_PIN, lgpio.SET_PULL_UP)
     _GPIO_AVAILABLE = True
-    print(f"[GPIO E-Stop] lgpio 초기화 완료 (GPIO{ESTOP_PIN})")
+    print(f"[GPIO E-Stop] lgpio 초기화 완료 (gpiochip{ESTOP_CHIP} line {ESTOP_PIN}, 물리핀 15)")
 except Exception as e:
     _GPIO_AVAILABLE = False
     _h = None
