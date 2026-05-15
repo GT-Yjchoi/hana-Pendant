@@ -518,11 +518,15 @@ class PageSettings(GlassCard):
     def set_plc_client(self, client):
         self.plc_client = client
         if self.plc_client:
+            # Qt.UniqueConnection: 동일 (시그널, 슬롯) 쌍이 이미 연결돼 있으면
+            # Qt 가 중복 생성을 거부 → "연결 먼저 끊고 다시 연결" 패턴 불필요.
+            # (PySide6 에서는 없는 연결의 disconnect() 가 RuntimeError 가 아니라
+            #  RuntimeWarning 을 출력하므로 try/except RuntimeError 로 못 잡음)
             try:
-                self.plc_client.sig_connected.disconnect(self._on_plc_status_changed)
-            except RuntimeError:
-                pass  # 연결되지 않은 시그널 disconnect는 무시
-            self.plc_client.sig_connected.connect(self._on_plc_status_changed)
+                self.plc_client.sig_connected.connect(
+                    self._on_plc_status_changed, Qt.UniqueConnection)
+            except (RuntimeError, TypeError):
+                pass  # 이미 연결돼 있음 — 정상
             self._on_plc_status_changed(self.plc_client.is_connected)
 
     # ----------------------------------------------------------------------
