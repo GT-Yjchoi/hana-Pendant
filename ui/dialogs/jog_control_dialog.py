@@ -173,7 +173,7 @@ class JogControlDialog(QWidget):
         bit_index = cfg.get("index", 0)
 
         btn = QPushButton(name)
-        btn.setMinimumHeight(45)
+        btn.setMinimumHeight(52)
         btn.setProperty("bit_index", bit_index)
         btn.setProperty("valve_mode", mode)
 
