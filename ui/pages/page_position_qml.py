@@ -1,0 +1,741 @@
+"""
+위치설정 페이지 QML(GPU) — PagePosition drop-in.
+UI/스크롤만 QML. teach·값편집·미세조정·PLC write·실시간추종/하이라이트·
+포인트네비·시퀀스편집기 로직은 PagePosition 과 동일(verbatim).
+오버레이/다이얼로그·ValveBackend 재사용.
+
+⚠ teach/값→PLC 포인트메모리 기록 경로는 실장비에서 정확도 검증 필수.
+"""
+import os
+
+from PySide6.QtCore import (Qt, QObject, Signal, Slot, Property, QUrl, QTimer,
+                            QAbstractListModel, QModelIndex, QByteArray)
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QVBoxLayout, QWidget, QDialog
+from PySide6.QtQuickWidgets import QQuickWidget
+
+from ui.pages.page_position import (NumberInputOverlay, FineAdjustOverlay,
+                                    PointNameCardOverlay, PositionOrderDialog)
+from ui.dialogs.sequence_editor_dialog import SequenceEditorDialog
+from ui.pages.page_manual_qml import ValveModel, ValveBackend
+
+_QML_PATH = os.path.join(os.path.dirname(__file__), "PagePosition.qml")
+_AXES = ["X", "Y", "Z", "Y2", "Z2", "θ", "R1", "R2"]
+
+
+class AxisPosModel(QAbstractListModel):
+    R_NM = Qt.UserRole + 1
+    R_CUR = Qt.UserRole + 2
+    R_SAV = Qt.UserRole + 3
+    R_SPD = Qt.UserRole + 4
+    R_VIS = Qt.UserRole + 5
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.cur = ["0.000"] * 8
+        self.sav = ["---"] * 8
+        self.spd = ["-"] * 8
+        self.vis = [True] * 8
+
+    def rowCount(self, p=QModelIndex()):
+        return 8
+
+    def roleNames(self):
+        return {self.R_NM: QByteArray(b"aname"),
+                self.R_CUR: QByteArray(b"acur"),
+                self.R_SAV: QByteArray(b"asaved"),
+                self.R_SPD: QByteArray(b"aspeed"),
+                self.R_VIS: QByteArray(b"avis")}
+
+    def data(self, ix, role):
+        i = ix.row()
+        if not (0 <= i < 8):
+            return None
+        return {self.R_NM: _AXES[i], self.R_CUR: self.cur[i],
+                self.R_SAV: self.sav[i], self.R_SPD: self.spd[i],
+                self.R_VIS: self.vis[i]}.get(role)
+
+    def _emit(self, roles):
+        self.dataChanged.emit(self.index(0, 0), self.index(7, 0), roles)
+
+    def set_cur(self, vals):
+        for i, v in enumerate(vals):
+            if i < 8:
+                self.cur[i] = f"{v:.3f}"
+        self._emit([self.R_CUR])
+
+    def set_saved(self, coords, speeds):
+        for i in range(8):
+            self.sav[i] = f"{coords[i]:.3f}" if i < len(coords) else "---"
+            self.spd[i] = f"{speeds[i]:.0f}" if i < len(speeds) else "-"
+        self._emit([self.R_SAV, self.R_SPD])
+
+    def clear_saved(self):
+        self.sav = ["---"] * 8
+        self.spd = ["-"] * 8
+        self._emit([self.R_SAV, self.R_SPD])
+
+    def set_vis(self, mask):
+        for i in range(8):
+            self.vis[i] = bool((mask >> i) & 1)
+        self._emit([self.R_VIS])
+
+    def set_one(self, row, sav=None, spd=None):
+        if sav is not None:
+            self.sav[row] = sav
+        if spd is not None:
+            self.spd[row] = spd
+        self.dataChanged.emit(self.index(row, 0), self.index(row, 0),
+                              [self.R_SAV, self.R_SPD])
+
+
+class PreviewModel(QAbstractListModel):
+    R_T = Qt.UserRole + 1
+    R_HI = Qt.UserRole + 2
+    R_C = Qt.UserRole + 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows = []     # [(text, is_comment)]
+        self._hi = -1
+
+    def rowCount(self, p=QModelIndex()):
+        return len(self._rows)
+
+    def roleNames(self):
+        return {self.R_T: QByteArray(b"ptext"),
+                self.R_HI: QByteArray(b"phi"),
+                self.R_C: QByteArray(b"pcomment")}
+
+    def data(self, ix, role):
+        i = ix.row()
+        if not (0 <= i < len(self._rows)):
+            return None
+        if role == self.R_T:
+            return self._rows[i][0]
+        if role == self.R_C:
+            return self._rows[i][1]
+        if role == self.R_HI:
+            return i == self._hi
+        return None
+
+    def reset_rows(self, rows):
+        self.beginResetModel()
+        self._rows = rows
+        self._hi = -1
+        self.endResetModel()
+
+    def set_hi(self, row):
+        if row == self._hi:
+            return
+        old = self._hi
+        self._hi = row
+        for r in (old, row):
+            if 0 <= r < len(self._rows):
+                self.dataChanged.emit(self.index(r, 0), self.index(r, 0),
+                                      [self.R_HI])
+
+
+class PosBackend(QObject):
+    changed = Signal()      # 포인트/네비/시퀀스 표시 갱신
+
+    def __init__(self, page):
+        super().__init__(page)
+        self._p = page
+
+    def _pn(self):
+        return self._p._point_name()
+
+    def _cp(self):
+        return self._p._pt_index > 0
+
+    def _cn(self):
+        return self._p._pt_index < len(self._p._visible_points) - 1
+
+    def _keys(self):
+        return self._p._seq_keys()
+
+    def _si(self):
+        return self._p._seq_index()
+
+    def _hi(self):
+        return self._p._hi_row
+
+    def _te(self):
+        return not (self._p._current_op_status in (1, 2))
+
+    pointName = Property(str, _pn, notify=changed)
+    canPrev = Property(bool, _cp, notify=changed)
+    canNext = Property(bool, _cn, notify=changed)
+    seqKeys = Property(list, _keys, notify=changed)
+    seqIndex = Property(int, _si, notify=changed)
+    hiRow = Property(int, _hi, notify=changed)
+    teachEnabled = Property(bool, _te, notify=changed)
+
+    @Slot()
+    def prevPoint(self):
+        self._p._nav_point(-1)
+
+    @Slot()
+    def nextPoint(self):
+        self._p._nav_point(1)
+
+    @Slot()
+    def showNameCard(self):
+        self._p._show_name_card_overlay()
+
+    @Slot()
+    def reorder(self):
+        self._p._on_reorder_clicked()
+
+    @Slot(int, str)
+    def valueClicked(self, row, col):
+        self._p._on_value_clicked(row, col)
+
+    @Slot()
+    def teachClicked(self):
+        self._p._on_teach_clicked()
+
+    @Slot(int)
+    def seqChanged(self, idx):
+        self._p._on_seq_selector_changed(idx)
+
+    @Slot()
+    def openSeqEditor(self):
+        self._p._open_sequence_editor()
+
+
+class PagePositionQml(QWidget):
+    sig_sequence_changed = Signal()
+
+    def __init__(self, sequence_data=None, position_points=None,
+                 view_order_data=None, mode_data=None, timer_library=None,
+                 plc_client=None):
+        super().__init__()
+        self.plc_client = plc_client
+        self.raw_sequence_ref = sequence_data if sequence_data is not None else []
+        self.position_points = position_points if position_points is not None else {}
+        self.view_order_data = view_order_data if view_order_data is not None else []
+        self.mode_data = mode_data if mode_data is not None else []
+        self.timer_library = timer_library if timer_library is not None else {}
+
+        self.sequences = {}
+        if isinstance(self.raw_sequence_ref, list):
+            self.sequences["Main"] = self.raw_sequence_ref
+        elif isinstance(self.raw_sequence_ref, dict):
+            self.sequences = self.raw_sequence_ref
+        else:
+            self.sequences["Main"] = []
+        if "Main" not in self.sequences:
+            self.sequences["Main"] = []
+        self.current_seq_key = "Main"
+
+        self._visible_points = []
+        self._pt_index = 0
+        self._current_op_status = 0
+        self._hi_row = -1
+        self._last_hi = None
+
+        self._init_points_from_sequence()
+
+        self._axis = AxisPosModel(self)
+        self._prev = PreviewModel(self)
+        self._valve_m = ValveModel(self)
+        self._valve_be = ValveBackend(plc_client, self._valve_m, self)
+        self._valve_be.load_configs()
+        self._be = PosBackend(self)
+
+        self._view = QQuickWidget(self)
+        self._view.setResizeMode(QQuickWidget.SizeRootObjectToView)
+        self._view.setClearColor(QColor("#16202B"))
+        ctx = self._view.rootContext()
+        ctx.setContextProperty("axisModel", self._axis)
+        ctx.setContextProperty("previewModel", self._prev)
+        ctx.setContextProperty("valveModel", self._valve_m)
+        ctx.setContextProperty("valveBackend", self._valve_be)
+        ctx.setContextProperty("posBackend", self._be)
+        self._view.setSource(QUrl.fromLocalFile(_QML_PATH))
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._view)
+
+        if self.plc_client:
+            self.plc_client.sig_monitor_data.connect(self._update_realtime_values)
+        self._refresh_ui()
+
+    # ---- PagePosition 와 동일 ----
+    def _init_points_from_sequence(self):
+        for seq_list in self.sequences.values():
+            for step in seq_list:
+                if step.get("type") == "POS":
+                    p_name = step.get("point_name", step.get("name", "Point"))
+                    if not p_name:
+                        p_name = "Point_1"
+                    if p_name not in self.position_points:
+                        self.position_points[p_name] = {
+                            "coords": list(step.get("coords", [0.0] * 8)),
+                            "speeds": list(step.get("speeds", [100.0] * 8))}
+
+    def _is_point_visible(self, name):
+        vm = self.position_points.get(name, {}).get("visible_mode", -1)
+        if isinstance(vm, int):
+            if vm < 0:
+                return True
+            return bool(self.mode_data[vm]) if self.mode_data and vm < len(self.mode_data) else False
+        if not vm:
+            return True
+        return any(bool(self.mode_data[i]) for i in vm
+                   if self.mode_data and i < len(self.mode_data))
+
+    def _recompute_visible_points(self, keep_name=None):
+        all_points = sorted(list(self.position_points.keys()))
+        valid_custom = [n for n in self.view_order_data if n in all_points]
+        new_names = [n for n in all_points if n not in valid_custom]
+        self.view_order_data.clear()
+        self.view_order_data.extend(valid_custom + new_names)
+        self._visible_points = [n for n in self.view_order_data
+                                if self._is_point_visible(n)]
+        if keep_name and keep_name in self._visible_points:
+            self._pt_index = self._visible_points.index(keep_name)
+        else:
+            self._pt_index = min(self._pt_index,
+                                 max(0, len(self._visible_points) - 1))
+
+    def _point_name(self):
+        if not self._visible_points:
+            return "위치 없음"
+        if 0 <= self._pt_index < len(self._visible_points):
+            return self._visible_points[self._pt_index]
+        return "위치 없음"
+
+    def _seq_keys(self):
+        keys = sorted([k for k in self.sequences.keys() if k != "Main"])
+        return ["Main"] + keys
+
+    def _seq_index(self):
+        ks = self._seq_keys()
+        return ks.index(self.current_seq_key) if self.current_seq_key in ks else 0
+
+    def _refresh_ui(self):
+        prev_name = self._point_name()
+        self._recompute_visible_points(
+            keep_name=prev_name if prev_name != "위치 없음" else None)
+        self._update_preview_list()
+        self._load_selected_point()
+        self._be.changed.emit()
+
+    def _load_selected_point(self):
+        name = self._point_name()
+        if name == "위치 없음" or name not in self.position_points:
+            self._axis.clear_saved()
+            return
+        d = self.position_points[name]
+        self._axis.set_saved(d.get("coords", [0.0] * 8),
+                             d.get("speeds", [100.0] * 8))
+
+    def _nav_point(self, delta):
+        n = len(self._visible_points)
+        if n == 0:
+            return
+        self._pt_index = max(0, min(n - 1, self._pt_index + delta))
+        self._load_selected_point()
+        self._be.changed.emit()
+
+    def _on_seq_selector_changed(self, idx):
+        ks = self._seq_keys()
+        if 0 <= idx < len(ks) and ks[idx] in self.sequences:
+            self.current_seq_key = ks[idx]
+            self._update_preview_list()
+            self._be.changed.emit()
+
+    # ---- preview 빌드 (PagePosition 와 동일 데코레이션) ----
+    def _out_port_name(self, out_type, bit_index):
+        try:
+            from utils.io_manager import IOManager
+            mgr = IOManager.instance()
+            if out_type == 0:
+                return f"Y{bit_index:02X}: {mgr.get_output_name(bit_index)}"
+            elif out_type == 1:
+                return f"Y{0x20+bit_index:02X}: {mgr.get_output_name(16+bit_index)}"
+        except Exception:
+            pass
+        if out_type == 0:
+            return f"Y{bit_index:02X}"
+        if out_type == 1:
+            return f"Y{0x20+bit_index:02X}"
+        try:
+            from utils.internal_bit_names import get_name
+            nm = get_name(f"M{bit_index:02d}")
+            if nm:
+                return f"M{bit_index:02d}: {nm}"
+        except Exception:
+            pass
+        return f"M{bit_index:02d}"
+
+    def _in_port_name(self, port_index):
+        if 100 <= port_index <= 131:
+            bit_idx = port_index - 100
+            try:
+                from utils.internal_bit_names import get_name
+                nm = get_name(f"M{bit_idx:02d}")
+                if nm:
+                    return f"M{bit_idx:02d}: {nm}"
+            except Exception:
+                pass
+            return f"M{bit_idx:02d}"
+        try:
+            from utils.io_manager import IOManager
+            mgr = IOManager.instance()
+            if 0 <= port_index < 16:
+                return f"X{port_index:02X}: {mgr.get_input_name(port_index)}"
+            if 32 <= port_index < 48:
+                return f"X{port_index:02X}: {mgr.get_input_name(port_index - 16)}"
+        except Exception:
+            pass
+        return f"X{port_index:02X}" if port_index < 100 else f"포트{port_index}"
+
+    def _jmp_target_name(self, current_steps, target_idx):
+        n = 0
+        for step in current_steps:
+            if step.get("type") == "COMMENT":
+                continue
+            if n == target_idx:
+                return step.get("name", f"스텝{target_idx}")
+            n += 1
+        return f"스텝{target_idx}"
+
+    def _update_preview_list(self):
+        self._last_hi = None
+        rows = []
+        current_steps = self.sequences.get(self.current_seq_key, [])
+        step_num = 0
+        for step in current_steps:
+            stype = step.get("type", "")
+            if stype == "COMMENT":
+                rows.append((f"// {step.get('text', '')}", True))
+                continue
+            step_num += 1
+            name = step.get("name", "Unknown")
+            if stype == "POS":
+                p_name = step.get("point_name", "")
+                if p_name and p_name != name:
+                    name = f"{name}  ({p_name})"
+            elif stype == "CALL":
+                tgt = step.get("target_seq", "")
+                if tgt:
+                    name = f"{name}  ({tgt})"
+            elif stype == "OUT":
+                ot = int(step.get("out_type", 0))
+                port = int(step.get("port", 0))
+                on_val = step.get("on", step.get("on_off", False))
+                name = f"{name}  ({self._out_port_name(ot, port)} {'ON' if on_val else 'OFF'})"
+            elif stype == "IN":
+                port = int(step.get("port", step.get("io_index", 0)))
+                on_val = step.get("on", step.get("on_off", True))
+                name = f"{name}  ({self._in_port_name(port)} {'ON' if on_val else 'OFF'})"
+            elif stype == "JMP":
+                ti = int(step.get("target_idx", 0))
+                tn = self._jmp_target_name(current_steps, ti)
+                if tn:
+                    name = f"{name}  ({tn})"
+            elif stype == "TMR":
+                ref = step.get("timer_ref", "")
+                if ref:
+                    name = f"{name}  ({ref})"
+            rows.append((f"[{step_num:02d}] {name}", False))
+        self._prev.reset_rows(rows)
+        self._hi_row = -1
+
+    # ---- 실시간 (PagePosition._update_realtime_values 와 동일) ----
+    def _update_realtime_values(self, data):
+        if not self.isVisible():
+            return
+        axis_data = data.get('axis_pos', []) if isinstance(data, dict) else data
+        self._axis.set_cur(axis_data)
+
+        op_status = data.get('op_status', 0) if isinstance(data, dict) else 0
+        current_step = data.get('current_step', -1) if isinstance(data, dict) else -1
+        self._current_op_status = op_status
+        self._be.changed.emit()
+
+        if op_status in (1, 2):
+            current_slot = data.get('sub_seq_idx', 0) if isinstance(data, dict) else 0
+            target_name = self._get_seq_name_by_slot(current_slot)
+            if target_name and target_name != self.current_seq_key \
+                    and target_name in self.sequences:
+                self.current_seq_key = target_name
+                self._update_preview_list()
+                self._last_hi = None
+                self._be.changed.emit()
+            self._highlight_step(current_step)
+        else:
+            self._highlight_step(-1)
+
+    def _get_seq_name_by_slot(self, slot_id):
+        MONITOR_KEY = "Monitor"
+        if slot_id == 0:
+            return "Main"
+        if slot_id == 39:
+            return MONITOR_KEY if MONITOR_KEY in self.sequences else None
+        reserved = {"Main", MONITOR_KEY}
+        subs = sorted([k for k in self.sequences.keys() if k not in reserved])
+        idx = slot_id - 1
+        return subs[idx] if 0 <= idx < len(subs) else None
+
+    def _highlight_step(self, step_idx):
+        list_row = -1
+        if step_idx >= 0:
+            n = 0
+            for i, s in enumerate(self.sequences.get(self.current_seq_key, [])):
+                if s.get("type") == "COMMENT":
+                    continue
+                if n == step_idx:
+                    list_row = i
+                    break
+                n += 1
+        if self._last_hi == list_row:
+            return
+        self._last_hi = list_row
+        self._hi_row = list_row
+        self._prev.set_hi(list_row)
+        self._be.changed.emit()
+
+    # ---- 값 편집 (PagePosition._on_value_clicked 와 동일) ----
+    def _on_value_clicked(self, row_idx, col_type):
+        if not self._visible_points:
+            return
+        selected_point = self._point_name()
+        if selected_point not in self.position_points:
+            return
+        if col_type == "coords" and self._current_op_status in (1, 2):
+            self._open_fine_adjust_overlay(selected_point, row_idx)
+            return
+        if col_type == "coords":
+            current_val_str = self._axis.sav[row_idx]
+        else:
+            current_val_str = self._axis.spd[row_idx]
+        prec = 3 if col_type == "coords" else 0
+        dlg = NumberInputOverlay(current_val_str, prec, parent=self.window())
+        new_val_str = dlg.exec()
+        if new_val_str is None:
+            return
+        try:
+            new_val = float(new_val_str)
+        except ValueError:
+            return
+        if col_type == "speed":
+            try:
+                old_speed = int(float(self._axis.spd[row_idx]))
+            except Exception:
+                old_speed = 0
+            new_val = max(1, min(100, int(new_val)))
+        elif col_type == "coords":
+            from utils.axis_limits import get_axis_strokes
+            stroke = get_axis_strokes()[row_idx] if 0 <= row_idx < 8 else 1000.0
+            if new_val < 0.0 or new_val > stroke:
+                try:
+                    from ui.dialogs.sequence_utils import DarkMessageDialog
+                    DarkMessageDialog(
+                        "입력 범위 초과",
+                        f"스트로크 한계를 벗어났습니다.\n허용 범위: 0 ~ {stroke:.3f} mm\n입력값: {new_val:.3f} mm",
+                        is_error=True, parent=self.window()).exec()
+                except Exception as e:
+                    print(f"[Position] 범위초과 팝업 실패: {e}")
+                return
+        if col_type == "coords":
+            self.position_points[selected_point]["coords"][row_idx] = new_val
+            for seq in self.sequences.values():
+                for step in seq:
+                    if step.get("type") == "POS":
+                        p_name = step.get("point_name", step.get("name"))
+                        if p_name == selected_point and "coords" in step:
+                            step["coords"][row_idx] = new_val
+        elif col_type == "speed":
+            if "speeds" not in self.position_points[selected_point]:
+                self.position_points[selected_point]["speeds"] = [100] * 8
+            self.position_points[selected_point]["speeds"][row_idx] = new_val
+        if self.plc_client and self.plc_client.is_connected:
+            try:
+                sorted_names = sorted(list(self.position_points.keys()))
+                point_idx = sorted_names.index(selected_point)
+                base_addr = self.plc_client.POINT_BASE_ADDR + (point_idx * self.plc_client.POINT_SIZE)
+                if col_type == "coords":
+                    target_addr = base_addr + 2 + (row_idx * 2)
+                    self.plc_client.write_dint(0x09, target_addr, int(new_val * 1000))
+                elif col_type == "speed":
+                    target_addr = base_addr + 18 + row_idx
+                    self.plc_client.write_words(0x09, target_addr, [int(new_val)])
+            except Exception as e:
+                print(f"[Position] PLC 시퀀스 값 전송 실패: {e}")
+        self._load_selected_point()
+        self.sig_sequence_changed.emit()
+        try:
+            from utils.op_history import record as op_record
+            axis = _AXES[row_idx] if 0 <= row_idx < 8 else f"축{row_idx+1}"
+            if col_type == "coords":
+                op_record("POS", f"{selected_point} {axis}축 기억위치 변경 → {new_val:.3f} mm")
+            elif col_type == "speed":
+                op_record("SPEED", f"{selected_point} {axis}축 속도 {old_speed} → {new_val} %")
+        except Exception:
+            pass
+
+    def _open_fine_adjust_overlay(self, selected_point, row_idx):
+        coords = self.position_points[selected_point].setdefault("coords", [0.0] * 8)
+        cur = coords[row_idx] if row_idx < len(coords) else 0.0
+        axis_name = _AXES[row_idx] if 0 <= row_idx < 8 else f"{row_idx+1}"
+        overlay = FineAdjustOverlay(axis_name, cur, on_adjust=None, parent=self)
+
+        def _apply(delta):
+            self._apply_fine_adjust(selected_point, row_idx, delta, overlay)
+        overlay._on_adjust = _apply
+        overlay.exec()
+
+    def _apply_fine_adjust(self, selected_point, row_idx, delta, overlay):
+        if selected_point not in self.position_points:
+            return
+        coords = self.position_points[selected_point].setdefault("coords", [0.0] * 8)
+        cur = coords[row_idx] if row_idx < len(coords) else 0.0
+        new_val = round(cur + delta, 3)
+        from utils.axis_limits import get_axis_strokes
+        stroke = get_axis_strokes()[row_idx] if 0 <= row_idx < 8 else 1000.0
+        if new_val < 0.0 or new_val > stroke:
+            from ui.dialogs.sequence_utils import DarkMessageDialog
+            DarkMessageDialog(
+                "입력 범위 초과",
+                f"스트로크 한계를 벗어났습니다.\n허용 범위: 0 ~ {stroke:.3f} mm\n입력값: {new_val:.3f} mm",
+                is_error=True, parent=self.window()).exec()
+            return
+        coords[row_idx] = new_val
+        for seq in self.sequences.values():
+            for step in seq:
+                if step.get("type") == "POS":
+                    p_name = step.get("point_name", step.get("name"))
+                    if p_name == selected_point and "coords" in step:
+                        step["coords"][row_idx] = new_val
+        if self.plc_client and self.plc_client.is_connected:
+            try:
+                sorted_names = sorted(list(self.position_points.keys()))
+                point_idx = sorted_names.index(selected_point)
+                base_addr = self.plc_client.POINT_BASE_ADDR + (point_idx * self.plc_client.POINT_SIZE)
+                target_addr = base_addr + 2 + (row_idx * 2)
+                self.plc_client.write_dint(0x09, target_addr, int(new_val * 1000))
+            except Exception as e:
+                print(f"[Position] 미세조정 PLC 전송 실패: {e}")
+        self._axis.set_one(row_idx, sav=f"{new_val:.3f}")
+        if overlay is not None:
+            overlay.set_value(new_val)
+        self.sig_sequence_changed.emit()
+        try:
+            from utils.op_history import record as op_record
+            axis = _AXES[row_idx] if 0 <= row_idx < 8 else f"축{row_idx+1}"
+            op_record("POS", f"(자동중) {selected_point} {axis}축 미세조정 {delta:+g} → {new_val:.3f} mm")
+        except Exception:
+            pass
+
+    # ---- teach (PagePosition._on_teach_clicked 와 동일) ----
+    def _on_teach_clicked(self):
+        if self._current_op_status in (1, 2):
+            return
+        if not self._visible_points:
+            return
+        target_point_name = self._point_name()
+        if target_point_name not in self.position_points:
+            return
+        new_coords = []
+        for s in self._axis.cur:
+            try:
+                new_coords.append(float(s))
+            except ValueError:
+                new_coords.append(0.0)
+        self.position_points[target_point_name]["coords"] = list(new_coords)
+        for seq in self.sequences.values():
+            for step in seq:
+                if step.get("type") == "POS":
+                    p_name = step.get("point_name", step.get("name"))
+                    if p_name == target_point_name:
+                        step["coords"] = list(new_coords)
+        if self.plc_client and self.plc_client.is_connected:
+            try:
+                sorted_names = sorted(list(self.position_points.keys()))
+                point_idx = sorted_names.index(target_point_name)
+                base_addr = self.plc_client.POINT_BASE_ADDR + (point_idx * self.plc_client.POINT_SIZE)
+                for i, val in enumerate(new_coords):
+                    target_addr = base_addr + 2 + (i * 2)
+                    self.plc_client.write_dint(0x09, target_addr, int(val * 1000))
+            except Exception as e:
+                print(f"[Position] PLC 포지션 값 전송 실패: {e}")
+        self._load_selected_point()
+        self.sig_sequence_changed.emit()
+        if self._pt_index + 1 < len(self._visible_points):
+            self._pt_index += 1
+            self._load_selected_point()
+            self._be.changed.emit()
+
+    # ---- 오버레이/다이얼로그 (재사용) ----
+    def _show_name_card_overlay(self):
+        if not self._visible_points:
+            return
+        ordered = list(self._visible_points)
+        current = self._point_name()
+        overlay = PointNameCardOverlay(ordered, current, parent=self)
+        overlay.point_selected.connect(self._on_point_selected_from_card)
+        overlay.show()
+        overlay.raise_()
+        overlay.activateWindow()
+
+    def _on_point_selected_from_card(self, name):
+        if name in self._visible_points:
+            self._pt_index = self._visible_points.index(name)
+            self._load_selected_point()
+            self._be.changed.emit()
+
+    def _on_reorder_clicked(self):
+        dlg = PositionOrderDialog(self.view_order_data, self)
+        if dlg.exec() == QDialog.Accepted:
+            new_order = dlg.get_ordered_names()
+            self.view_order_data.clear()
+            self.view_order_data.extend(new_order)
+            self._refresh_ui()
+            self.sig_sequence_changed.emit()
+
+    def _open_sequence_editor(self):
+        dlg = SequenceEditorDialog(
+            sequence_data=self.sequences,
+            position_points=self.position_points,
+            timer_library=self.timer_library,
+            plc_client=self.plc_client,
+            mode_data=self.mode_data,
+            parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            new_seqs = dlg.get_sequence_data()
+            new_points = dlg.get_position_points()
+            self.sequences.clear()
+            self.sequences.update(new_seqs)
+            if isinstance(self.raw_sequence_ref, list):
+                self.raw_sequence_ref.clear()
+                if "Main" in self.sequences:
+                    self.raw_sequence_ref.extend(self.sequences["Main"])
+            self.position_points.clear()
+            self.position_points.update(new_points)
+            self._refresh_ui()
+            self.sig_sequence_changed.emit()
+
+    # ---- 호환 (main_window 가 _refresh_ui() 호출) ----
+    def showEvent(self, event):
+        self._refresh_ui()
+        if self._visible_points:
+            self._pt_index = 0
+            self._load_selected_point()
+        super().showEvent(event)
+        QTimer.singleShot(0, self._check_axis_visibility)
+
+    def _check_axis_visibility(self):
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        try:
+            data = self.plc_client.read_words(0x09, self.plc_client.AXIS_PARAM_ADDR, 1)
+            if data:
+                self._axis.set_vis(data[0])
+        except Exception as e:
+            print(f"[Position] 축 표시 갱신 실패: {e}")

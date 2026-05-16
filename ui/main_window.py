@@ -17,7 +17,7 @@ from ui.top_bar import TopBar
 
 # 페이지들 임포트
 from ui.pages.page_mode_qml import PageModeQml
-from ui.pages.page_position import PagePosition
+from ui.pages.page_position_qml import PagePositionQml
 from ui.pages.page_timer_qml import PageTimerQml
 from ui.pages.page_packing import PagePacking
 from ui.pages.page_data_qml import PageDataQml
@@ -208,7 +208,7 @@ class MainWindow(QWidget):
         
         self.pages["mode"] = PageModeQml(mode_data=self.master_mode_data, plc_client=self.plc_client)
         
-        self.pages["position"] = PagePosition(
+        self.pages["position"] = PagePositionQml(
             sequence_data=self.master_sequence_data,
             view_order_data=self.master_view_order,
             position_points=self.master_position_points,

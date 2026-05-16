@@ -21,14 +21,16 @@ from utils.languages import LanguageManager
 class NumberInputOverlay(QWidget):
     def __init__(self, current_val_str, precision=0, parent=None):
         super().__init__(parent)
-        if parent:
-            main_window = parent.window()
-            self.setParent(main_window)
-            self.resize(main_window.size())
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        # QQuickWidget(QML) 위 자식 오버레이 첫입력 가로채임 방지 —
+        # top-level 프레임리스 모달 (feedback-qquickwidget-overlay-input)
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
-        
+
         self.precision = precision
         self.result_val = None
         self._event_loop = None
@@ -72,7 +74,14 @@ class NumberInputOverlay(QWidget):
     def _quit(self):
         if self._event_loop: self._event_loop.quit()
         self.close(); self.deleteLater()
-    def exec(self): self.show(); self.raise_(); self._event_loop = QEventLoop(); self._event_loop.exec(); return self.result_val
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter
+        p = QPainter(self)
+        if self._bg_pixmap: p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
+    def exec(self):
+        self.show(); self.raise_(); self.activateWindow()
+        self._event_loop = QEventLoop(); self._event_loop.exec(); return self.result_val
 
 # =========================================================================
 # [NEW] 자동운전 중 기억위치 미세조정 오버레이
@@ -83,12 +92,13 @@ class NumberInputOverlay(QWidget):
 class FineAdjustOverlay(QWidget):
     def __init__(self, axis_name, initial_val, on_adjust, parent=None):
         super().__init__(parent)
-        if parent:
-            main_window = parent.window()
-            self.setParent(main_window)
-            self.resize(main_window.size())
-        self.setStyleSheet("background-color: rgba(0,0,0,180);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        # QQuickWidget(QML) 위 자식 오버레이 첫입력 가로채임 방지 (top-level 모달)
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
 
         self._on_adjust = on_adjust  # callback(delta)
@@ -142,8 +152,14 @@ class FineAdjustOverlay(QWidget):
         if self._event_loop: self._event_loop.quit()
         self.close(); self.deleteLater()
 
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter
+        p = QPainter(self)
+        if self._bg_pixmap: p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
+
     def exec(self):
-        self.show(); self.raise_()
+        self.show(); self.raise_(); self.activateWindow()
         self._event_loop = QEventLoop(); self._event_loop.exec()
 
 
@@ -193,12 +209,13 @@ class PointNameCardOverlay(QWidget):
 
     def __init__(self, ordered_points, current_point, parent=None):
         super().__init__(parent)
-        if parent:
-            mw = parent.window()
-            self.setParent(mw)
-            self.resize(mw.size())
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        # QQuickWidget(QML) 위 자식 오버레이 첫입력 가로채임 방지 (top-level 모달)
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
@@ -258,6 +275,12 @@ class PointNameCardOverlay(QWidget):
         scroll.setWidget(grid_widget)
         vbox.addWidget(scroll, 1)
         layout.addWidget(popup)
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter
+        p = QPainter(self)
+        if self._bg_pixmap: p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
 
     def _on_card(self, name):
         self.point_selected.emit(name)
