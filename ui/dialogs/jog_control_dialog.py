@@ -113,7 +113,7 @@ class JogControlDialog(QWidget):
 
         # (런너암/제품암 전환 버튼 제거 — 1~4축 평면 배치로 대체)
 
-        # 4. 하단 밸브 버튼 (settings.json jog_valve=True 항목, 최대 6개)
+        # 4. 하단 밸브 버튼 (settings.json jog_valve=True 항목, 최대 8개)
         self._valve_btns = []
         self._valve_configs = []
         jog_valves = self._load_jog_valves()
@@ -145,7 +145,7 @@ class JogControlDialog(QWidget):
             self._monitor_connected = True
 
     def _load_jog_valves(self):
-        """settings.json에서 jog_valve=True인 밸브를 jog_order 순으로 최대 6개 반환"""
+        """settings.json에서 jog_valve=True인 밸브를 jog_order 순으로 최대 8개 반환"""
         try:
             path = get_settings_path()
             if os.path.exists(path):
@@ -154,7 +154,7 @@ class JogControlDialog(QWidget):
                 cfgs = s.get("valve_config", [])
                 result = [c for c in cfgs if c.get("jog_valve", False)]
                 result.sort(key=lambda x: x.get("jog_order", 99))
-                return result[:6]
+                return result[:8]
         except Exception as e:
             print(f"[JOG] valve config load error: {e}")
         return []

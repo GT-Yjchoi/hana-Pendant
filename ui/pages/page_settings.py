@@ -623,7 +623,7 @@ class PageSettings(GlassCard):
         self.valve_jog_up_btns = [] # JOG 순서 위로
         self.valve_jog_down_btns = [] # JOG 순서 아래로
         self._jog_order = []        # JOG 선택 밸브 인덱스 순서 리스트
-        self._JOG_MAX = 6           # JOG 팝업 최대 밸브 수
+        self._JOG_MAX = 8           # JOG 팝업 최대 밸브 수(밸브칸 2개 추가)
         
         for i in range(32):
             row = i + 1
@@ -901,7 +901,7 @@ class PageSettings(GlassCard):
         self.valve_mode_combos[idx2].setChecked(m1)
     
     def _on_jog_valve_toggled(self, btn, checked, valve_idx):
-        """JOG 버튼 토글 — 최대 6개 초과 시 자동 해제, _jog_order 동기화"""
+        """JOG 버튼 토글 — 최대 8개 초과 시 자동 해제, _jog_order 동기화"""
         if checked:
             if len(self._jog_order) >= self._JOG_MAX:
                 btn.blockSignals(True)
