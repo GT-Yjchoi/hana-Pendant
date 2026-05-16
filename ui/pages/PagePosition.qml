@@ -39,7 +39,8 @@ Rectangle {
                     Text { anchors.centerIn: parent
                            text: posBackend ? posBackend.pointName : "위치 없음"
                            color: "white"; font.pixelSize: 18; font.bold: true
-                           elide: Text.ElideRight; width: parent.width - 16 }
+                           elide: Text.ElideRight; width: parent.width - 16
+                           horizontalAlignment: Text.AlignHCenter }
                     MouseArea { id: pName; anchors.fill: parent
                         onClicked: if (posBackend) posBackend.showNameCard() }
                 }
