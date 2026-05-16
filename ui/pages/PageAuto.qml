@@ -95,7 +95,9 @@ Rectangle {
             spacing: 12
 
             RowLayout {
-                Layout.fillWidth: true; spacing: 15
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 90; Layout.maximumHeight: 90
+                spacing: 15
                 Repeater {
                     model: 3
                     delegate: Rectangle {
@@ -113,7 +115,9 @@ Rectangle {
             }
 
             RowLayout {
-                Layout.fillWidth: true; spacing: 10
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 50; Layout.maximumHeight: 50
+                spacing: 10
                 visible: autoBackend ? autoBackend.subVisible : false
                 Repeater {
                     model: 2

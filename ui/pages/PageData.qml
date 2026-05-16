@@ -83,7 +83,13 @@ Rectangle {
                 }
             }
             RowLayout {
-                Layout.fillWidth: true; Layout.preferredHeight: 65; spacing: 12
+                // 중첩 Layout 은 fillHeight 기본 true → 명시적으로 끄고 높이 고정
+                // (안 그러면 미리보기와 세로공간을 반씩 나눠 버튼이 거대해짐)
+                Layout.fillWidth: true
+                Layout.fillHeight: false
+                Layout.preferredHeight: 65
+                Layout.maximumHeight: 65
+                spacing: 12
                 Repeater {
                     model: dataBackend ? dataBackend.buttons : []
                     delegate: Rectangle {

@@ -82,7 +82,8 @@ Rectangle {
         }
 
         RowLayout {
-            Layout.fillWidth: true
+            Layout.fillWidth: true; Layout.fillHeight: false
+            Layout.preferredHeight: 40; Layout.maximumHeight: 40
             Item { Layout.fillWidth: true }
             Rectangle {
                 Layout.preferredWidth: 130; Layout.preferredHeight: 36

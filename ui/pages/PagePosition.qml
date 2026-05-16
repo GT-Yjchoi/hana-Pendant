@@ -21,7 +21,9 @@ Rectangle {
             spacing: 8
 
             RowLayout {
-                Layout.fillWidth: true; spacing: 10
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 46; Layout.maximumHeight: 46
+                spacing: 10
                 Rectangle {
                     Layout.preferredWidth: 45; Layout.preferredHeight: 42; radius: 6
                     color: pPrev.pressed ? "#4D468CFF" : "#1AFFFFFF"
@@ -153,7 +155,9 @@ Rectangle {
             Layout.preferredWidth: 4; Layout.fillWidth: true; Layout.fillHeight: true
             spacing: 10
             RowLayout {
-                Layout.fillWidth: true; spacing: 10
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 44; Layout.maximumHeight: 44
+                spacing: 10
                 Text { text: "동작 순서"; color: "#E9EEF3"
                        font.pixelSize: 18; font.bold: true }
                 Item { Layout.fillWidth: true }
