@@ -824,7 +824,7 @@ Rectangle {
     Rectangle {
         id: ilOverlay
         anchors.fill: parent
-        color: "#E6111827"
+        color: "#111827"
         visible: settingsBackend ? settingsBackend.ilOpen : false
         MouseArea { anchors.fill: parent }   // 뒤 입력 차단
 
