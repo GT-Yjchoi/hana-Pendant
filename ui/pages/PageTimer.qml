@@ -11,24 +11,25 @@ Rectangle {
     property string activeName: timerBackend ? timerBackend.activeName : ""
     property bool blinkOn: timerBackend ? timerBackend.blinkOn : false
 
+    // 빈 상태 안내 (GridView.count 로 판정 — raw QAbstractListModel 은
+    //  QML 에 count 프로퍼티 없음. 레이아웃 밖 오버레이로 배치)
+    Text {
+        anchors.centerIn: parent
+        width: parent.width - 40
+        visible: gv.count === 0
+        horizontalAlignment: Text.AlignHCenter
+        text: "타이머가 없습니다.\n시퀀스 편집기 TMR 스텝에서 타이머를 추가하세요."
+        color: "#66FFFFFF"; font.pixelSize: 16
+        wrapMode: Text.WordWrap
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
         spacing: 8
 
-        // 빈 상태 안내
-        Text {
-            visible: timerModel ? timerModel.count === 0 : true
-            Layout.fillWidth: true; Layout.fillHeight: true
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            text: "타이머가 없습니다.\n시퀀스 편집기 TMR 스텝에서 타이머를 추가하세요."
-            color: "#66FFFFFF"; font.pixelSize: 16
-        }
-
         GridView {
             id: gv
-            visible: timerModel ? timerModel.count > 0 : false
             Layout.fillWidth: true; Layout.fillHeight: true
             clip: true
             model: timerModel
