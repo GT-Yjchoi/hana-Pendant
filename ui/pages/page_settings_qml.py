@@ -209,7 +209,7 @@ class SettingsBackend(QObject):
     @Slot(int)
     def toggleValveEnabled(self, i):
         self._p._v_enabled[i] = not self._p._v_enabled[i]
-        self._p._refresh_valve_model()
+        self._p._refresh_valve_row(i)
 
     @Slot(int)
     def editValveName(self, i):
@@ -218,7 +218,7 @@ class SettingsBackend(QObject):
     @Slot(int)
     def toggleValveMode(self, i):
         self._p._v_mode[i] = not self._p._v_mode[i]
-        self._p._refresh_valve_model()
+        self._p._refresh_valve_row(i)
 
     @Slot(int)
     def moveValveUp(self, i):
@@ -402,14 +402,17 @@ class PageSettingsQml(QWidget):
         self.update_language()
 
     # ---- 모델 갱신 ----
+    def _io_row(self, i):
+        xa = i if i < 16 else i + 16
+        ya = i if i < 16 else i + 16
+        return {"xaddr": f"X{xa:02X}", "inname": self._in_name[i],
+                "yaddr": f"Y{ya:02X}", "outname": self._out_name[i]}
+
     def _refresh_io_model(self):
-        rows = []
-        for i in range(32):
-            xa = i if i < 16 else i + 16
-            ya = i if i < 16 else i + 16
-            rows.append({"xaddr": f"X{xa:02X}", "inname": self._in_name[i],
-                         "yaddr": f"Y{ya:02X}", "outname": self._out_name[i]})
-        self._io_model.reset(rows)
+        self._io_model.reset([self._io_row(i) for i in range(32)])
+
+    def _refresh_io_row(self, i):
+        self._io_model.update_row(i, self._io_row(i))
 
     def _refresh_param_model(self):
         rows = []
@@ -420,14 +423,19 @@ class PageSettingsQml(QWidget):
         self._param_model.reset(rows)
         self._be.changed.emit()
 
+    def _valve_row(self, i):
+        ya = i if i < 16 else i + 16
+        return {"vyaddr": f"Y{ya:02X}", "venabled": self._v_enabled[i],
+                "vname": self._v_name[i], "vtoggle": self._v_mode[i],
+                "vjog": i in self._jog_order}
+
     def _refresh_valve_model(self):
-        rows = []
-        for i in range(32):
-            ya = i if i < 16 else i + 16
-            rows.append({"vyaddr": f"Y{ya:02X}", "venabled": self._v_enabled[i],
-                         "vname": self._v_name[i], "vtoggle": self._v_mode[i],
-                         "vjog": i in self._jog_order})
-        self._valve_model.reset(rows)
+        # 전체 reset — 로드/초기화 전용 (ListView 스크롤 맨위로 튐)
+        self._valve_model.reset([self._valve_row(i) for i in range(32)])
+
+    def _refresh_valve_row(self, i):
+        # 단일 행 dataChanged — 스크롤 위치 보존 (버튼 조작용)
+        self._valve_model.update_row(i, self._valve_row(i))
 
     def _refresh_alarm_model(self):
         from ui.overlays.alarm_overlay import USER_ALARMS
@@ -456,7 +464,7 @@ class PageSettingsQml(QWidget):
             new_name = dlg.get_text()
             if new_name:
                 self._v_name[idx] = new_name
-                self._refresh_valve_model()
+                self._refresh_valve_row(idx)
 
     def _move_valve_up(self, idx):
         if idx == 0:
@@ -472,7 +480,8 @@ class PageSettingsQml(QWidget):
         self._v_enabled[a], self._v_enabled[b] = self._v_enabled[b], self._v_enabled[a]
         self._v_name[a], self._v_name[b] = self._v_name[b], self._v_name[a]
         self._v_mode[a], self._v_mode[b] = self._v_mode[b], self._v_mode[a]
-        self._refresh_valve_model()
+        self._refresh_valve_row(a)
+        self._refresh_valve_row(b)
 
     def _on_jog_valve_toggled(self, valve_idx):
         # 원본 _on_jog_valve_toggled 와 동일 로직 (체크 상태는 멤버십으로 표현)
@@ -482,7 +491,7 @@ class PageSettingsQml(QWidget):
             self._jog_order.append(valve_idx)
         else:
             self._jog_order.remove(valve_idx)
-        self._refresh_valve_model()
+        self._refresh_valve_row(valve_idx)
 
     def _move_jog_order(self, valve_idx, direction):
         if valve_idx not in self._jog_order:
@@ -492,7 +501,7 @@ class PageSettingsQml(QWidget):
         if 0 <= new_pos < len(self._jog_order):
             self._jog_order[pos], self._jog_order[new_pos] = \
                 self._jog_order[new_pos], self._jog_order[pos]
-        self._refresh_valve_model()
+        self._refresh_valve_row(valve_idx)
 
     def _build_valve_config(self):
         valve_config = []
@@ -744,7 +753,7 @@ class PageSettingsQml(QWidget):
         dlg = TouchKeyboard(addr, parent=self)
         if dlg.exec() == QDialog.Accepted:
             arr[i] = dlg.get_text()
-            self._refresh_io_model()
+            self._refresh_io_row(i)
 
     def _apply_io_names(self):
         if not IOManager:
