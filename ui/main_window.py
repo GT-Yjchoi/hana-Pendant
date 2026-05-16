@@ -20,7 +20,7 @@ from ui.pages.page_mode_qml import PageModeQml
 from ui.pages.page_position import PagePosition
 from ui.pages.page_timer import PageTimer
 from ui.pages.page_packing import PagePacking
-from ui.pages.page_data import PageData
+from ui.pages.page_data_qml import PageDataQml
 from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY, normalize_all_sequences
 from ui.pages.page_manual_qml import PageManualQml
 from ui.pages.page_auto_qml import PageAutoQml
@@ -223,7 +223,7 @@ class MainWindow(QWidget):
             plc_client=self.plc_client
         )
 
-        self.pages["data"] = PageData(
+        self.pages["data"] = PageDataQml(
             sequence_data=self.master_sequence_data,
             position_points=self.master_position_points,
             timer_library=self.master_timer_library,
