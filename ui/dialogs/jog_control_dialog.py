@@ -64,36 +64,22 @@ class JogControlDialog(QWidget):
         line = QLabel(); line.setFixedHeight(2); line.setStyleSheet("background-color: #00E5FF;"); layout.addWidget(line)
         layout.addSpacing(10)
 
-        # 2. 주행 버튼
-        top_layout = QHBoxLayout(); top_layout.setSpacing(8)
-        self.btn_trav_neg = self._create_btn("주행 -", h=55)
-        self.btn_trav_pos = self._create_btn("주행 +", h=55)
-        top_layout.addWidget(self.btn_trav_neg); top_layout.addWidget(self.btn_trav_pos)
-        layout.addLayout(top_layout)
-        layout.addSpacing(15)
-
-        # 3. 십자키
-        cross_frame = QFrame()
-        cross_frame.setStyleSheet("background: rgba(255,255,255,0.03); border-radius: 12px; border: none;")
-        cross_layout = QGridLayout(cross_frame)
-        cross_layout.setSpacing(8); cross_layout.setContentsMargins(8, 8, 8, 8)
-        
-        btn_size = (70, 75)
-        self.btn_up = self._create_btn("상 (Z-)", btn_size)
-        self.btn_down = self._create_btn("하 (Z+)", btn_size)
-        self.btn_front = self._create_btn("전 (Y+)", btn_size)
-        self.btn_back = self._create_btn("후 (Y-)", btn_size)
-
-        cross_layout.addWidget(self.btn_up, 0, 1)       
-        cross_layout.addWidget(self.btn_front, 1, 0)   
-        cross_layout.addWidget(self.btn_back, 1, 2)    
-        cross_layout.addWidget(self.btn_down, 2, 1)    
-        
-        center_lbl = QLabel("MOVE")
-        center_lbl.setAlignment(Qt.AlignCenter)
-        center_lbl.setStyleSheet("color: #666; font-size: 11px;")
-        cross_layout.addWidget(center_lbl, 1, 1)
-        layout.addWidget(cross_frame, 0, Qt.AlignCenter)
+        # 2. 축 조그 버튼 — 위에서부터 1축~4축 (X / Y / Z / A).
+        #    각 행 [축− , 축+]. 라벨→DT205 비트 매핑은 _on_jog 에서만 하며
+        #    PLC write_bit 호출(영역 0x09 / 주소 205 / 모멘터리)은 기존과
+        #    한 글자도 다르지 않음(verbatim). 런너암/제품암 전환 제거.
+        axis_grid = QGridLayout()
+        axis_grid.setSpacing(8)
+        self._axis_btns = {}
+        for row, ax in enumerate(("X", "Y", "Z", "A")):
+            b_neg = self._create_btn(f"{ax} -", h=62)
+            b_pos = self._create_btn(f"{ax} +", h=62)
+            axis_grid.addWidget(b_neg, row, 0)
+            axis_grid.addWidget(b_pos, row, 1)
+            self._axis_btns[f"{ax} -"] = b_neg
+            self._axis_btns[f"{ax} +"] = b_pos
+        layout.addLayout(axis_grid)
+        layout.addSpacing(10)
         
         # ---------------------------------------------------------
         # 속도 조절 섹션 (1~5단)
@@ -125,33 +111,7 @@ class JogControlDialog(QWidget):
         layout.addLayout(speed_layout)
         layout.addSpacing(10)
 
-        # 런너암 전환 버튼
-        self.btn_runner_arm = QPushButton()
-        self.btn_runner_arm.setCheckable(True)
-        self.btn_runner_arm.setMinimumHeight(55)
-        self.btn_runner_arm.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(0,180,255,0.15);
-                border: 2px solid #00B4FF;
-                border-radius: 8px;
-                color: #00B4FF; font-weight: bold; font-size: 16px;
-            }
-            QPushButton:checked {
-                background-color: rgba(255,180,0,0.25);
-                border: 2px solid #FFB400;
-                color: #FFB400;
-            }
-            QPushButton:disabled {
-                background-color: rgba(255,255,255,0.03);
-                border: 2px solid rgba(255,255,255,0.08);
-                color: #555;
-            }
-        """)
-        self.btn_runner_arm.toggled.connect(self._on_arm_toggled)
-        self._on_arm_toggled(False)
-        layout.addWidget(self.btn_runner_arm)
-        layout.addSpacing(10)
-        # ---------------------------------------------------------
+        # (런너암/제품암 전환 버튼 제거 — 1~4축 평면 배치로 대체)
 
         # 4. 하단 밸브 버튼 (settings.json jog_valve=True 항목, 최대 6개)
         self._valve_btns = []
@@ -183,7 +143,6 @@ class JogControlDialog(QWidget):
         if self.plc_client and self._valve_btns:
             self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
             self._monitor_connected = True
-        self._init_runner_arm()
 
     def _load_jog_valves(self):
         """settings.json에서 jog_valve=True인 밸브를 jog_order 순으로 최대 6개 반환"""
@@ -323,27 +282,6 @@ class JogControlDialog(QWidget):
                 btn.setChecked(is_on)
                 btn.blockSignals(False)
 
-    def _on_arm_toggled(self, checked):
-        self.btn_runner_arm.setText("런너암 조작" if checked else "제품암 조작")
-
-    def _init_runner_arm(self):
-        """PLC 연결 전 settings.json으로 초기 활성화 여부 결정"""
-        import os, json
-        try:
-            path = get_settings_path()
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    s = json.load(f)
-                axis_uses = s.get("axis_uses", [True] * 8)
-                use_y2 = axis_uses[3] if len(axis_uses) > 3 else True
-                use_z2 = axis_uses[4] if len(axis_uses) > 4 else True
-                enabled = bool(use_y2 or use_z2)
-                self.btn_runner_arm.setEnabled(enabled)
-                if not enabled:
-                    self.btn_runner_arm.setChecked(False)
-        except Exception as e:
-            print(f"[JOG] Runner arm init error: {e}")
-
     def _create_btn(self, text, size=None, h=55):
         btn = QPushButton(text)
         if size: btn.setFixedSize(size[0], size[1])
@@ -398,19 +336,16 @@ class JogControlDialog(QWidget):
 
         target_addr = 205
         area_code = 0x09
-        
-        # 런너암 모드 여부 확인
-        is_runner = self.btn_runner_arm.isChecked()
 
-        bit_pos = -1
-
-        if name == "주행 +": bit_pos = 0
-        elif name == "주행 -": bit_pos = 1
-        elif name == "전 (Y+)": bit_pos = 6 if is_runner else 2
-        elif name == "후 (Y-)": bit_pos = 7 if is_runner else 3
-        elif name == "하 (Z+)": bit_pos = 8 if is_runner else 4
-        elif name == "상 (Z-)": bit_pos = 9 if is_runner else 5
-
+        # 라벨 → DT205 비트. 위에서부터 1축X / 2축Y / 3축Z / 4축A(=Y2축).
+        # 사용자 확정 매핑. 비트 번호는 기존(주행±=0/1, 제품암Y=2/3,
+        # 제품암Z=4/5, 런너암Y=6/7)을 그대로 계승 — write_bit 호출 verbatim.
+        bit_pos = {
+            "X +": 0, "X -": 1,
+            "Y +": 2, "Y -": 3,
+            "Z +": 4, "Z -": 5,
+            "A +": 6, "A -": 7,
+        }.get(name, -1)
 
         if bit_pos >= 0:
             try:
