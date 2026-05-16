@@ -125,6 +125,7 @@ class SettingsBackend(QObject):
     eMethod = Property(str, lambda s: s._p._e["method"], notify=changed)
     eGw = Property(str, lambda s: s._p._e["gw"], notify=changed)
     eConn = Property(str, lambda s: s._p._e["conn"], notify=changed)
+    netPriority = Property(str, lambda s: s._p._net_prio, notify=changed)
     ilOpen = Property(bool, lambda s: s._p._il_open, notify=changed)
 
     # ---- 슬롯: 전부 page 의 verbatim 로직 호출 ----
@@ -332,6 +333,7 @@ class PageSettingsQml(QWidget):
                    "toggle": "연결"}
         self._e = {"iface": "-", "state": "-", "scolor": "#DDDDDD", "ip": "-",
                    "method": "-", "gw": "-", "conn": "-"}
+        self._net_prio = "wifi"  # 인터넷 우선(기본 무선). 탭 진입 시 실측 반영.
         self._last_wifi_ssid = ""
         self._wifi = None
         self._scan_worker = None
@@ -1109,7 +1111,9 @@ class PageSettingsQml(QWidget):
          "toggleWifi": self._toggle_wifi_connection,
          "refreshEth": self._refresh_eth_status,
          "ethDhcp": self._apply_eth_dhcp,
-         "ethStatic": self._open_eth_static_dialog}.get(key, lambda: None)()
+         "ethStatic": self._open_eth_static_dialog,
+         "prioWifi": lambda: self._set_net_priority("wifi"),
+         "prioEth": lambda: self._set_net_priority("eth")}.get(key, lambda: None)()
 
     def _refresh_wifi_status(self):
         w = self._ensure_wifi()
@@ -1321,6 +1325,35 @@ class PageSettingsQml(QWidget):
             self._show_wifi_msg("실패", res.get("error", "알 수 없는 오류"))
         self._refresh_eth_status()
 
+    def _refresh_net_priority(self):
+        w = self._ensure_wifi()
+        if not w:
+            return
+        try:
+            self._net_prio = w.get_internet_priority()
+        except Exception:
+            pass
+        self._be.changed.emit()
+
+    def _set_net_priority(self, prefer):
+        w = self._ensure_wifi()
+        if not w:
+            return
+        # PLC IP(일반설정에서 설정된 값)를 eth0 호스트 라우트로 고정 → 무선
+        # 우선이어도 PLC 통신은 eth0 보장.
+        plc_ip = (self._ip or "").strip()
+        res = w.set_internet_priority(prefer, plc_ip)
+        if res.get("ok") == "1":
+            label = "무선(WiFi)" if prefer == "wifi" else "유선(Ethernet)"
+            extra = (f"\nPLC({plc_ip})는 유선(eth0)으로 고정됩니다."
+                     if prefer == "wifi" and plc_ip else "")
+            self._show_wifi_msg("인터넷 우선순위",
+                                f"인터넷 우선을 {label}로 설정했습니다.{extra}")
+        else:
+            self._show_wifi_msg("실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_net_priority()
+        self._refresh_eth_status()
+
     # ===================================================================
     # 탭/표시 (page_settings 와 동일 동작)
     # ===================================================================
@@ -1333,6 +1366,7 @@ class PageSettingsQml(QWidget):
         if index == 6:
             self._refresh_wifi_status()
             self._refresh_eth_status()
+            self._refresh_net_priority()
             self._scan_wifi(silent=True)
             self._start_auto_scan()
         else:
@@ -1350,6 +1384,7 @@ class PageSettingsQml(QWidget):
         if self._cur_tab == 6:
             self._refresh_wifi_status()
             self._refresh_eth_status()
+            self._refresh_net_priority()
             self._start_auto_scan()
         super().showEvent(event)
 

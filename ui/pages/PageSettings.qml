@@ -806,6 +806,39 @@ Rectangle {
                         }
                         RowLayout {
                             Layout.fillWidth: true; spacing: 10
+                            Text { text: "인터넷 우선:"; color: "#DDDDDD"
+                                   font.pixelSize: 14 }
+                            Repeater {
+                                model: [["무선(WiFi)","wifi","prioWifi"],
+                                        ["유선(Ethernet)","eth","prioEth"]]
+                                delegate: Rectangle {
+                                    Layout.preferredWidth: 140; Layout.preferredHeight: 38
+                                    radius: 6
+                                    property bool sel: settingsBackend
+                                        && settingsBackend.netPriority === modelData[1]
+                                    color: sel ? "#3346D17A"
+                                        : (npMa.pressed ? "#33468CFF" : "#2E468CFF")
+                                    border.width: 1
+                                    border.color: sel ? "#CC46D17A" : "#99468CFF"
+                                    Text { anchors.centerIn: parent; text: modelData[0]
+                                        color: sel ? "#CFFFE0" : "#DDEEFF"
+                                        font.pixelSize: 14; font.bold: true }
+                                    MouseArea { id: npMa; anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.wifiBtn(modelData[2]) }
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "무선 우선: 인터넷=WiFi, PLC=유선(eth0) 고정 · " +
+                                  "유선 우선: 인터넷·통신 모두 eth0"
+                            color: "#999999"; font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 10
                             Repeater {
                                 model: [["새로고침","refreshEth"],["DHCP 사용","ethDhcp"],
                                         ["고정 IP 설정","ethStatic"]]

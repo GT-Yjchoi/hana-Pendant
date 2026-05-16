@@ -275,3 +275,133 @@ def set_ethernet_static(ip: str, prefix: int, gateway: str, dns: str = "") -> Di
     if r.returncode == 0:
         return {"ok": "1"}
     return {"ok": "0", "error": (r.stderr or r.stdout).strip()}
+
+
+# --- 인터넷 우선순위(유선/무선) -------------------------------------------------
+# eth0(PLC망)·wlan0 가 같은 192.168.0.x 대역이면, 어느 인터페이스가 그 대역
+# (인터넷 게이트웨이 포함)을 가져갈지는 ipv4.route-metric(낮을수록 우선)으로
+# 결정된다. NM 기본값은 이더넷≈100 < WiFi=600 이라, eth0 가 올라오면 게이트웨이
+# 까지 eth0(인터넷 없음)로 가버려 인터넷이 끊긴다. 아래 함수로 영구 조정.
+_PRIO_HIGH = 100   # 우선(낮은 메트릭)
+_PRIO_LOW = 700    # 비우선(WiFi 기본 600 보다 높게 두어 확실히 양보)
+
+
+def _first_wifi_device() -> str:
+    try:
+        r = _run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"], timeout=3)
+        for line in r.stdout.strip().splitlines():
+            parts = line.split(":")
+            if len(parts) >= 2 and parts[1] == "wifi":
+                return parts[0]
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+    return "wlan0"
+
+
+def _wifi_profile(iface: str) -> str:
+    act = _active_connection_for(iface)
+    if act:
+        return act
+    try:
+        r = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], timeout=3)
+        for line in r.stdout.strip().splitlines():
+            parts = line.rsplit(":", 1)
+            if len(parts) == 2 and parts[1] == "802-11-wireless":
+                return parts[0]
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+    return ""
+
+
+def _conn_field(conn: str, field: str) -> str:
+    if not conn:
+        return ""
+    try:
+        r = _run(["nmcli", "-g", field, "connection", "show", conn], timeout=3)
+        return r.stdout.strip()
+    except (subprocess.TimeoutExpired, Exception):
+        return ""
+
+
+def _device_state(iface: str) -> str:
+    try:
+        r = _run(["nmcli", "-t", "-f", "DEVICE,STATE", "device"], timeout=3)
+        for line in r.stdout.strip().splitlines():
+            p = line.split(":", 1)
+            if len(p) == 2 and p[0] == iface:
+                return p[1]
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+    return ""
+
+
+def set_internet_priority(prefer: str, plc_ip: str = "") -> Dict[str, str]:
+    """인터넷(공유 대역·기본 라우트) 우선 인터페이스 설정. 영구 저장.
+
+    prefer="wifi": WiFi 가 대역/기본 라우트 우선. eth0 는 never-default 로
+        인터넷을 절대 제공하지 않게 하고, plc_ip 가 주어지면 그 호스트(/32)
+        만 eth0 로 강제 고정 → PLC 통신은 eth0, 인터넷은 WiFi 로 분리.
+    prefer="eth": eth0 가 우선(메트릭↓). PLC 호스트 라우트는 제거.
+    """
+    eth_iface = _first_ethernet_device()
+    wifi_iface = _first_wifi_device()
+    eth_conn = _ethernet_profile(eth_iface)
+    wifi_conn = _wifi_profile(wifi_iface)
+    if not eth_conn:
+        return {"ok": "0", "error": "이더넷 연결 프로파일을 찾지 못했습니다."}
+
+    try:
+        if prefer == "wifi":
+            eth_args = ["nmcli", "connection", "modify", eth_conn,
+                        "ipv4.route-metric", str(_PRIO_LOW),
+                        "ipv4.never-default", "yes"]
+            if plc_ip:
+                eth_args += ["ipv4.routes", f"{plc_ip}/32"]
+            else:
+                eth_args += ["ipv4.routes", ""]
+            _run(eth_args, timeout=10)
+            if wifi_conn:
+                _run(["nmcli", "connection", "modify", wifi_conn,
+                      "ipv4.route-metric", str(_PRIO_HIGH),
+                      "ipv4.never-default", "no"], timeout=10)
+        elif prefer == "eth":
+            _run(["nmcli", "connection", "modify", eth_conn,
+                  "ipv4.route-metric", str(_PRIO_HIGH),
+                  "ipv4.never-default", "no",
+                  "ipv4.routes", ""], timeout=10)
+            if wifi_conn:
+                _run(["nmcli", "connection", "modify", wifi_conn,
+                      "ipv4.route-metric", str(_PRIO_LOW),
+                      "ipv4.never-default", "no"], timeout=10)
+        else:
+            return {"ok": "0", "error": f"알 수 없는 우선순위: {prefer}"}
+
+        # 연결된 인터페이스에만 즉시 재적용(reapply 는 링크 유지·비차단).
+        # eth0 가 DHCP 미응답으로 멈춰 있을 수 있어 connection up 은 피한다.
+        for ifc, cn in ((wifi_iface, wifi_conn), (eth_iface, eth_conn)):
+            if cn and _device_state(ifc) == "connected":
+                _run(["nmcli", "device", "reapply", ifc], timeout=15)
+    except subprocess.TimeoutExpired:
+        return {"ok": "0", "error": "시간 초과"}
+    return {"ok": "1"}
+
+
+def get_internet_priority() -> str:
+    """현재 우선순위 추정: eth0 가 never-default=yes 거나 메트릭이 WiFi 보다
+    크면 'wifi', 아니면 'eth'. 미설정(기본)일 땐 NM 기본값 기준 'eth'."""
+    eth_conn = _ethernet_profile(_first_ethernet_device())
+    wifi_conn = _wifi_profile(_first_wifi_device())
+    eth_nd = _conn_field(eth_conn, "ipv4.never-default")
+    if eth_nd == "yes":
+        return "wifi"
+
+    def _m(v: str, default: int) -> int:
+        try:
+            n = int(v)
+            return default if n < 0 else n
+        except (ValueError, TypeError):
+            return default
+
+    em = _m(_conn_field(eth_conn, "ipv4.route-metric"), 100)
+    wm = _m(_conn_field(wifi_conn, "ipv4.route-metric"), 600)
+    return "wifi" if wm < em else "eth"
