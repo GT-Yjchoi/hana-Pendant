@@ -58,17 +58,19 @@ Rectangle {
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 10; spacing: 20
                     // PLC
-                    GroupBox {
+                    ColumnLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: false
                         Layout.preferredHeight: 100
                         Layout.minimumHeight: 100
-                        topPadding: 34
-                        label: Text { text: "PLC 통신 설정"; color: "#00E5FF"
-                                      font.pixelSize: 15; font.bold: true }
-                        background: Rectangle { color: "transparent"; radius: 8
-                            border.color: "#6600E5FF"; border.width: 1 }
-                        RowLayout {
+                        spacing: 4
+                        Text { text: "PLC 통신 설정"; color: "#00E5FF"
+                               font.pixelSize: 15; font.bold: true }
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.fillHeight: true
+                            color: "transparent"; radius: 8
+                            border.color: "#6600E5FF"; border.width: 1
+                            RowLayout {
                             anchors.fill: parent; anchors.margins: 8; spacing: 12
                             Text { text: "IP 주소:"; color: "white"; font.pixelSize: 14 }
                             Rectangle {
@@ -115,19 +117,22 @@ Rectangle {
                                 font.pixelSize: 14; font.bold: true
                             }
                             Item { Layout.fillWidth: true }
+                            }
                         }
                     }
                     // 언어
-                    GroupBox {
+                    ColumnLayout {
                         Layout.fillWidth: true; Layout.fillHeight: false
                         Layout.preferredHeight: 92
                         Layout.minimumHeight: 92
-                        topPadding: 34
-                        label: Text { text: "환경 설정"; color: "#DDDDDD"
-                                      font.pixelSize: 15; font.bold: true }
-                        background: Rectangle { color: "transparent"; radius: 8
-                            border.color: "#26FFFFFF"; border.width: 1 }
-                        RowLayout {
+                        spacing: 4
+                        Text { text: "환경 설정"; color: "#DDDDDD"
+                               font.pixelSize: 15; font.bold: true }
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.fillHeight: true
+                            color: "transparent"; radius: 8
+                            border.color: "#26FFFFFF"; border.width: 1
+                            RowLayout {
                             anchors.fill: parent; anchors.margins: 8; spacing: 12
                             Text { text: "언어 (Language)"; color: "white"
                                    font.pixelSize: 14; font.bold: true }
@@ -150,19 +155,22 @@ Rectangle {
                                 }
                             }
                             Item { Layout.fillWidth: true }
+                            }
                         }
                     }
                     // 시스템
-                    GroupBox {
+                    ColumnLayout {
                         Layout.fillWidth: true; Layout.fillHeight: false
                         Layout.preferredHeight: 95
                         Layout.minimumHeight: 95
-                        topPadding: 34
-                        label: Text { text: "시스템"; color: "#FF8080"
-                                      font.pixelSize: 15; font.bold: true }
-                        background: Rectangle { color: "transparent"; radius: 8
-                            border.color: "#4DFF4646"; border.width: 1 }
-                        RowLayout {
+                        spacing: 4
+                        Text { text: "시스템"; color: "#FF8080"
+                               font.pixelSize: 15; font.bold: true }
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.fillHeight: true
+                            color: "transparent"; radius: 8
+                            border.color: "#4DFF4646"; border.width: 1
+                            RowLayout {
                             anchors.fill: parent; anchors.margins: 8
                             Text { text: "프로그램 종료"; color: "#FF8080"
                                    font.pixelSize: 14; font.bold: true }
@@ -175,6 +183,7 @@ Rectangle {
                                        color: "#FF4646"; font.pixelSize: 15; font.bold: true }
                                 MouseArea { id: exMa; anchors.fill: parent
                                     onClicked: if (settingsBackend) settingsBackend.exitClicked() }
+                            }
                             }
                         }
                     }
