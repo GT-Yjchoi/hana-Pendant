@@ -95,7 +95,7 @@ Rectangle {
                         }
                         Text {
                             text: model.label; color: "#E9EEF3"
-                            font.pixelSize: 15
+                            font.pixelSize: 19
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
@@ -123,7 +123,7 @@ Rectangle {
                         }
                         Text {
                             text: model.label; color: "#E9EEF3"
-                            font.pixelSize: 15
+                            font.pixelSize: 19
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }

@@ -64,7 +64,7 @@ Rectangle {
                         Rectangle { width: 34; height: 22; radius: 10
                             color: model.on ? "#F5468CFF" : "#E6000000"
                             border.width: 1; border.color: model.on ? "#DC8CC8FF" : "#23FFFFFF" }
-                        Text { text: model.label; color: "#E9EEF3"; font.pixelSize: 15
+                        Text { text: model.label; color: "#E9EEF3"; font.pixelSize: 19
                                anchors.verticalCenter: parent.verticalCenter }
                     }
                 }
@@ -82,7 +82,7 @@ Rectangle {
                         Rectangle { width: 34; height: 22; radius: 10
                             color: model.on ? "#F5FF6923" : "#E6000000"
                             border.width: 1; border.color: model.on ? "#DCFFAA78" : "#23FFFFFF" }
-                        Text { text: model.label; color: "#E9EEF3"; font.pixelSize: 15
+                        Text { text: model.label; color: "#E9EEF3"; font.pixelSize: 19
                                anchors.verticalCenter: parent.verticalCenter }
                     }
                 }
