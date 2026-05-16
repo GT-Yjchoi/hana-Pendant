@@ -30,10 +30,15 @@ class TimerEditDialog(QWidget):
 
     def __init__(self, timer_name, current_val_ms, parent=None):
         super().__init__(parent)
-        if parent:
-            self.resize(parent.size())
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        # QQuickWidget(QML) 호스트 위에서 자식 오버레이는 첫 입력이 QML 씬으로
+        # 가로채여 먹힘. OverlayDialog(앱 내 검증됨)와 동일하게 top-level
+        # 프레임리스 모달 윈도우로 띄워 입력을 정상 수신.
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
 
         self.current_ms = int(current_val_ms)
@@ -141,6 +146,15 @@ class TimerEditDialog(QWidget):
 
         main_layout.addWidget(self.container)
         self._update_display()
+
+    def paintEvent(self, event):
+        # OverlayDialog 와 동일: 캡처한 화면 위에 반투명 어둠 → 페이지가
+        # 비쳐 보이는 기존 룩 유지 (top-level 윈도우라 stylesheet rgba 불가)
+        from PySide6.QtGui import QPainter, QColor
+        p = QPainter(self)
+        if self._bg_pixmap:
+            p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
 
     def exec(self):
         self.show()

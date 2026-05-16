@@ -63,13 +63,16 @@ STYLE_RED_ON    = "background-color: #E74C3C; color: white; border: 3px solid #C
 class AutoConfirmOverlay(QWidget):
     def __init__(self, title, message, parent=None):
         super().__init__(parent)
-        if parent:
-            self.resize(parent.size())
-            
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        # QQuickWidget(QML) 호스트 위 자식 오버레이 첫입력 가로채임 방지 —
+        # OverlayDialog 와 동일하게 top-level 프레임리스 모달로.
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
-        
+
         self.result = False
         self._event_loop = None
         
@@ -118,6 +121,13 @@ class AutoConfirmOverlay(QWidget):
         vbox.addLayout(btn_layout)
         
         layout.addWidget(container)
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor
+        p = QPainter(self)
+        if self._bg_pixmap:
+            p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
 
     def accept(self):
         self.result = True
