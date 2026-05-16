@@ -522,7 +522,8 @@ Rectangle {
                                         MouseArea { anchors.fill: parent
                                             onClicked: if (settingsBackend)
                                                 settingsBackend.toggleValveMode(index) } }
-                                    RowLayout { Layout.preferredWidth: 76; spacing: 3
+                                    RowLayout { Layout.preferredWidth: 76
+                                        Layout.fillWidth: false; spacing: 3
                                         Rectangle { Layout.fillWidth: true; height: 30
                                             radius: 4; color: vuMa.pressed ? "#33468CFF" : "#1AFFFFFF"
                                             border.color: "#666666"; border.width: 1
@@ -539,7 +540,8 @@ Rectangle {
                                             MouseArea { id: vdMa; anchors.fill: parent
                                                 onClicked: if (settingsBackend)
                                                     settingsBackend.moveValveDown(index) } } }
-                                    RowLayout { Layout.preferredWidth: 96; spacing: 3
+                                    RowLayout { Layout.preferredWidth: 96
+                                        Layout.fillWidth: false; spacing: 3
                                         Rectangle { Layout.fillWidth: true; height: 33
                                             radius: 4
                                             property bool j: model.vjog
@@ -813,6 +815,137 @@ Rectangle {
                         }
                         Item { Layout.preferredHeight: 10 }
                     }
+                }
+            }
+        }
+    }
+
+    // ===== 인터록 그룹 설정 오버레이 (별도 윈도우 X — 같은 씬 내 풀스크린) =====
+    Rectangle {
+        id: ilOverlay
+        anchors.fill: parent
+        color: "#E6111827"
+        visible: settingsBackend ? settingsBackend.ilOpen : false
+        MouseArea { anchors.fill: parent }   // 뒤 입력 차단
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 8
+
+            RowLayout {
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 40
+                Text { text: "인터록 그룹 설정"; color: "#00E5FF"
+                       font.pixelSize: 20; font.bold: true }
+                Item { Layout.fillWidth: true }
+                Rectangle {
+                    Layout.preferredWidth: 110; Layout.preferredHeight: 34
+                    radius: 6; color: ilClr.pressed ? "#66FF4646" : "#33FF4646"
+                    border.color: "#FF4646"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "전체 해제"
+                           color: "#FF4646"; font.pixelSize: 13; font.bold: true }
+                    MouseArea { id: ilClr; anchors.fill: parent
+                        onClicked: if (settingsBackend) settingsBackend.ilClear() }
+                }
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#374151" }
+
+            RowLayout {
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 96; spacing: 8
+                Repeater {
+                    model: ilGroupModel
+                    delegate: Rectangle {
+                        Layout.preferredWidth: 112; Layout.fillHeight: true
+                        radius: 8; color: model.gcardbg
+                        border.color: model.gcardborder; border.width: 1
+                        ColumnLayout {
+                            anchors.fill: parent; anchors.margins: 6; spacing: 4
+                            Rectangle {
+                                Layout.fillWidth: true; Layout.preferredHeight: 24
+                                radius: 5; color: model.glabelbg
+                                Text { anchors.centerIn: parent; text: model.glabel
+                                       color: "white"; font.pixelSize: 15; font.bold: true }
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true; Layout.preferredHeight: 30
+                                radius: 5; color: model.exbg
+                                border.color: model.exborder; border.width: model.exbw
+                                Text { anchors.centerIn: parent; text: model.extext
+                                       color: model.exfg; font.pixelSize: 12; font.bold: true }
+                                MouseArea { anchors.fill: parent
+                                    onClicked: if (settingsBackend)
+                                        settingsBackend.ilToggleExcl(model.gnum) }
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true; Layout.preferredHeight: 30
+                                radius: 5; color: model.mnbg
+                                border.color: model.mnborder; border.width: model.mnbw
+                                Text { anchors.centerIn: parent; text: model.mntext
+                                       color: model.mnfg; font.pixelSize: 12; font.bold: true }
+                                MouseArea { anchors.fill: parent
+                                    onClicked: if (settingsBackend)
+                                        settingsBackend.ilToggleMand(model.gnum) }
+                            }
+                        }
+                    }
+                }
+                Item { Layout.fillWidth: true }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "모드 버튼을 탭하면 그룹 순환 (없음 → G1 → … → G8 → 없음).  "
+                    + "배타: 하나 ON 시 나머지 자동 OFF.  필수: 마지막 하나는 끌 수 없음."
+                color: "#9CA3AF"; font.pixelSize: 13; wrapMode: Text.WordWrap
+            }
+
+            GridView {
+                id: ilGv
+                Layout.fillWidth: true; Layout.fillHeight: true
+                clip: true; model: ilModeModel
+                cacheBuffer: 2000
+                boundsBehavior: Flickable.StopAtBounds
+                cellWidth: Math.floor(width / 4)
+                cellHeight: 76
+                delegate: Item {
+                    width: ilGv.cellWidth; height: ilGv.cellHeight
+                    Rectangle {
+                        anchors.fill: parent; anchors.margins: 5
+                        radius: 8; color: model.mbg
+                        border.color: model.mborder; border.width: model.mbw
+                        Text { anchors.centerIn: parent
+                               horizontalAlignment: Text.AlignHCenter
+                               text: model.mtext; color: model.mfg
+                               font.pixelSize: 13; font.bold: true }
+                        MouseArea { anchors.fill: parent
+                            onClicked: if (settingsBackend)
+                                settingsBackend.ilCycle(index) }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 46; spacing: 10
+                Rectangle {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    radius: 8; color: ilCx.pressed ? "#33FFFFFF" : "#14FFFFFF"
+                    border.color: "#555555"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "취소"
+                           color: "#CCCCCC"; font.pixelSize: 16; font.bold: true }
+                    MouseArea { id: ilCx; anchors.fill: parent
+                        onClicked: if (settingsBackend) settingsBackend.ilReject() }
+                }
+                Rectangle {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    radius: 8; color: ilOk.pressed ? "#5900E5FF" : "#2600E5FF"
+                    border.color: "#00E5FF"; border.width: 1
+                    Text { anchors.centerIn: parent; text: "저장"
+                           color: "#00E5FF"; font.pixelSize: 16; font.bold: true }
+                    MouseArea { id: ilOk; anchors.fill: parent
+                        onClicked: if (settingsBackend) settingsBackend.ilAccept() }
                 }
             }
         }

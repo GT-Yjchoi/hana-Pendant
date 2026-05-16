@@ -125,6 +125,7 @@ class SettingsBackend(QObject):
     eMethod = Property(str, lambda s: s._p._e["method"], notify=changed)
     eGw = Property(str, lambda s: s._p._e["gw"], notify=changed)
     eConn = Property(str, lambda s: s._p._e["conn"], notify=changed)
+    ilOpen = Property(bool, lambda s: s._p._il_open, notify=changed)
 
     # ---- 슬롯: 전부 page 의 verbatim 로직 호출 ----
     @Slot(int)
@@ -259,6 +260,30 @@ class SettingsBackend(QObject):
     def openInterlock(self):
         self._p._open_interlock_dialog()
 
+    @Slot(int)
+    def ilCycle(self, idx):
+        self._p._il_cycle(idx)
+
+    @Slot(int)
+    def ilToggleExcl(self, g):
+        self._p._il_toggle_excl(g)
+
+    @Slot(int)
+    def ilToggleMand(self, g):
+        self._p._il_toggle_mand(g)
+
+    @Slot()
+    def ilClear(self):
+        self._p._il_clear()
+
+    @Slot()
+    def ilAccept(self):
+        self._p._il_accept()
+
+    @Slot()
+    def ilReject(self):
+        self._p._il_reject()
+
     @Slot(str)
     def wifiBtn(self, key):
         self._p._wifi_btn(key)
@@ -314,6 +339,15 @@ class PageSettingsQml(QWidget):
         self._eth_status_worker = None
         self._wifi_nets = []
 
+        # ---- 인터록 오버레이 상태 (별도 윈도우 X) ----
+        self._il_open = False
+        self._il_groups = []
+        self._il_mandatory = []
+        self._il_exclusive = []
+        self._il_get_name = None
+        self._il_colors = []
+        self._il_max_group = 8
+
         # ---- 모델 ----
         self._io_model = _ListModel(["xaddr", "inname", "yaddr", "outname"], self)
         self._param_model = _ListModel(
@@ -322,6 +356,12 @@ class PageSettingsQml(QWidget):
             ["vyaddr", "venabled", "vname", "vtoggle", "vjog"], self)
         self._alarm_model = _ListModel(["ano", "amsg", "anoraw"], self)
         self._wifi_model = _ListModel(["wtext"], self)
+        self._il_mode_model = _ListModel(
+            ["mtext", "mbg", "mborder", "mbw", "mfg"], self)
+        self._il_grp_model = _ListModel(
+            ["gnum", "glabel", "gcardbg", "gcardborder", "glabelbg",
+             "extext", "exbg", "exborder", "exbw", "exfg",
+             "mntext", "mnbg", "mnborder", "mnbw", "mnfg"], self)
         self._be = SettingsBackend(self)
         self._be.sig_valve_config_changed.connect(self.sig_valve_config_changed)
 
@@ -335,6 +375,8 @@ class PageSettingsQml(QWidget):
         ctx.setContextProperty("valveModel", self._valve_model)
         ctx.setContextProperty("alarmModel", self._alarm_model)
         ctx.setContextProperty("wifiModel", self._wifi_model)
+        ctx.setContextProperty("ilModeModel", self._il_mode_model)
+        ctx.setContextProperty("ilGroupModel", self._il_grp_model)
         ctx.setContextProperty("settingsBackend", self._be)
         self._view.setSource(QUrl.fromLocalFile(_QML_PATH))
 
@@ -808,63 +850,149 @@ class PageSettingsQml(QWidget):
                           parent=self).exec()
 
     # ===================================================================
-    # 인터록 — page_settings 와 동일 (InterlockDialog 재사용)
+    # 인터록 — 같은 QML 씬 내 풀스크린 오버레이 (별도 윈도우 X).
+    # 그룹순환/배타/필수/전체해제 로직은 page_mode.InterlockDialog 와 동일.
     # ===================================================================
-    def _open_interlock_dialog(self):
+    _IL_COLORS = [None, "#E74C3C", "#3498DB", "#2ECC71", "#F39C12",
+                  "#9B59B6", "#1ABC9C", "#E67E22", "#E91E63"]
+    _IL_DEFNAMES = [
+        "제품측 취출", "런너측 취출", "주행 대기", "하강 대기", "주행도중개방",
+        "복귀도중개방", "안전도어 회피", "안전도어 회피2", "낙하측 반전",
+        "주행도중 반전", "취출대기 반전", "고정측 취출", "제품 형내개방",
+        "런너 형내개방", "에젝터 연동", "언더컷 취출모드", "척1 사용",
+        "척1 감지", "척2 사용", "척2 감지", "척3 사용", "척3 감지",
+        "척4 사용", "척4 감지", "흡착1 사용", "흡착1 감지", "흡착2 사용",
+        "흡착2 감지", "흡착3 사용", "흡착3 감지", "흡착4 사용", "흡착4 감지",
+        "2포인트 개방", "공정감시 모드"]
+
+    @staticmethod
+    def _il_alpha(hex_color, aa):
+        return "#" + aa + hex_color[1:]
+
+    def _il_name(self, idx):
         try:
-            from ui.pages.page_mode import TOTAL_SLOTS
-            from ui.pages.interlock_dialog_qml import InterlockDialogQml as InterlockDialog
-        except ImportError:
-            return
-        _GROUP_COLORS = [None, "#E74C3C", "#3498DB", "#2ECC71", "#F39C12",
-                         "#9B59B6", "#1ABC9C", "#E67E22", "#E91E63"]
+            from utils.mode_manager import ModeManager
+            m = ModeManager.instance()
+            if m:
+                return m.get_name(idx)
+        except Exception:
+            pass
+        return (self._IL_DEFNAMES[idx] if idx < len(self._IL_DEFNAMES)
+                else f"User Mode {idx-33}")
 
-        def _load():
-            try:
-                with open(_get_settings_path(), "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                g = d.get("interlock_groups", [0] * TOTAL_SLOTS)
-                m = d.get("interlock_mandatory", [False] * 9)
-                e = d.get("interlock_exclusive", [True] * 9)
-                if len(g) < TOTAL_SLOTS:
-                    g += [0] * (TOTAL_SLOTS - len(g))
-                if len(m) < 9:
-                    m += [False] * (9 - len(m))
-                if len(e) < 9:
-                    e += [True] * (9 - len(e))
-                return g[:TOTAL_SLOTS], m[:9], e[:9]
-            except Exception:
-                return [0] * TOTAL_SLOTS, [False] * 9, [True] * 9
+    def _open_interlock_dialog(self):
+        from ui.pages.page_mode import TOTAL_SLOTS
+        try:
+            with open(_get_settings_path(), "r", encoding="utf-8") as f:
+                d = json.load(f)
+            g = d.get("interlock_groups", [0] * TOTAL_SLOTS)
+            m = d.get("interlock_mandatory", [False] * 9)
+            e = d.get("interlock_exclusive", [True] * 9)
+            if len(g) < TOTAL_SLOTS:
+                g += [0] * (TOTAL_SLOTS - len(g))
+            if len(m) < 9:
+                m += [False] * (9 - len(m))
+            if len(e) < 9:
+                e += [True] * (9 - len(e))
+            self._il_groups, self._il_mandatory, self._il_exclusive = \
+                g[:TOTAL_SLOTS], m[:9], e[:9]
+        except Exception:
+            self._il_groups = [0] * TOTAL_SLOTS
+            self._il_mandatory = [False] * 9
+            self._il_exclusive = [True] * 9
+        self._il_colors = self._IL_COLORS
+        self._il_max_group = len(self._IL_COLORS) - 1
+        self._il_total = TOTAL_SLOTS
+        self._il_build_groups()
+        self._il_refresh_all()
+        self._il_open = True
+        self._be.changed.emit()
 
-        def _get_mode_name(idx):
-            default = [
-                "제품측 취출", "런너측 취출", "주행 대기", "하강 대기", "주행도중개방",
-                "복귀도중개방", "안전도어 회피", "안전도어 회피2", "낙하측 반전",
-                "주행도중 반전", "취출대기 반전", "고정측 취출", "제품 형내개방",
-                "런너 형내개방", "에젝터 연동", "언더컷 취출모드", "척1 사용",
-                "척1 감지", "척2 사용", "척2 감지", "척3 사용", "척3 감지",
-                "척4 사용", "척4 감지", "흡착1 사용", "흡착1 감지", "흡착2 사용",
-                "흡착2 감지", "흡착3 사용", "흡착3 감지", "흡착4 사용", "흡착4 감지",
-                "2포인트 개방", "공정감시 모드"]
-            try:
-                from utils.mode_manager import ModeManager
-                m = ModeManager.instance()
-                if m:
-                    return m.get_name(idx)
-            except Exception:
-                pass
-            return default[idx] if idx < len(default) else f"User Mode {idx-33}"
+    # ---- 표시 계산 (page_mode.InterlockDialog 의 _refresh_* 와 동일 결과) ----
+    def _il_mode_cell(self, idx):
+        grp = self._il_groups[idx]
+        name = self._il_name(idx)
+        if grp > 0:
+            tags = []
+            if self._il_exclusive[grp]:
+                tags.append("⊗")
+            if self._il_mandatory[grp]:
+                tags.append("★")
+            suffix = " " + "".join(tags) if tags else ""
+        else:
+            suffix = ""
+        if grp == 0:
+            return {"mtext": f"{name}\n—", "mbg": "#0DFFFFFF",
+                    "mborder": "#26FFFFFF", "mbw": 1, "mfg": "#9CA3AF"}
+        c = self._il_colors[grp]
+        return {"mtext": f"{name}\nG{grp}{suffix}",
+                "mbg": self._il_alpha(c, "33"), "mborder": c, "mbw": 2,
+                "mfg": c}
 
-        groups, mandatory, exclusive = _load()
-        dlg = InterlockDialog(groups, mandatory, exclusive, _get_mode_name,
-                              _GROUP_COLORS, parent=self)
-        if dlg.exec() == QDialog.Accepted:
-            path = _get_settings_path()
-            data = load_json(path) or {}
-            data["interlock_groups"] = dlg.get_groups()
-            data["interlock_mandatory"] = dlg.get_mandatory()
-            data["interlock_exclusive"] = dlg.get_exclusive()
-            save_json(path, data)
+    def _il_grp_card(self, g):
+        c = self._il_colors[g]
+        d = {"gnum": g, "glabel": f"G{g}",
+             "gcardbg": self._il_alpha(c, "22"),
+             "gcardborder": self._il_alpha(c, "66"), "glabelbg": c}
+        if self._il_exclusive[g]:
+            d.update(extext="배타 ON ⊗", exbg=c, exborder=c, exbw=0,
+                     exfg="white")
+        else:
+            d.update(extext="배타 OFF", exbg="#14FFFFFF", exborder="#555555",
+                     exbw=1, exfg="#777777")
+        if self._il_mandatory[g]:
+            d.update(mntext="필수 ON ★", mnbg=c, mnborder=c, mnbw=0,
+                     mnfg="white")
+        else:
+            d.update(mntext="필수 OFF", mnbg="#14FFFFFF", mnborder="#555555",
+                     mnbw=1, mnfg="#777777")
+        return d
+
+    def _il_build_groups(self):
+        self._il_grp_model.reset([self._il_grp_card(g)
+                                  for g in range(1, self._il_max_group + 1)])
+
+    def _il_refresh_group(self, g):
+        self._il_grp_model.update_row(g - 1, self._il_grp_card(g))
+
+    def _il_refresh_all(self):
+        self._il_mode_model.reset(
+            [self._il_mode_cell(i) for i in range(self._il_total)])
+
+    def _il_refresh_btn(self, idx):
+        self._il_mode_model.update_row(idx, self._il_mode_cell(idx))
+
+    # ---- 로직 (page_mode.InterlockDialog 와 동일) ----
+    def _il_cycle(self, idx):
+        self._il_groups[idx] = (self._il_groups[idx] + 1) % (self._il_max_group + 1)
+        self._il_refresh_btn(idx)
+
+    def _il_clear(self):
+        self._il_groups = [0] * self._il_total
+        self._il_refresh_all()
+
+    def _il_toggle_excl(self, g):
+        self._il_exclusive[g] = not self._il_exclusive[g]
+        self._il_refresh_group(g)
+        self._il_refresh_all()   # 모드 버튼 suffix 갱신 (원본과 동일)
+
+    def _il_toggle_mand(self, g):
+        self._il_mandatory[g] = not self._il_mandatory[g]
+        self._il_refresh_group(g)  # 원본은 mandatory 토글 시 grid 갱신 안 함
+
+    def _il_accept(self):
+        path = _get_settings_path()
+        data = load_json(path) or {}
+        data["interlock_groups"] = self._il_groups[:]
+        data["interlock_mandatory"] = self._il_mandatory[:]
+        data["interlock_exclusive"] = self._il_exclusive[:]
+        save_json(path, data)
+        self._il_open = False
+        self._be.changed.emit()
+
+    def _il_reject(self):
+        self._il_open = False
+        self._be.changed.emit()
 
     # ===================================================================
     # 일반/PLC/언어 — page_settings 와 동일
