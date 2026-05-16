@@ -812,7 +812,8 @@ class PageSettingsQml(QWidget):
     # ===================================================================
     def _open_interlock_dialog(self):
         try:
-            from ui.pages.page_mode import InterlockDialog, TOTAL_SLOTS
+            from ui.pages.page_mode import TOTAL_SLOTS
+            from ui.pages.interlock_dialog_qml import InterlockDialogQml as InterlockDialog
         except ImportError:
             return
         _GROUP_COLORS = [None, "#E74C3C", "#3498DB", "#2ECC71", "#F39C12",
