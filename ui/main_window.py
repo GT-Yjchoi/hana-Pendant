@@ -22,8 +22,8 @@ from ui.pages.page_timer import PageTimer
 from ui.pages.page_packing import PagePacking
 from ui.pages.page_data import PageData
 from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY, normalize_all_sequences
-from ui.pages.page_manual import PageManual
-from ui.pages.page_auto import PageAuto
+from ui.pages.page_manual_qml import PageManualQml
+from ui.pages.page_auto_qml import PageAutoQml
 from ui.pages.page_settings import PageSettings
 
 # [조그 오버레이 임포트]
@@ -203,8 +203,8 @@ class MainWindow(QWidget):
         self.pages = {}
         self.page_keys = ["manual", "auto", "mode", "position", "timer", "packing", "data", "settings"]
 
-        self.pages["manual"] = PageManual(plc_client=self.plc_client)
-        self.pages["auto"] = PageAuto(plc_client=self.plc_client, speed_state=self.master_speed_state)
+        self.pages["manual"] = PageManualQml(plc_client=self.plc_client)
+        self.pages["auto"] = PageAutoQml(plc_client=self.plc_client, speed_state=self.master_speed_state)
         
         self.pages["mode"] = PageModeQml(mode_data=self.master_mode_data, plc_client=self.plc_client)
         
