@@ -18,7 +18,7 @@ from ui.top_bar import TopBar
 # 페이지들 임포트
 from ui.pages.page_mode_qml import PageModeQml
 from ui.pages.page_position import PagePosition
-from ui.pages.page_timer import PageTimer
+from ui.pages.page_timer_qml import PageTimerQml
 from ui.pages.page_packing import PagePacking
 from ui.pages.page_data_qml import PageDataQml
 from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY, normalize_all_sequences
@@ -217,7 +217,7 @@ class MainWindow(QWidget):
             plc_client=self.plc_client
         )
 
-        self.pages["timer"] = PageTimer(
+        self.pages["timer"] = PageTimerQml(
             sequence_data=self.master_sequence_data,
             timer_library=self.master_timer_library,
             plc_client=self.plc_client
