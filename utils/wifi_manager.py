@@ -165,6 +165,35 @@ def _active_connection_for(iface: str) -> str:
     return ""
 
 
+def _ethernet_profile(iface: str) -> str:
+    """이더넷이 끊긴 상태에서도 조작할 연결 프로파일명을 결정.
+    1) iface 에 현재 활성 연결이 있으면 그 이름.
+    2) 없으면 interface-name 이 iface 로 고정된 저장 프로파일.
+    3) 그래도 없으면 임의의 802-3-ethernet 저장 프로파일(이더넷 1개 가정).
+    DHCP 미응답으로 device 가 disconnected 여도 setter 가 프로파일을
+    찾아 고정IP/DHCP 를 적용할 수 있게 한다."""
+    act = _active_connection_for(iface)
+    if act:
+        return act
+    try:
+        r = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], timeout=3)
+        eth_profiles = []
+        for line in r.stdout.strip().splitlines():
+            parts = line.rsplit(":", 1)
+            if len(parts) == 2 and parts[1] == "802-3-ethernet":
+                eth_profiles.append(parts[0])
+        for name in eth_profiles:
+            g = _run(["nmcli", "-g", "connection.interface-name",
+                      "connection", "show", name], timeout=3)
+            if g.stdout.strip() == iface:
+                return name
+        if eth_profiles:
+            return eth_profiles[0]
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+    return ""
+
+
 def get_ethernet_status() -> Dict[str, str]:
     """이더넷 상태 조회. 각 nmcli 호출 3초 타임아웃(UI 블로킹 방지)."""
     info = {
@@ -184,6 +213,11 @@ def get_ethernet_status() -> Dict[str, str]:
                 if len(parts) >= 3:
                     info["connection"] = parts[2] if parts[2] and parts[2] != "--" else ""
                 break
+
+        # 끊긴 상태(DHCP 미응답 등)면 활성 연결이 없으므로, iface 에 묶인
+        # 저장 프로파일로 폴백 → UI 표시 및 DHCP/고정IP 버튼이 동작하도록.
+        if not info["connection"]:
+            info["connection"] = _ethernet_profile(info["iface"])
 
         r2 = _run(["nmcli", "-t", "-f", "IP4.ADDRESS,IP4.GATEWAY", "device", "show", info["iface"]], timeout=3)
         for line in r2.stdout.strip().splitlines():
