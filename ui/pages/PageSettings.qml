@@ -158,6 +158,84 @@ Rectangle {
                             }
                         }
                     }
+                    // 화면 밝기
+                    ColumnLayout {
+                        Layout.fillWidth: true; Layout.fillHeight: false
+                        Layout.preferredHeight: 92
+                        Layout.minimumHeight: 92
+                        spacing: 4
+                        Text { text: "화면 밝기"; color: "#FFD280"
+                               font.pixelSize: 15; font.bold: true }
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.fillHeight: true
+                            color: "transparent"; radius: 8
+                            border.color: "#33FFD280"; border.width: 1
+                            RowLayout {
+                            anchors.fill: parent; anchors.margins: 8; spacing: 12
+                            Text { text: "밝기"; color: "white"
+                                   font.pixelSize: 14; font.bold: true }
+                            Rectangle {
+                                Layout.preferredWidth: 44; Layout.preferredHeight: 40
+                                radius: 8; color: brDn.pressed ? "#33FFD280" : "#15FFD280"
+                                border.color: "#66FFD280"; border.width: 1
+                                Text { anchors.centerIn: parent; text: "−"
+                                       color: "#FFD280"; font.pixelSize: 22; font.bold: true }
+                                MouseArea { id: brDn; anchors.fill: parent
+                                    onClicked: if (settingsBackend)
+                                        settingsBackend.setBrightness(
+                                            Math.max(10, settingsBackend.brightness - 10)) }
+                            }
+                            Slider {
+                                id: brSlider
+                                Layout.fillWidth: true
+                                from: 10; to: 100; stepSize: 1
+                                value: settingsBackend ? settingsBackend.brightness : 100
+                                onMoved: if (settingsBackend)
+                                    settingsBackend.previewBrightness(Math.round(value))
+                                onPressedChanged: if (!pressed && settingsBackend)
+                                    settingsBackend.setBrightness(Math.round(value))
+                                background: Rectangle {
+                                    x: brSlider.leftPadding
+                                    y: brSlider.topPadding
+                                       + brSlider.availableHeight / 2 - height / 2
+                                    width: brSlider.availableWidth; height: 8
+                                    radius: 4; color: "#33FFFFFF"
+                                    Rectangle {
+                                        width: brSlider.visualPosition * parent.width
+                                        height: parent.height; radius: 4; color: "#FFD280"
+                                    }
+                                }
+                                handle: Rectangle {
+                                    x: brSlider.leftPadding + brSlider.visualPosition
+                                       * (brSlider.availableWidth - width)
+                                    y: brSlider.topPadding
+                                       + brSlider.availableHeight / 2 - height / 2
+                                    width: 30; height: 30; radius: 15
+                                    color: brSlider.pressed ? "#FFE7B0" : "#FFD280"
+                                    border.color: "#80FFFFFF"; border.width: 1
+                                }
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: 44; Layout.preferredHeight: 40
+                                radius: 8; color: brUp.pressed ? "#33FFD280" : "#15FFD280"
+                                border.color: "#66FFD280"; border.width: 1
+                                Text { anchors.centerIn: parent; text: "+"
+                                       color: "#FFD280"; font.pixelSize: 20; font.bold: true }
+                                MouseArea { id: brUp; anchors.fill: parent
+                                    onClicked: if (settingsBackend)
+                                        settingsBackend.setBrightness(
+                                            Math.min(100, settingsBackend.brightness + 10)) }
+                            }
+                            Text {
+                                Layout.preferredWidth: 52
+                                text: (settingsBackend ? settingsBackend.brightness : 100)
+                                      + " %"
+                                color: "#FFD280"; font.pixelSize: 15; font.bold: true
+                                horizontalAlignment: Text.AlignRight
+                            }
+                            }
+                        }
+                    }
                     // 시스템
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.fillHeight: false

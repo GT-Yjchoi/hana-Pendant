@@ -87,17 +87,20 @@ else
 fi
 
 echo
-echo "=== [5/6] 백라이트 최대 밝기 고정 (udev) ==="
+echo "=== [5/6] 백라이트 밝기 조절 권한 (udev: video 그룹 쓰기) ==="
 BL_RULE_SRC="$PROJECT_DIR/99-pendant-backlight.rules"
 BL_RULE_DST=/etc/udev/rules.d/99-pendant-backlight.rules
 if [ -f "$BL_RULE_SRC" ]; then
     sudo cp "$BL_RULE_SRC" "$BL_RULE_DST"
     sudo udevadm control --reload-rules
-    # 지금 즉시도 최대로 (다음 부팅부터는 udev 가 자동)
+    # 재부팅 없이 현재 세션에도 즉시 권한 적용(다음 부팅부터는 udev 가 자동).
+    # 밝기 자체는 앱이 settings.json("screen_brightness") 값으로 설정하므로
+    # 여기서 강제로 max 를 쓰지 않는다(기존 하드코딩 제거).
     for bl in /sys/class/backlight/*/; do
-        [ -e "$bl/max_brightness" ] || continue
-        sudo sh -c "cat '$bl/max_brightness' > '$bl/brightness'" 2>/dev/null || true
-        echo "  $(basename "$bl"): $(cat "$bl/actual_brightness" 2>/dev/null)/$(cat "$bl/max_brightness" 2>/dev/null)"
+        [ -e "$bl/brightness" ] || continue
+        sudo chgrp video "$bl/brightness" 2>/dev/null || true
+        sudo chmod g+w "$bl/brightness" 2>/dev/null || true
+        echo "  $(basename "$bl"): $(ls -l "$bl/brightness" | awk '{print $1, $3":"$4}')"
     done
 else
     echo "  $BL_RULE_SRC 없음 — 건너뜀"

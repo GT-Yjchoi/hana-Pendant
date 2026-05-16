@@ -24,6 +24,7 @@ from PySide6.QtQuickWidgets import QQuickWidget
 
 from utils.paths import get_settings_path as _get_settings_path
 from utils.json_utils import load_json, save_json
+from utils import backlight
 
 # page_settings.py 의 오버레이/워커/다이얼로그 그대로 재사용
 from ui.pages.page_settings import (
@@ -112,6 +113,7 @@ class SettingsBackend(QObject):
     statusText = Property(str, lambda s: s._p._status_text, notify=changed)
     statusColor = Property(str, lambda s: s._p._status_color, notify=changed)
     lang = Property(str, lambda s: s._p._lang, notify=changed)
+    brightness = Property(int, lambda s: s._p._brightness, notify=changed)
     homeOn = Property(bool, lambda s: s._p._p_home, notify=changed)
     wSsid = Property(str, lambda s: s._p._w["ssid"], notify=changed)
     wSignal = Property(str, lambda s: s._p._w["signal"], notify=changed)
@@ -148,6 +150,19 @@ class SettingsBackend(QObject):
     @Slot(str)
     def setLang(self, code):
         self._p._set_language(code)
+
+    @Slot(int)
+    def setBrightness(self, pct):
+        self._p._set_brightness(pct)
+
+    @Slot(int)
+    def previewBrightness(self, pct):
+        # 드래그 중: sysfs 즉시 반영만(JSON 저장 X, changed emit X → 바인딩 충돌 방지).
+        try:
+            backlight.set_percent(pct, persist=False)
+            self._p._brightness = backlight._clamp(pct)
+        except Exception:
+            pass
 
     @Slot()
     def exitClicked(self):
@@ -310,6 +325,10 @@ class PageSettingsQml(QWidget):
         self._status_color = "#FF4646"
         self._lang = (LanguageManager.instance().current_lang
                       if LanguageManager else "KR")
+        try:
+            self._brightness = backlight.get_percent()
+        except Exception:
+            self._brightness = 100
 
         self._v_enabled = [i >= 16 for i in range(32)]
         self._v_name = [(_DEF_Y2X[i - 16] if i >= 16 else _DEF_Y0X[i])
@@ -1077,6 +1096,15 @@ class PageSettingsQml(QWidget):
         LanguageManager.instance().set_language(code)
         self._lang = code
         self.update_language()
+
+    def _set_brightness(self, pct):
+        # 즉시 적용 + settings.json("screen_brightness")에 0~100 저장.
+        try:
+            backlight.set_percent(pct, persist=True)
+            self._brightness = backlight.get_percent()
+        except Exception as e:
+            print(f"[Settings] 밝기 설정 실패: {e}")
+        self._be.changed.emit()
 
     def update_language(self, lang_code=None):
         if LanguageManager:

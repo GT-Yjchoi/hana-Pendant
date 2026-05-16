@@ -142,6 +142,14 @@ def main():
     app.setStyleSheet(APP_STYLESHEET)
     app.setOverrideCursor(Qt.BlankCursor)
 
+    # 화면 밝기: settings.json 의 저장값을 적용. (이전엔 udev/setup.sh 가
+    # 부팅마다 max 로 강제하던 하드코딩 — 제거하고 사용자 설정값 사용.)
+    try:
+        from utils import backlight
+        backlight.apply_saved()
+    except Exception as _e:
+        print(f"[backlight] 시작 시 적용 실패: {_e}")
+
     # 4. [NEW] PLC 통신 모듈 생성
     # 프로그램 전체에서 하나만 만들어 공유합니다.
     plc_client = PLCClient()

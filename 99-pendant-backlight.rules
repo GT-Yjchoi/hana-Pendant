@@ -1,4 +1,6 @@
-# Pendant 키오스크: 부팅 시 백라이트를 항상 최대 밝기로 고정.
-# systemd-backlight 의 save/restore 와 무관하게 결정론적으로 max 로 설정.
+# Pendant 키오스크: 백라이트 brightness 파일을 video 그룹에서 쓰기 가능하게.
+# (이전엔 부팅마다 max_brightness 를 강제로 써 밝기를 최대 고정했으나 제거.
+#  밝기는 앱이 settings.json 의 "screen_brightness" 값으로 설정한다.)
+# odroid 사용자는 video 그룹이므로 sudo 없이 밝기 조절 가능.
 # setup.sh 가 /etc/udev/rules.d/ 로 설치.
-ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="backlight", RUN+="/bin/sh -c 'cat /sys/class/backlight/%k/max_brightness > /sys/class/backlight/%k/brightness'"
+ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"
