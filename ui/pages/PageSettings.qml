@@ -61,6 +61,9 @@ Rectangle {
                     GroupBox {
                         Layout.fillWidth: true
                         Layout.fillHeight: false
+                        Layout.preferredHeight: 100
+                        Layout.minimumHeight: 100
+                        topPadding: 34
                         label: Text { text: "PLC 통신 설정"; color: "#00E5FF"
                                       font.pixelSize: 15; font.bold: true }
                         background: Rectangle { color: "transparent"; radius: 8
@@ -117,6 +120,9 @@ Rectangle {
                     // 언어
                     GroupBox {
                         Layout.fillWidth: true; Layout.fillHeight: false
+                        Layout.preferredHeight: 92
+                        Layout.minimumHeight: 92
+                        topPadding: 34
                         label: Text { text: "환경 설정"; color: "#DDDDDD"
                                       font.pixelSize: 15; font.bold: true }
                         background: Rectangle { color: "transparent"; radius: 8
@@ -149,6 +155,9 @@ Rectangle {
                     // 시스템
                     GroupBox {
                         Layout.fillWidth: true; Layout.fillHeight: false
+                        Layout.preferredHeight: 95
+                        Layout.minimumHeight: 95
+                        topPadding: 34
                         label: Text { text: "시스템"; color: "#FF8080"
                                       font.pixelSize: 15; font.bold: true }
                         background: Rectangle { color: "transparent"; radius: 8
@@ -285,6 +294,7 @@ Rectangle {
                                         delegate: Text { text: modelData; color: "#BBBBBB"
                                             font.pixelSize: 12; font.bold: true
                                             Layout.fillWidth: true
+                                            Layout.preferredWidth: 1
                                             horizontalAlignment: Text.AlignHCenter }
                                     }
                                 }
@@ -295,9 +305,11 @@ Rectangle {
                                         Text { text: model.axname; color: "white"
                                             font.pixelSize: 14; font.bold: true
                                             Layout.fillWidth: true
+                                            Layout.preferredWidth: 1
                                             horizontalAlignment: Text.AlignHCenter }
                                         // 사용
-                                        Item { Layout.fillWidth: true; height: 36
+                                        Item { Layout.fillWidth: true
+                                            Layout.preferredWidth: 1; height: 36
                                             Rectangle { anchors.centerIn: parent
                                                 width: 26; height: 26; radius: 4
                                                 color: model.axuse ? "#468CFF" : "transparent"
@@ -310,7 +322,8 @@ Rectangle {
                                                     onClicked: if (settingsBackend)
                                                         settingsBackend.toggleAxisUse(index) } } }
                                         // 방향
-                                        Item { Layout.fillWidth: true; height: 36
+                                        Item { Layout.fillWidth: true
+                                            Layout.preferredWidth: 1; height: 36
                                             Rectangle { anchors.centerIn: parent
                                                 width: 90; height: 30; radius: 4
                                                 property bool fwd: model.axdir === 0
@@ -325,7 +338,8 @@ Rectangle {
                                                     onClicked: if (settingsBackend)
                                                         settingsBackend.toggleAxisDir(index) } } }
                                         // 스트로크
-                                        Rectangle { Layout.fillWidth: true; height: 36
+                                        Rectangle { Layout.fillWidth: true
+                                            Layout.preferredWidth: 1; height: 36
                                             radius: 4; color: "#1AFFFFFF"
                                             border.color: "#33FFFFFF"; border.width: 1
                                             Text { anchors.centerIn: parent; text: model.axstroke
@@ -334,7 +348,8 @@ Rectangle {
                                                 onClicked: if (settingsBackend)
                                                     settingsBackend.editStroke(index) } }
                                         // 가감속
-                                        Rectangle { Layout.fillWidth: true; height: 36
+                                        Rectangle { Layout.fillWidth: true
+                                            Layout.preferredWidth: 1; height: 36
                                             radius: 4; color: "#1AFFFFFF"
                                             border.color: "#33FFFFFF"; border.width: 1
                                             Text { anchors.centerIn: parent; text: model.axaccel
@@ -343,7 +358,8 @@ Rectangle {
                                                 onClicked: if (settingsBackend)
                                                     settingsBackend.editAccel(index) } }
                                         // PPR
-                                        Rectangle { Layout.fillWidth: true; height: 36
+                                        Rectangle { Layout.fillWidth: true
+                                            Layout.preferredWidth: 1; height: 36
                                             radius: 4; color: "#1AFFFFFF"
                                             border.color: "#33FFFFFF"; border.width: 1
                                             Text { anchors.centerIn: parent; text: model.axppr
@@ -426,121 +442,142 @@ Rectangle {
                                 onClicked: if (settingsBackend) settingsBackend.saveValveConfig() }
                         }
                     }
-                    RowLayout {
-                        Layout.fillWidth: true; spacing: 8
-                        Repeater {
-                            model: ["사용","번호","이름","동작","순서","JOG"]
-                            delegate: Text { text: modelData; color: "#FFD700"
-                                font.pixelSize: 12; font.bold: true; Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter }
-                        }
-                    }
                     Rectangle {
                         Layout.fillWidth: true; Layout.fillHeight: true
                         color: "#26000000"; radius: 10
-                        ListView {
-                            anchors.fill: parent; anchors.margins: 6
-                            clip: true; model: valveModel; spacing: 6
-                            cacheBuffer: 2400
-                            boundsBehavior: Flickable.StopAtBounds
-                            delegate: RowLayout {
-                                width: ListView.view ? ListView.view.width : 0
-                                height: 42; spacing: 8
-                                // 사용
-                                Item { Layout.fillWidth: true; height: 40
-                                    Rectangle { anchors.centerIn: parent
-                                        width: 24; height: 24; radius: 4
-                                        color: model.venabled ? "#468CFF" : "transparent"
-                                        border.color: model.venabled ? "#468CFF" : "#888888"
-                                        border.width: 2
-                                        Text { anchors.centerIn: parent
-                                            text: model.venabled ? "✓" : ""
-                                            color: "white"; font.pixelSize: 15; font.bold: true }
-                                        MouseArea { anchors.fill: parent
-                                            onClicked: if (settingsBackend)
-                                                settingsBackend.toggleValveEnabled(index) } } }
-                                Text { text: model.vyaddr; color: "#FFD280"
-                                    font.pixelSize: 12; font.bold: true
-                                    Layout.fillWidth: true
+                        // 헤더+리스트를 같은 ColumnLayout·같은 인셋에 둬 컬럼 픽셀정렬 보장.
+                        // 컬럼폭: 사용50 / 번호55 / 이름(유동) / 동작110 / 순서76 / JOG96
+                        ColumnLayout {
+                            anchors.fill: parent; anchors.margins: 6; spacing: 6
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: false
+                                Layout.preferredHeight: 22
+                                spacing: 8
+                                Text { text: "사용"; color: "#FFD700"; font.pixelSize: 12
+                                    font.bold: true; Layout.preferredWidth: 50
                                     horizontalAlignment: Text.AlignHCenter }
-                                Rectangle { Layout.fillWidth: true; height: 35
-                                    Layout.preferredWidth: 2; radius: 4
-                                    color: vnMa.pressed ? "#33468CFF" : "#1AFFFFFF"
-                                    border.color: "#666666"; border.width: 1
-                                    Text { anchors.fill: parent; anchors.leftMargin: 10
-                                        verticalAlignment: Text.AlignVCenter
-                                        text: model.vname; color: "white"
-                                        font.pixelSize: 12; elide: Text.ElideRight }
-                                    MouseArea { id: vnMa; anchors.fill: parent
-                                        onClicked: if (settingsBackend)
-                                            settingsBackend.editValveName(index) } }
-                                Rectangle { Layout.fillWidth: true; height: 35; radius: 4
-                                    property bool tg: model.vtoggle
-                                    color: tg ? "#332ECC71" : "#33468CFF"
-                                    border.color: tg ? "#2ECC71" : "#468CFF"
-                                    border.width: 1
-                                    Text { anchors.centerIn: parent
-                                        text: parent.tg ? "Toggle" : "Momentary"
-                                        color: parent.tg ? "#2ECC71" : "white"
-                                        font.pixelSize: 11; font.bold: true }
-                                    MouseArea { anchors.fill: parent
-                                        onClicked: if (settingsBackend)
-                                            settingsBackend.toggleValveMode(index) } }
-                                RowLayout { Layout.fillWidth: true; spacing: 3
-                                    Rectangle { Layout.fillWidth: true; height: 30
-                                        radius: 4; color: vuMa.pressed ? "#33468CFF" : "#1AFFFFFF"
-                                        border.color: "#666666"; border.width: 1
-                                        Text { anchors.centerIn: parent; text: "▲"
-                                            color: "white"; font.pixelSize: 10 }
-                                        MouseArea { id: vuMa; anchors.fill: parent
-                                            onClicked: if (settingsBackend)
-                                                settingsBackend.moveValveUp(index) } }
-                                    Rectangle { Layout.fillWidth: true; height: 30
-                                        radius: 4; color: vdMa.pressed ? "#33468CFF" : "#1AFFFFFF"
-                                        border.color: "#666666"; border.width: 1
-                                        Text { anchors.centerIn: parent; text: "▼"
-                                            color: "white"; font.pixelSize: 10 }
-                                        MouseArea { id: vdMa; anchors.fill: parent
-                                            onClicked: if (settingsBackend)
-                                                settingsBackend.moveValveDown(index) } } }
-                                RowLayout { Layout.fillWidth: true; spacing: 3
-                                    Rectangle { Layout.preferredWidth: 45; height: 33
+                                Text { text: "번호"; color: "#FFD700"; font.pixelSize: 12
+                                    font.bold: true; Layout.preferredWidth: 55
+                                    horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "이름"; color: "#FFD700"; font.pixelSize: 12
+                                    font.bold: true; Layout.fillWidth: true
+                                    horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "동작"; color: "#FFD700"; font.pixelSize: 12
+                                    font.bold: true; Layout.preferredWidth: 110
+                                    horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "순서"; color: "#FFD700"; font.pixelSize: 12
+                                    font.bold: true; Layout.preferredWidth: 76
+                                    horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "JOG"; color: "#FFD700"; font.pixelSize: 12
+                                    font.bold: true; Layout.preferredWidth: 96
+                                    horizontalAlignment: Text.AlignHCenter }
+                            }
+                            ListView {
+                                Layout.fillWidth: true; Layout.fillHeight: true
+                                clip: true; model: valveModel; spacing: 6
+                                cacheBuffer: 2400
+                                boundsBehavior: Flickable.StopAtBounds
+                                delegate: RowLayout {
+                                    width: ListView.view ? ListView.view.width : 0
+                                    height: 42; spacing: 8
+                                    // 사용
+                                    Item { Layout.preferredWidth: 50; height: 40
+                                        Rectangle { anchors.centerIn: parent
+                                            width: 24; height: 24; radius: 4
+                                            color: model.venabled ? "#468CFF" : "transparent"
+                                            border.color: model.venabled ? "#468CFF" : "#888888"
+                                            border.width: 2
+                                            Text { anchors.centerIn: parent
+                                                text: model.venabled ? "✓" : ""
+                                                color: "white"; font.pixelSize: 15; font.bold: true }
+                                            MouseArea { anchors.fill: parent
+                                                onClicked: if (settingsBackend)
+                                                    settingsBackend.toggleValveEnabled(index) } } }
+                                    Text { text: model.vyaddr; color: "#FFD280"
+                                        font.pixelSize: 12; font.bold: true
+                                        Layout.preferredWidth: 55
+                                        horizontalAlignment: Text.AlignHCenter }
+                                    Rectangle { Layout.fillWidth: true; height: 35
                                         radius: 4
-                                        property bool j: model.vjog
-                                        color: j ? "#3300E5FF" : "#12FFFFFF"
-                                        border.color: j ? "#00E5FF" : "#555555"
+                                        color: vnMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                        border.color: "#666666"; border.width: 1
+                                        Text { anchors.fill: parent; anchors.leftMargin: 10
+                                            verticalAlignment: Text.AlignVCenter
+                                            text: model.vname; color: "white"
+                                            font.pixelSize: 12; elide: Text.ElideRight }
+                                        MouseArea { id: vnMa; anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.editValveName(index) } }
+                                    Rectangle { Layout.preferredWidth: 110; height: 35
+                                        radius: 4
+                                        property bool tg: model.vtoggle
+                                        color: tg ? "#332ECC71" : "#33468CFF"
+                                        border.color: tg ? "#2ECC71" : "#468CFF"
                                         border.width: 1
-                                        Text { anchors.centerIn: parent; text: "JOG"
-                                            color: parent.j ? "#00E5FF" : "#666666"
+                                        Text { anchors.centerIn: parent
+                                            text: parent.tg ? "Toggle" : "Momentary"
+                                            color: parent.tg ? "#2ECC71" : "white"
                                             font.pixelSize: 11; font.bold: true }
                                         MouseArea { anchors.fill: parent
                                             onClicked: if (settingsBackend)
-                                                settingsBackend.toggleValveJog(index) } }
-                                    ColumnLayout { spacing: 1
-                                        Rectangle { Layout.preferredWidth: 22
-                                            Layout.preferredHeight: 15; radius: 3
-                                            color: "#0DFFFFFF"
-                                            border.color: model.vjog ? "#00B4D8" : "#444444"
-                                            border.width: 1
+                                                settingsBackend.toggleValveMode(index) } }
+                                    RowLayout { Layout.preferredWidth: 76; spacing: 3
+                                        Rectangle { Layout.fillWidth: true; height: 30
+                                            radius: 4; color: vuMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                            border.color: "#666666"; border.width: 1
                                             Text { anchors.centerIn: parent; text: "▲"
-                                                color: model.vjog ? "#00B4D8" : "#555555"
-                                                font.pixelSize: 8 }
-                                            MouseArea { anchors.fill: parent
-                                                enabled: model.vjog
+                                                color: "white"; font.pixelSize: 10 }
+                                            MouseArea { id: vuMa; anchors.fill: parent
                                                 onClicked: if (settingsBackend)
-                                                    settingsBackend.jogOrderUp(index) } }
-                                        Rectangle { Layout.preferredWidth: 22
-                                            Layout.preferredHeight: 15; radius: 3
-                                            color: "#0DFFFFFF"
-                                            border.color: model.vjog ? "#00B4D8" : "#444444"
-                                            border.width: 1
+                                                    settingsBackend.moveValveUp(index) } }
+                                        Rectangle { Layout.fillWidth: true; height: 30
+                                            radius: 4; color: vdMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                            border.color: "#666666"; border.width: 1
                                             Text { anchors.centerIn: parent; text: "▼"
-                                                color: model.vjog ? "#00B4D8" : "#555555"
-                                                font.pixelSize: 8 }
-                                            MouseArea { anchors.fill: parent
-                                                enabled: model.vjog
+                                                color: "white"; font.pixelSize: 10 }
+                                            MouseArea { id: vdMa; anchors.fill: parent
                                                 onClicked: if (settingsBackend)
-                                                    settingsBackend.jogOrderDown(index) } } }
+                                                    settingsBackend.moveValveDown(index) } } }
+                                    RowLayout { Layout.preferredWidth: 96; spacing: 3
+                                        Rectangle { Layout.fillWidth: true; height: 33
+                                            radius: 4
+                                            property bool j: model.vjog
+                                            color: j ? "#3300E5FF" : "#12FFFFFF"
+                                            border.color: j ? "#00E5FF" : "#555555"
+                                            border.width: 1
+                                            Text { anchors.centerIn: parent; text: "JOG"
+                                                color: parent.j ? "#00E5FF" : "#666666"
+                                                font.pixelSize: 11; font.bold: true }
+                                            MouseArea { anchors.fill: parent
+                                                onClicked: if (settingsBackend)
+                                                    settingsBackend.toggleValveJog(index) } }
+                                        ColumnLayout { spacing: 1
+                                            Rectangle { Layout.preferredWidth: 22
+                                                Layout.preferredHeight: 15; radius: 3
+                                                color: "#0DFFFFFF"
+                                                border.color: model.vjog ? "#00B4D8" : "#444444"
+                                                border.width: 1
+                                                Text { anchors.centerIn: parent; text: "▲"
+                                                    color: model.vjog ? "#00B4D8" : "#555555"
+                                                    font.pixelSize: 8 }
+                                                MouseArea { anchors.fill: parent
+                                                    enabled: model.vjog
+                                                    onClicked: if (settingsBackend)
+                                                        settingsBackend.jogOrderUp(index) } }
+                                            Rectangle { Layout.preferredWidth: 22
+                                                Layout.preferredHeight: 15; radius: 3
+                                                color: "#0DFFFFFF"
+                                                border.color: model.vjog ? "#00B4D8" : "#444444"
+                                                border.width: 1
+                                                Text { anchors.centerIn: parent; text: "▼"
+                                                    color: model.vjog ? "#00B4D8" : "#555555"
+                                                    font.pixelSize: 8 }
+                                                MouseArea { anchors.fill: parent
+                                                    enabled: model.vjog
+                                                    onClicked: if (settingsBackend)
+                                                        settingsBackend.jogOrderDown(index) } } }
+                                    }
                                 }
                             }
                         }
