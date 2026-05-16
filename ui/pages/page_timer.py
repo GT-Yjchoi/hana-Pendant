@@ -145,6 +145,12 @@ class TimerEditDialog(QWidget):
     def exec(self):
         self.show()
         self.raise_()
+        # QQuickWidget(QML) 호스트 위에 뜰 때 첫 클릭이 활성화용으로
+        # 소모되는 문제 방지 — 윈도우 활성화 + 포커스 즉시 확보
+        self.activateWindow()
+        self.setFocus(Qt.OtherFocusReason)
+        from PySide6.QtWidgets import QApplication as _QA
+        _QA.processEvents()
         self._event_loop = QEventLoop()
         self._event_loop.exec()
         self.hide()
