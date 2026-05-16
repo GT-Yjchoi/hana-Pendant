@@ -335,7 +335,7 @@ class PageSettingsQml(QWidget):
                         for i in range(32)]
         self._v_mode = [True] * 32          # True=toggle
         self._jog_order = []
-        self._JOG_MAX = 8           # JOG 팝업 최대 밸브 수(밸브칸 2개 추가)
+        self._JOG_MAX = 10          # JOG 팝업 최대 밸브 수
 
         self._p_use = [False] * 8
         self._p_dir = [0] * 8

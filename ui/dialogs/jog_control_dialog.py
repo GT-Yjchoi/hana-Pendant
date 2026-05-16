@@ -72,8 +72,8 @@ class JogControlDialog(QWidget):
         axis_grid.setSpacing(8)
         self._axis_btns = {}
         for row, ax in enumerate(("X", "Y", "Z", "A")):
-            b_neg = self._create_btn(f"{ax} -", h=62)
-            b_pos = self._create_btn(f"{ax} +", h=62)
+            b_neg = self._create_btn(f"{ax} -", h=56)
+            b_pos = self._create_btn(f"{ax} +", h=56)
             axis_grid.addWidget(b_neg, row, 0)
             axis_grid.addWidget(b_pos, row, 1)
             self._axis_btns[f"{ax} -"] = b_neg
@@ -84,7 +84,7 @@ class JogControlDialog(QWidget):
         # ---------------------------------------------------------
         # 속도 조절 섹션 (1~5단)
         # ---------------------------------------------------------
-        layout.addSpacing(15)
+        layout.addSpacing(5)
         lbl_speed = QLabel("JOG SPEED (DT211)")
         lbl_speed.setStyleSheet("color: #AAA; font-size: 12px; margin-bottom: 5px;")
         lbl_speed.setAlignment(Qt.AlignCenter)
@@ -113,7 +113,7 @@ class JogControlDialog(QWidget):
 
         # (런너암/제품암 전환 버튼 제거 — 1~4축 평면 배치로 대체)
 
-        # 4. 하단 밸브 버튼 (settings.json jog_valve=True 항목, 최대 8개)
+        # 4. 하단 밸브 버튼 (settings.json jog_valve=True 항목, 최대 10개)
         self._valve_btns = []
         self._valve_configs = []
         jog_valves = self._load_jog_valves()
@@ -145,7 +145,7 @@ class JogControlDialog(QWidget):
             self._monitor_connected = True
 
     def _load_jog_valves(self):
-        """settings.json에서 jog_valve=True인 밸브를 jog_order 순으로 최대 8개 반환"""
+        """settings.json에서 jog_valve=True인 밸브를 jog_order 순으로 최대 10개 반환"""
         try:
             path = get_settings_path()
             if os.path.exists(path):
@@ -154,7 +154,7 @@ class JogControlDialog(QWidget):
                 cfgs = s.get("valve_config", [])
                 result = [c for c in cfgs if c.get("jog_valve", False)]
                 result.sort(key=lambda x: x.get("jog_order", 99))
-                return result[:8]
+                return result[:10]
         except Exception as e:
             print(f"[JOG] valve config load error: {e}")
         return []
