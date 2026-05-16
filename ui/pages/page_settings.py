@@ -96,18 +96,18 @@ class WifiStatusWorker(QThread):
 class NumberInputOverlay(QWidget):
     def __init__(self, current_val_str, is_ip=False, parent=None):
         super().__init__(parent)
-        
-        # 최상위 윈도우 덮기
-        if parent:
-            main_window = parent.window()
-            self.setParent(main_window)
-            self.resize(main_window.size())
-            
-        # 배경 어둡게
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+
+        # QQuickWidget(QML) 위 자식 오버레이 첫입력 가로채임 방지 —
+        # OverlayDialog 와 동일 top-level 프레임리스 모달
+        # ([[feedback-qquickwidget-overlay-input]])
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
-        
+
         self.is_ip = is_ip
         self.result_val = None
         self._event_loop = None
@@ -254,9 +254,17 @@ class NumberInputOverlay(QWidget):
         self.close()
         self.deleteLater()
 
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor
+        p = QPainter(self)
+        if self._bg_pixmap:
+            p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
+
     def exec(self):
         self.show()
         self.raise_()
+        self.activateWindow()
         self._event_loop = QEventLoop()
         self._event_loop.exec()
         return self.result_val
@@ -267,13 +275,15 @@ class NumberInputOverlay(QWidget):
 class ConfirmOverlay(QWidget):
     def __init__(self, title, message, btn_yes="예", btn_no="아니오", parent=None):
         super().__init__(parent)
-        if parent:
-            self.resize(parent.size())
-            
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        # QQuickWidget(QML) 위 자식 오버레이 첫입력 가로채임 방지 (top-level 모달)
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_AcceptTouchEvents, True)
-        
+
         self.result = False
         self._event_loop = None
         
@@ -347,9 +357,17 @@ class ConfirmOverlay(QWidget):
         self.close()
         self.deleteLater()
 
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor
+        p = QPainter(self)
+        if self._bg_pixmap:
+            p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
+
     def exec(self):
         self.show()
         self.raise_()
+        self.activateWindow()
         self._event_loop = QEventLoop()
         self._event_loop.exec()
         return self.result

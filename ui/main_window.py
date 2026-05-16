@@ -24,7 +24,7 @@ from ui.pages.page_data_qml import PageDataQml
 from ui.dialogs.sequence_editor_dialog import MONITOR_SEQ_KEY, normalize_all_sequences
 from ui.pages.page_manual_qml import PageManualQml
 from ui.pages.page_auto_qml import PageAutoQml
-from ui.pages.page_settings import PageSettings
+from ui.pages.page_settings_qml import PageSettingsQml
 
 # [조그 오버레이 임포트]
 from ui.dialogs.jog_control_dialog import JogControlDialog
@@ -239,7 +239,7 @@ class MainWindow(QWidget):
             plc_client=self.plc_client,
             packing_config=self.master_packing_config,
         )
-        self.pages["settings"] = PageSettings()
+        self.pages["settings"] = PageSettingsQml()
 
         self.pages["data"].sig_file_loaded.connect(self._on_recipe_loaded)
         self.pages["position"].sig_sequence_changed.connect(self._on_sequence_updated)

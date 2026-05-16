@@ -1,0 +1,783 @@
+// 설정 페이지 QML(GPU). 7탭. 렌더/스크롤만, 로직 전부 Python(backend)에서
+// page_settings.py 와 동일(verbatim). 안전탭(valve/param/interlock)의 PLC
+// 패킹·주소·스케일은 한 글자도 안 바뀜 — 값 출처만 위젯→모델(동일값).
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+
+Rectangle {
+    id: root
+    color: "#660F161E"; radius: 16
+    border.color: "#23FFFFFF"; border.width: 1
+
+    readonly property var tabNames: ["일반 설정","IO 이름 변경","시스템 파라미터",
+        "밸브 설정","알람 메시지","인터록 설정","네트워크"]
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 12
+        spacing: 8
+
+        // ===== 탭 바 =====
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: false
+            Layout.preferredHeight: 46
+            Layout.maximumHeight: 46
+            spacing: 4
+            Repeater {
+                model: root.tabNames
+                delegate: Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 8
+                    property bool sel: stack.currentIndex === index
+                    color: sel ? "#33468CFF" : (tbMa.pressed ? "#1AFFFFFF" : "transparent")
+                    border.width: 1
+                    border.color: sel ? "#468CFF" : "#26FFFFFF"
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData
+                        color: sel ? "#9CC8FF" : "#AAAAAA"
+                        font.pixelSize: 14; font.bold: sel
+                    }
+                    MouseArea { id: tbMa; anchors.fill: parent
+                        onClicked: { stack.currentIndex = index
+                                     if (settingsBackend) settingsBackend.tabChanged(index) } }
+                }
+            }
+        }
+
+        StackLayout {
+            id: stack
+            Layout.fillWidth: true; Layout.fillHeight: true
+            currentIndex: 0
+
+            // ---------- [0] 일반 설정 ----------
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 10; spacing: 20
+                    // PLC
+                    GroupBox {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: false
+                        label: Text { text: "PLC 통신 설정"; color: "#00E5FF"
+                                      font.pixelSize: 15; font.bold: true }
+                        background: Rectangle { color: "transparent"; radius: 8
+                            border.color: "#6600E5FF"; border.width: 1 }
+                        RowLayout {
+                            anchors.fill: parent; anchors.margins: 8; spacing: 12
+                            Text { text: "IP 주소:"; color: "white"; font.pixelSize: 14 }
+                            Rectangle {
+                                Layout.preferredWidth: 200; Layout.preferredHeight: 40
+                                radius: 6; color: "#1AFFFFFF"
+                                border.color: ipMa.pressed ? "#468CFF" : "#4DFFFFFF"
+                                border.width: 1
+                                Text { anchors.centerIn: parent
+                                       text: settingsBackend ? settingsBackend.ipText : ""
+                                       color: "#FFD280"; font.pixelSize: 16; font.bold: true }
+                                MouseArea { id: ipMa; anchors.fill: parent
+                                    onClicked: if (settingsBackend) settingsBackend.editIp() }
+                            }
+                            Text { text: "포트:"; color: "white"; font.pixelSize: 14 }
+                            Rectangle {
+                                Layout.preferredWidth: 100; Layout.preferredHeight: 40
+                                radius: 6; color: "#1AFFFFFF"
+                                border.color: poMa.pressed ? "#468CFF" : "#4DFFFFFF"
+                                border.width: 1
+                                Text { anchors.centerIn: parent
+                                       text: settingsBackend ? settingsBackend.portText : ""
+                                       color: "#FFD280"; font.pixelSize: 16; font.bold: true }
+                                MouseArea { id: poMa; anchors.fill: parent
+                                    onClicked: if (settingsBackend) settingsBackend.editPort() }
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: 100; Layout.preferredHeight: 40
+                                radius: 6
+                                property bool conn: settingsBackend ? settingsBackend.plcConnected : false
+                                color: cnMa.pressed ? "#33FFFFFF"
+                                      : (conn ? "#26FF4646" : "#2600FF00")
+                                border.width: 1
+                                border.color: conn ? "#FF4646" : "#00FF00"
+                                Text { anchors.centerIn: parent
+                                       text: settingsBackend ? settingsBackend.connText : "연결"
+                                       color: parent.conn ? "#FF4646" : "#00FF00"
+                                       font.pixelSize: 14; font.bold: true }
+                                MouseArea { id: cnMa; anchors.fill: parent
+                                    onClicked: if (settingsBackend) settingsBackend.connectClicked() }
+                            }
+                            Text {
+                                text: settingsBackend ? settingsBackend.statusText : "● Disconnected"
+                                color: settingsBackend ? settingsBackend.statusColor : "#FF4646"
+                                font.pixelSize: 14; font.bold: true
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                    }
+                    // 언어
+                    GroupBox {
+                        Layout.fillWidth: true; Layout.fillHeight: false
+                        label: Text { text: "환경 설정"; color: "#DDDDDD"
+                                      font.pixelSize: 15; font.bold: true }
+                        background: Rectangle { color: "transparent"; radius: 8
+                            border.color: "#26FFFFFF"; border.width: 1 }
+                        RowLayout {
+                            anchors.fill: parent; anchors.margins: 8; spacing: 12
+                            Text { text: "언어 (Language)"; color: "white"
+                                   font.pixelSize: 14; font.bold: true }
+                            Repeater {
+                                model: [["KR","🇰🇷 한국어"],["EN","🇺🇸 English"]]
+                                delegate: Rectangle {
+                                    Layout.preferredWidth: 120; Layout.preferredHeight: 40
+                                    radius: 20
+                                    property bool act: settingsBackend
+                                        && settingsBackend.lang === modelData[0]
+                                    color: act ? "#33468CFF" : "#0DFFFFFF"
+                                    border.width: 2
+                                    border.color: act ? "#468CFF" : "#1AFFFFFF"
+                                    Text { anchors.centerIn: parent; text: modelData[1]
+                                           color: act ? "#468CFF" : "#AAAAAA"
+                                           font.pixelSize: 13; font.bold: true }
+                                    MouseArea { anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.setLang(modelData[0]) }
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                    }
+                    // 시스템
+                    GroupBox {
+                        Layout.fillWidth: true; Layout.fillHeight: false
+                        label: Text { text: "시스템"; color: "#FF8080"
+                                      font.pixelSize: 15; font.bold: true }
+                        background: Rectangle { color: "transparent"; radius: 8
+                            border.color: "#4DFF4646"; border.width: 1 }
+                        RowLayout {
+                            anchors.fill: parent; anchors.margins: 8
+                            Text { text: "프로그램 종료"; color: "#FF8080"
+                                   font.pixelSize: 14; font.bold: true }
+                            Item { Layout.fillWidth: true }
+                            Rectangle {
+                                Layout.preferredWidth: 150; Layout.preferredHeight: 45
+                                radius: 8; color: exMa.pressed ? "#C83232" : "#26FF4646"
+                                border.color: "#FF4646"; border.width: 2
+                                Text { anchors.centerIn: parent; text: "종료"
+                                       color: "#FF4646"; font.pixelSize: 15; font.bold: true }
+                                MouseArea { id: exMa; anchors.fill: parent
+                                    onClicked: if (settingsBackend) settingsBackend.exitClicked() }
+                            }
+                        }
+                    }
+                    Item { Layout.fillHeight: true }
+                    Text { Layout.alignment: Qt.AlignRight
+                           text: "HMI System v1.3.2 | Build 2026.02.05"
+                           color: "#4DFFFFFF"; font.pixelSize: 12 }
+                }
+            }
+
+            // ---------- [1] IO 이름 변경 ----------
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 10; spacing: 8
+                    Text { Layout.alignment: Qt.AlignRight
+                           text: "※ 변경 후 [이름 적용] 버튼을 눌러야 저장됩니다."
+                           color: "#80FFFFFF"; font.pixelSize: 13 }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 0
+                        Text { text: "  입력 (Input) 이름"; color: "#AAAAAA"
+                               font.pixelSize: 13; font.bold: true; Layout.fillWidth: true }
+                        Text { text: "  출력 (Output) 이름"; color: "#AAAAAA"
+                               font.pixelSize: 13; font.bold: true; Layout.fillWidth: true }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        color: "#26000000"; radius: 12
+                        ListView {
+                            anchors.fill: parent; anchors.margins: 6
+                            clip: true; model: ioModel; spacing: 6
+                            cacheBuffer: 2000
+                            boundsBehavior: Flickable.StopAtBounds
+                            delegate: RowLayout {
+                                width: ListView.view ? ListView.view.width : 0
+                                height: 44; spacing: 8
+                                Text { text: model.xaddr; color: "#64FFDA"
+                                       font.pixelSize: 15; font.bold: true
+                                       Layout.preferredWidth: 44
+                                       horizontalAlignment: Text.AlignHCenter }
+                                Rectangle {
+                                    Layout.fillWidth: true; Layout.preferredHeight: 38
+                                    radius: 6; color: inMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                    border.color: "#33FFFFFF"; border.width: 1
+                                    Text { anchors.fill: parent; anchors.leftMargin: 10
+                                           verticalAlignment: Text.AlignVCenter
+                                           text: model.inname; color: "white"
+                                           font.pixelSize: 14; elide: Text.ElideRight }
+                                    MouseArea { id: inMa; anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.editInName(index) }
+                                }
+                                Text { text: model.yaddr; color: "#FFD280"
+                                       font.pixelSize: 15; font.bold: true
+                                       Layout.preferredWidth: 44
+                                       horizontalAlignment: Text.AlignHCenter }
+                                Rectangle {
+                                    Layout.fillWidth: true; Layout.preferredHeight: 38
+                                    radius: 6; color: ouMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                    border.color: "#33FFFFFF"; border.width: 1
+                                    Text { anchors.fill: parent; anchors.leftMargin: 10
+                                           verticalAlignment: Text.AlignVCenter
+                                           text: model.outname; color: "white"
+                                           font.pixelSize: 14; elide: Text.ElideRight }
+                                    MouseArea { id: ouMa; anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.editOutName(index) }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 50
+                        Layout.fillHeight: false; radius: 10
+                        color: ioSaveMa.pressed ? "#2A65C7" : "#468CFF"
+                        Text { anchors.centerIn: parent; text: "이름 적용"
+                               color: "white"; font.pixelSize: 16; font.bold: true }
+                        MouseArea { id: ioSaveMa; anchors.fill: parent
+                            onClicked: if (settingsBackend) settingsBackend.applyIoNames() }
+                    }
+                }
+            }
+
+            // ---------- [2] 시스템 파라미터 ----------
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 10; spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            Layout.preferredWidth: 150; Layout.preferredHeight: 40
+                            radius: 6; color: pApply.pressed ? "#E74C3C" : "#C0392B"
+                            border.color: "#E74C3C"; border.width: 1
+                            Text { anchors.centerIn: parent; text: "파라미터 적용"
+                                   color: "white"; font.pixelSize: 13; font.bold: true }
+                            MouseArea { id: pApply; anchors.fill: parent
+                                onClicked: if (settingsBackend) settingsBackend.saveParams() }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        color: "#26000000"; radius: 10
+                        Flickable {
+                            anchors.fill: parent; anchors.margins: 10
+                            clip: true; contentHeight: paramCol.height
+                            boundsBehavior: Flickable.StopAtBounds
+                            ColumnLayout {
+                                id: paramCol
+                                width: parent.width; spacing: 14
+                                Text { text: "축 구성 및 모션 설정 (DT15000 ~)"
+                                       color: "#FFD700"; font.pixelSize: 14; font.bold: true }
+                                // 헤더
+                                RowLayout {
+                                    Layout.fillWidth: true; spacing: 8
+                                    Repeater {
+                                        model: ["축","사용","방향","스트로크","가감속","PPR"]
+                                        delegate: Text { text: modelData; color: "#BBBBBB"
+                                            font.pixelSize: 12; font.bold: true
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter }
+                                    }
+                                }
+                                Repeater {
+                                    model: paramModel
+                                    delegate: RowLayout {
+                                        Layout.fillWidth: true; spacing: 8; height: 44
+                                        Text { text: model.axname; color: "white"
+                                            font.pixelSize: 14; font.bold: true
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter }
+                                        // 사용
+                                        Item { Layout.fillWidth: true; height: 36
+                                            Rectangle { anchors.centerIn: parent
+                                                width: 26; height: 26; radius: 4
+                                                color: model.axuse ? "#468CFF" : "transparent"
+                                                border.color: model.axuse ? "#468CFF" : "#888888"
+                                                border.width: 2
+                                                Text { anchors.centerIn: parent
+                                                    text: model.axuse ? "✓" : ""
+                                                    color: "white"; font.pixelSize: 16; font.bold: true }
+                                                MouseArea { anchors.fill: parent
+                                                    onClicked: if (settingsBackend)
+                                                        settingsBackend.toggleAxisUse(index) } } }
+                                        // 방향
+                                        Item { Layout.fillWidth: true; height: 36
+                                            Rectangle { anchors.centerIn: parent
+                                                width: 90; height: 30; radius: 4
+                                                property bool fwd: model.axdir === 0
+                                                color: fwd ? "#334CC600" : "#33FF6400"
+                                                border.color: fwd ? "#00FF00" : "#FF8000"
+                                                border.width: 1
+                                                Text { anchors.centerIn: parent
+                                                    text: parent.fwd ? "정방향" : "역방향"
+                                                    color: parent.fwd ? "#00FF00" : "#FF8000"
+                                                    font.pixelSize: 12; font.bold: true }
+                                                MouseArea { anchors.fill: parent
+                                                    onClicked: if (settingsBackend)
+                                                        settingsBackend.toggleAxisDir(index) } } }
+                                        // 스트로크
+                                        Rectangle { Layout.fillWidth: true; height: 36
+                                            radius: 4; color: "#1AFFFFFF"
+                                            border.color: "#33FFFFFF"; border.width: 1
+                                            Text { anchors.centerIn: parent; text: model.axstroke
+                                                color: "#FFD280"; font.pixelSize: 13; font.bold: true }
+                                            MouseArea { anchors.fill: parent
+                                                onClicked: if (settingsBackend)
+                                                    settingsBackend.editStroke(index) } }
+                                        // 가감속
+                                        Rectangle { Layout.fillWidth: true; height: 36
+                                            radius: 4; color: "#1AFFFFFF"
+                                            border.color: "#33FFFFFF"; border.width: 1
+                                            Text { anchors.centerIn: parent; text: model.axaccel
+                                                color: "white"; font.pixelSize: 13; font.bold: true }
+                                            MouseArea { anchors.fill: parent
+                                                onClicked: if (settingsBackend)
+                                                    settingsBackend.editAccel(index) } }
+                                        // PPR
+                                        Rectangle { Layout.fillWidth: true; height: 36
+                                            radius: 4; color: "#1AFFFFFF"
+                                            border.color: "#33FFFFFF"; border.width: 1
+                                            Text { anchors.centerIn: parent; text: model.axppr
+                                                color: "white"; font.pixelSize: 13; font.bold: true }
+                                            MouseArea { anchors.fill: parent
+                                                onClicked: if (settingsBackend)
+                                                    settingsBackend.editPpr(index) } }
+                                    }
+                                }
+                                Rectangle { Layout.fillWidth: true; height: 1
+                                            color: "#22FFFFFF" }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "JOG 모드"; color: "#DDDDDD"
+                                           font.pixelSize: 13; font.bold: true }
+                                    Item { Layout.fillWidth: true }
+                                    Rectangle {
+                                        Layout.preferredWidth: 100; Layout.preferredHeight: 38
+                                        radius: 8
+                                        property bool on: settingsBackend
+                                            ? settingsBackend.homeOn : false
+                                        color: on ? "#334CC864" : "#14FFFFFF"
+                                        border.color: on ? "#00CC66" : "#666666"
+                                        border.width: 1
+                                        Text { anchors.centerIn: parent
+                                            text: parent.on ? "ON" : "OFF"
+                                            color: parent.on ? "#00CC66" : "#AAAAAA"
+                                            font.pixelSize: 15; font.bold: true }
+                                        MouseArea { anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.toggleHome() }
+                                    }
+                                }
+                                Text { text: "데이터셋 (Zero Preset) — 버튼을 누르면 해당 축 원점 설정 (DT50033)"
+                                       color: "#DDDDDD"; font.pixelSize: 12 }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 4; rowSpacing: 8; columnSpacing: 8
+                                    Repeater {
+                                        model: paramModel
+                                        delegate: Rectangle {
+                                            Layout.fillWidth: true; Layout.preferredHeight: 50
+                                            radius: 6
+                                            color: dsMa.pressed ? "#E67E22" : "#444444"
+                                            border.color: dsMa.pressed ? "#D35400" : "#666666"
+                                            border.width: 1
+                                            Text { anchors.centerIn: parent
+                                                text: model.axname + "\nSET"
+                                                horizontalAlignment: Text.AlignHCenter
+                                                color: dsMa.pressed ? "white" : "#AAAAAA"
+                                                font.pixelSize: 12; font.bold: true }
+                                            MouseArea { id: dsMa; anchors.fill: parent
+                                                onPressed: if (settingsBackend)
+                                                    settingsBackend.datasetPressed(index)
+                                                onReleased: if (settingsBackend)
+                                                    settingsBackend.datasetReleased(index) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------- [3] 밸브 설정 ----------
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 10; spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            Layout.preferredWidth: 120; Layout.preferredHeight: 40
+                            radius: 6; color: vSave.pressed ? "#1E8449" : "#27AE60"
+                            border.color: "#2ECC71"; border.width: 1
+                            Text { anchors.centerIn: parent; text: " 저장"
+                                   color: "white"; font.pixelSize: 13; font.bold: true }
+                            MouseArea { id: vSave; anchors.fill: parent
+                                onClicked: if (settingsBackend) settingsBackend.saveValveConfig() }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 8
+                        Repeater {
+                            model: ["사용","번호","이름","동작","순서","JOG"]
+                            delegate: Text { text: modelData; color: "#FFD700"
+                                font.pixelSize: 12; font.bold: true; Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignHCenter }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        color: "#26000000"; radius: 10
+                        ListView {
+                            anchors.fill: parent; anchors.margins: 6
+                            clip: true; model: valveModel; spacing: 6
+                            cacheBuffer: 2400
+                            boundsBehavior: Flickable.StopAtBounds
+                            delegate: RowLayout {
+                                width: ListView.view ? ListView.view.width : 0
+                                height: 42; spacing: 8
+                                // 사용
+                                Item { Layout.fillWidth: true; height: 40
+                                    Rectangle { anchors.centerIn: parent
+                                        width: 24; height: 24; radius: 4
+                                        color: model.venabled ? "#468CFF" : "transparent"
+                                        border.color: model.venabled ? "#468CFF" : "#888888"
+                                        border.width: 2
+                                        Text { anchors.centerIn: parent
+                                            text: model.venabled ? "✓" : ""
+                                            color: "white"; font.pixelSize: 15; font.bold: true }
+                                        MouseArea { anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.toggleValveEnabled(index) } } }
+                                Text { text: model.vyaddr; color: "#FFD280"
+                                    font.pixelSize: 12; font.bold: true
+                                    Layout.fillWidth: true
+                                    horizontalAlignment: Text.AlignHCenter }
+                                Rectangle { Layout.fillWidth: true; height: 35
+                                    Layout.preferredWidth: 2; radius: 4
+                                    color: vnMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                    border.color: "#666666"; border.width: 1
+                                    Text { anchors.fill: parent; anchors.leftMargin: 10
+                                        verticalAlignment: Text.AlignVCenter
+                                        text: model.vname; color: "white"
+                                        font.pixelSize: 12; elide: Text.ElideRight }
+                                    MouseArea { id: vnMa; anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.editValveName(index) } }
+                                Rectangle { Layout.fillWidth: true; height: 35; radius: 4
+                                    property bool tg: model.vtoggle
+                                    color: tg ? "#332ECC71" : "#33468CFF"
+                                    border.color: tg ? "#2ECC71" : "#468CFF"
+                                    border.width: 1
+                                    Text { anchors.centerIn: parent
+                                        text: parent.tg ? "Toggle" : "Momentary"
+                                        color: parent.tg ? "#2ECC71" : "white"
+                                        font.pixelSize: 11; font.bold: true }
+                                    MouseArea { anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.toggleValveMode(index) } }
+                                RowLayout { Layout.fillWidth: true; spacing: 3
+                                    Rectangle { Layout.fillWidth: true; height: 30
+                                        radius: 4; color: vuMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                        border.color: "#666666"; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "▲"
+                                            color: "white"; font.pixelSize: 10 }
+                                        MouseArea { id: vuMa; anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.moveValveUp(index) } }
+                                    Rectangle { Layout.fillWidth: true; height: 30
+                                        radius: 4; color: vdMa.pressed ? "#33468CFF" : "#1AFFFFFF"
+                                        border.color: "#666666"; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "▼"
+                                            color: "white"; font.pixelSize: 10 }
+                                        MouseArea { id: vdMa; anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.moveValveDown(index) } } }
+                                RowLayout { Layout.fillWidth: true; spacing: 3
+                                    Rectangle { Layout.preferredWidth: 45; height: 33
+                                        radius: 4
+                                        property bool j: model.vjog
+                                        color: j ? "#3300E5FF" : "#12FFFFFF"
+                                        border.color: j ? "#00E5FF" : "#555555"
+                                        border.width: 1
+                                        Text { anchors.centerIn: parent; text: "JOG"
+                                            color: parent.j ? "#00E5FF" : "#666666"
+                                            font.pixelSize: 11; font.bold: true }
+                                        MouseArea { anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.toggleValveJog(index) } }
+                                    ColumnLayout { spacing: 1
+                                        Rectangle { Layout.preferredWidth: 22
+                                            Layout.preferredHeight: 15; radius: 3
+                                            color: "#0DFFFFFF"
+                                            border.color: model.vjog ? "#00B4D8" : "#444444"
+                                            border.width: 1
+                                            Text { anchors.centerIn: parent; text: "▲"
+                                                color: model.vjog ? "#00B4D8" : "#555555"
+                                                font.pixelSize: 8 }
+                                            MouseArea { anchors.fill: parent
+                                                enabled: model.vjog
+                                                onClicked: if (settingsBackend)
+                                                    settingsBackend.jogOrderUp(index) } }
+                                        Rectangle { Layout.preferredWidth: 22
+                                            Layout.preferredHeight: 15; radius: 3
+                                            color: "#0DFFFFFF"
+                                            border.color: model.vjog ? "#00B4D8" : "#444444"
+                                            border.width: 1
+                                            Text { anchors.centerIn: parent; text: "▼"
+                                                color: model.vjog ? "#00B4D8" : "#555555"
+                                                font.pixelSize: 8 }
+                                            MouseArea { anchors.fill: parent
+                                                enabled: model.vjog
+                                                onClicked: if (settingsBackend)
+                                                    settingsBackend.jogOrderDown(index) } } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------- [4] 알람 메시지 ----------
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 10; spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            Layout.preferredWidth: 140; Layout.preferredHeight: 40
+                            radius: 6; color: aAdd.pressed ? "#33468CFF" : "#26468CFF"
+                            border.color: "#468CFF"; border.width: 1
+                            Text { anchors.centerIn: parent; text: "＋ 알람 추가"
+                                   color: "#468CFF"; font.pixelSize: 13; font.bold: true }
+                            MouseArea { id: aAdd; anchors.fill: parent
+                                onClicked: if (settingsBackend) settingsBackend.addAlarm() }
+                        }
+                        Rectangle {
+                            Layout.preferredWidth: 100; Layout.preferredHeight: 40
+                            radius: 6; color: aSave.pressed ? "#1A4FA0" : "#2A65C7"
+                            border.color: "#468CFF"; border.width: 1
+                            Text { anchors.centerIn: parent; text: "저장"
+                                   color: "white"; font.pixelSize: 13; font.bold: true }
+                            MouseArea { id: aSave; anchors.fill: parent
+                                onClicked: if (settingsBackend) settingsBackend.saveAlarms() }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        color: "#26000000"; radius: 8
+                        ListView {
+                            anchors.fill: parent; anchors.margins: 6
+                            clip: true; model: alarmModel; spacing: 4
+                            cacheBuffer: 1600
+                            boundsBehavior: Flickable.StopAtBounds
+                            delegate: Rectangle {
+                                width: ListView.view ? ListView.view.width : 0
+                                height: 48; radius: 6; color: "#0AFFFFFF"
+                                RowLayout {
+                                    anchors.fill: parent; anchors.margins: 8; spacing: 8
+                                    Text { text: model.ano; color: "#FF6B6B"
+                                        font.pixelSize: 14; font.bold: true
+                                        Layout.preferredWidth: 60
+                                        horizontalAlignment: Text.AlignHCenter }
+                                    Text { text: model.amsg; color: "white"
+                                        font.pixelSize: 14; Layout.fillWidth: true
+                                        elide: Text.ElideRight }
+                                    Rectangle { Layout.preferredWidth: 70
+                                        Layout.preferredHeight: 34; radius: 4
+                                        color: aeMa.pressed ? "#33FFFFFF" : "#1AFFFFFF"
+                                        border.color: "#888888"; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "수정"
+                                            color: "white"; font.pixelSize: 13; font.bold: true }
+                                        MouseArea { id: aeMa; anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.editAlarm(model.anoraw) } }
+                                    Rectangle { Layout.preferredWidth: 70
+                                        Layout.preferredHeight: 34; radius: 4
+                                        color: adMa.pressed ? "#33FF4646" : "#26FF4646"
+                                        border.color: "#FF4646"; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "삭제"
+                                            color: "#FF4646"; font.pixelSize: 13; font.bold: true }
+                                        MouseArea { id: adMa; anchors.fill: parent
+                                            onClicked: if (settingsBackend)
+                                                settingsBackend.deleteAlarm(model.anoraw) } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------- [5] 인터록 설정 ----------
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 20; spacing: 16
+                    Text { text: "모드 인터록 설정"; color: "#00E5FF"
+                           font.pixelSize: 18; font.bold: true }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "• 배타(⊗): 같은 그룹에서 하나를 켜면 나머지가 자동으로 꺼집니다.\n"
+                            + "• 필수(★): 같은 그룹에서 마지막 하나는 끌 수 없습니다.\n"
+                            + "• 두 옵션은 독립적으로 설정할 수 있습니다."
+                        color: "#9CA3AF"; font.pixelSize: 14; wrapMode: Text.WordWrap
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#374151" }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 55; radius: 10
+                        color: ilMa.pressed ? "#3300E5FF" : "#1A00E5FF"
+                        border.color: "#00E5FF"; border.width: 2
+                        Text { anchors.centerIn: parent; text: "인터록 그룹 설정 열기"
+                               color: "#00E5FF"; font.pixelSize: 17; font.bold: true }
+                        MouseArea { id: ilMa; anchors.fill: parent
+                            onClicked: if (settingsBackend) settingsBackend.openInterlock() }
+                    }
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            // ---------- [6] 네트워크 ----------
+            Item {
+                Flickable {
+                    anchors.fill: parent; anchors.margins: 10
+                    clip: true; contentHeight: netCol.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    ColumnLayout {
+                        id: netCol
+                        width: parent.width; spacing: 14
+
+                        Text { text: "무선 (WiFi)"; color: "#DDDDDD"
+                               font.pixelSize: 15; font.bold: true }
+                        GridLayout {
+                            Layout.fillWidth: true; columns: 4
+                            rowSpacing: 6; columnSpacing: 12
+                            Text { text: "SSID:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.wSsid : "-"
+                                   color: "#00E5FF"; font.pixelSize: 14; font.bold: true
+                                   Layout.fillWidth: true }
+                            Text { text: "신호:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.wSignal : "-"
+                                   color: "#DDDDDD"; font.pixelSize: 14; Layout.fillWidth: true }
+                            Text { text: "IP 주소:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.wIp : "-"
+                                   color: "#FFD280"; font.pixelSize: 14; font.bold: true
+                                   Layout.fillWidth: true }
+                            Text { text: "인터페이스:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.wIface : "-"
+                                   color: "#AAAAAA"; font.pixelSize: 14; Layout.fillWidth: true }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 10
+                            Repeater {
+                                model: [["새로고침","refreshWifi"],["네트워크 스캔","scanWifi"]]
+                                delegate: Rectangle {
+                                    Layout.preferredWidth: 130; Layout.preferredHeight: 38
+                                    radius: 6; color: wbMa.pressed ? "#33468CFF" : "#2E468CFF"
+                                    border.color: "#99468CFF"; border.width: 1
+                                    Text { anchors.centerIn: parent; text: modelData[0]
+                                        color: "#DDEEFF"; font.pixelSize: 14; font.bold: true }
+                                    MouseArea { id: wbMa; anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.wifiBtn(modelData[1]) }
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                            Rectangle {
+                                Layout.preferredWidth: 110; Layout.preferredHeight: 38
+                                radius: 6; color: wDis.pressed ? "#33FF4646" : "#26FF4646"
+                                border.color: "#80FF4646"; border.width: 1
+                                Text { anchors.centerIn: parent
+                                    text: settingsBackend ? settingsBackend.wToggleText : "연결"
+                                    color: "#FFCCCC"; font.pixelSize: 14; font.bold: true }
+                                MouseArea { id: wDis; anchors.fill: parent
+                                    onClicked: if (settingsBackend)
+                                        settingsBackend.wifiBtn("toggleWifi") }
+                            }
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.preferredHeight: 220
+                            color: "#40000000"; radius: 8
+                            border.color: "#1FFFFFFF"; border.width: 1
+                            ListView {
+                                anchors.fill: parent; anchors.margins: 4
+                                clip: true; model: wifiModel; spacing: 0
+                                boundsBehavior: Flickable.StopAtBounds
+                                delegate: Rectangle {
+                                    width: ListView.view ? ListView.view.width : 0
+                                    height: 42
+                                    color: wiMa.pressed ? "#33468CFF" : "transparent"
+                                    Text { anchors.verticalCenter: parent.verticalCenter
+                                        x: 12; text: model.wtext; color: "#EEEEEE"
+                                        font.pixelSize: 15 }
+                                    Rectangle { anchors.bottom: parent.bottom
+                                        width: parent.width; height: 1; color: "#0DFFFFFF" }
+                                    MouseArea { id: wiMa; anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.wifiItemActivated(index) }
+                                }
+                            }
+                        }
+
+                        Rectangle { Layout.fillWidth: true; height: 1; color: "#22FFFFFF" }
+                        Text { text: "유선 (Ethernet)"; color: "#FFD280"
+                               font.pixelSize: 15; font.bold: true }
+                        GridLayout {
+                            Layout.fillWidth: true; columns: 4
+                            rowSpacing: 6; columnSpacing: 12
+                            Text { text: "인터페이스:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.eIface : "-"
+                                   color: "#FFD280"; font.pixelSize: 14; font.bold: true
+                                   Layout.fillWidth: true }
+                            Text { text: "상태:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.eState : "-"
+                                   color: settingsBackend ? settingsBackend.eStateColor : "#DDD"
+                                   font.pixelSize: 14; font.bold: true; Layout.fillWidth: true }
+                            Text { text: "IP 주소:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.eIp : "-"
+                                   color: "#00E5FF"; font.pixelSize: 14; font.bold: true
+                                   Layout.fillWidth: true }
+                            Text { text: "방식:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.eMethod : "-"
+                                   color: "#DDDDDD"; font.pixelSize: 14; Layout.fillWidth: true }
+                            Text { text: "게이트웨이:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.eGw : "-"
+                                   color: "#DDDDDD"; font.pixelSize: 14; Layout.fillWidth: true }
+                            Text { text: "프로파일:"; color: "#DDDDDD"; font.pixelSize: 14 }
+                            Text { text: settingsBackend ? settingsBackend.eConn : "-"
+                                   color: "#AAAAAA"; font.pixelSize: 14; Layout.fillWidth: true }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 10
+                            Repeater {
+                                model: [["새로고침","refreshEth"],["DHCP 사용","ethDhcp"],
+                                        ["고정 IP 설정","ethStatic"]]
+                                delegate: Rectangle {
+                                    Layout.preferredWidth: 130; Layout.preferredHeight: 38
+                                    radius: 6; color: ebMa.pressed ? "#33468CFF" : "#2E468CFF"
+                                    border.color: "#99468CFF"; border.width: 1
+                                    Text { anchors.centerIn: parent; text: modelData[0]
+                                        color: "#DDEEFF"; font.pixelSize: 14; font.bold: true }
+                                    MouseArea { id: ebMa; anchors.fill: parent
+                                        onClicked: if (settingsBackend)
+                                            settingsBackend.wifiBtn(modelData[1]) }
+                                }
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        Item { Layout.preferredHeight: 10 }
+                    }
+                }
+            }
+        }
+    }
+}

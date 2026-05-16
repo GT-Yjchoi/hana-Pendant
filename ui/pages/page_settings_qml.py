@@ -1,0 +1,1220 @@
+"""
+설정 페이지 QML(GPU) — PageSettings drop-in (7탭).
+
+원칙: PLC 기록/저장/로드 로직은 page_settings.py 와 **문자 단위로 동일**.
+값의 출처만 QWidget → 백엔드 상태배열(동일 값/타입)로 교체.
+  - _build_valve_config / _save_valve_config(_silent) / _load_valve_config
+  - _save_params / _load_params (DT 패킹·인덱스·스케일 IDENTICAL)
+  - _save_axis_settings / _load_axis_settings
+  - _apply_io_names / _load_io_input_names / _sync_valve_names_to_io
+  - 알람 CRUD / PLC 연결·상태 / 인터록 / WiFi·Ethernet
+다이얼로그·오버레이·WiFi 워커는 page_settings.py 의 것을 그대로 재사용.
+
+⚠ valve/param/interlock/dataset 의 실제 동작·모션한계는 실장비에서 전수
+재검증 필수 (무PLC 환경에선 UI/스크롤/로직구조까지만 검증 가능).
+"""
+import json
+import os
+
+from PySide6.QtCore import (Qt, QObject, Signal, Slot, Property, QUrl, QTimer,
+                            QAbstractListModel, QModelIndex, QByteArray)
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QVBoxLayout, QWidget, QDialog, QApplication
+from PySide6.QtQuickWidgets import QQuickWidget
+
+from utils.paths import get_settings_path as _get_settings_path
+from utils.json_utils import load_json, save_json
+
+# page_settings.py 의 오버레이/워커/다이얼로그 그대로 재사용
+from ui.pages.page_settings import (
+    NumberInputOverlay, ConfirmOverlay, _EthernetStaticDialog,
+    WifiScanWorker, EthernetStatusWorker, WifiStatusWorker, AXIS_NAMES)
+
+try:
+    from widgets.touch_keyboard import TouchKeyboard
+except ImportError:
+    TouchKeyboard = None
+try:
+    from utils.io_manager import IOManager
+except ImportError:
+    IOManager = None
+try:
+    from utils.languages import LanguageManager
+except ImportError:
+    LanguageManager = None
+
+_QML_PATH = os.path.join(os.path.dirname(__file__), "PageSettings.qml")
+
+_DEF_Y0X = ["형개허가", "형폐허가", "에젝터 허가", "싸이클스타트",
+            "컨베어출력1", "컨베어출력2", "예비1", "예비2",
+            "예비 Y08", "예비 Y09", "예비 Y0A", "예비 Y0B",
+            "예비 Y0C", "예비 Y0D", "예비 Y0E", "예비 Y0F"]
+_DEF_Y2X = ["척 1 (Chuck 1)", "척 2 (Chuck 2)", "척 3 (Chuck 3)", "척 4 (Chuck 4)",
+            "흡착 1 (Vac 1)", "흡착 2 (Vac 2)", "흡착 3 (Vac 3)", "흡착 4 (Vac 4)",
+            "포스쳐 반전", "포스쳐 복귀", "스위블 회전", "스위블 복귀",
+            "니퍼 컷팅 1", "니퍼 컷팅 2", "컨베이어 출력", "공급기 출력"]
+
+
+# ───────────────────────── 모델 ─────────────────────────
+class _ListModel(QAbstractListModel):
+    def __init__(self, roles, parent=None):
+        super().__init__(parent)
+        self._roles = {Qt.UserRole + 1 + i: QByteArray(r.encode())
+                       for i, r in enumerate(roles)}
+        self._rnames = list(roles)
+        self._rows = []
+
+    def rowCount(self, p=QModelIndex()):
+        return len(self._rows)
+
+    def roleNames(self):
+        return self._roles
+
+    def data(self, ix, role):
+        i = ix.row()
+        if 0 <= i < len(self._rows):
+            key = self._rnames[role - (Qt.UserRole + 1)]
+            return self._rows[i].get(key)
+        return None
+
+    def reset(self, rows):
+        self.beginResetModel()
+        self._rows = rows
+        self.endResetModel()
+
+    def update_row(self, i, d):
+        if 0 <= i < len(self._rows):
+            self._rows[i].update(d)
+            self.dataChanged.emit(self.index(i, 0), self.index(i, 0),
+                                  list(self._roles.keys()))
+
+
+# ───────────────────────── 백엔드 ─────────────────────────
+class SettingsBackend(QObject):
+    changed = Signal()                 # 일반/상태 프로퍼티 갱신
+    sig_valve_config_changed = Signal()
+
+    def __init__(self, page):
+        super().__init__(page)
+        self._p = page
+
+    # ---- 상태 프로퍼티 getter ----
+    def _g(attr, default=""):
+        def _get(self):
+            return getattr(self._p, attr, default)
+        return _get
+
+    ipText = Property(str, _g("_ip", "192.168.0.10"), notify=changed)
+    portText = Property(str, _g("_port", "9094"), notify=changed)
+    plcConnected = Property(bool, lambda s: s._p._plc_connected, notify=changed)
+    connText = Property(str, lambda s: "해제" if s._p._plc_connected else "연결",
+                        notify=changed)
+    statusText = Property(str, lambda s: s._p._status_text, notify=changed)
+    statusColor = Property(str, lambda s: s._p._status_color, notify=changed)
+    lang = Property(str, lambda s: s._p._lang, notify=changed)
+    homeOn = Property(bool, lambda s: s._p._p_home, notify=changed)
+    wSsid = Property(str, lambda s: s._p._w["ssid"], notify=changed)
+    wSignal = Property(str, lambda s: s._p._w["signal"], notify=changed)
+    wIp = Property(str, lambda s: s._p._w["ip"], notify=changed)
+    wIface = Property(str, lambda s: s._p._w["iface"], notify=changed)
+    wToggleText = Property(str, lambda s: s._p._w["toggle"], notify=changed)
+    eIface = Property(str, lambda s: s._p._e["iface"], notify=changed)
+    eState = Property(str, lambda s: s._p._e["state"], notify=changed)
+    eStateColor = Property(str, lambda s: s._p._e["scolor"], notify=changed)
+    eIp = Property(str, lambda s: s._p._e["ip"], notify=changed)
+    eMethod = Property(str, lambda s: s._p._e["method"], notify=changed)
+    eGw = Property(str, lambda s: s._p._e["gw"], notify=changed)
+    eConn = Property(str, lambda s: s._p._e["conn"], notify=changed)
+
+    # ---- 슬롯: 전부 page 의 verbatim 로직 호출 ----
+    @Slot(int)
+    def tabChanged(self, idx):
+        self._p._on_tab_changed(idx)
+
+    @Slot()
+    def editIp(self):
+        self._p._edit_general("ip")
+
+    @Slot()
+    def editPort(self):
+        self._p._edit_general("port")
+
+    @Slot()
+    def connectClicked(self):
+        self._p._on_connect_clicked()
+
+    @Slot(str)
+    def setLang(self, code):
+        self._p._set_language(code)
+
+    @Slot()
+    def exitClicked(self):
+        self._p._on_exit_clicked()
+
+    @Slot(int)
+    def editInName(self, i):
+        self._p._edit_io_name(i, True)
+
+    @Slot(int)
+    def editOutName(self, i):
+        self._p._edit_io_name(i, False)
+
+    @Slot()
+    def applyIoNames(self):
+        self._p._apply_io_names()
+
+    @Slot(int)
+    def toggleAxisUse(self, i):
+        self._p._p_use[i] = not self._p._p_use[i]
+        self._p._refresh_param_model()
+
+    @Slot(int)
+    def toggleAxisDir(self, i):
+        self._p._p_dir[i] = 1 - self._p._p_dir[i]
+        self._p._refresh_param_model()
+
+    @Slot(int)
+    def editStroke(self, i):
+        self._p._edit_stroke(i)
+
+    @Slot(int)
+    def editAccel(self, i):
+        self._p._edit_num(self._p._p_accel, i)
+
+    @Slot(int)
+    def editPpr(self, i):
+        self._p._edit_num(self._p._p_ppr, i)
+
+    @Slot()
+    def toggleHome(self):
+        self._p._on_home_toggle_clicked()
+
+    @Slot(int)
+    def datasetPressed(self, i):
+        self._p._on_dataset_pressed(i)
+
+    @Slot(int)
+    def datasetReleased(self, i):
+        self._p._on_dataset_released(i)
+
+    @Slot()
+    def saveParams(self):
+        self._p._save_params()
+
+    @Slot()
+    def saveValveConfig(self):
+        self._p._save_valve_config()
+
+    @Slot(int)
+    def toggleValveEnabled(self, i):
+        self._p._v_enabled[i] = not self._p._v_enabled[i]
+        self._p._refresh_valve_model()
+
+    @Slot(int)
+    def editValveName(self, i):
+        self._p._edit_valve_name(i)
+
+    @Slot(int)
+    def toggleValveMode(self, i):
+        self._p._v_mode[i] = not self._p._v_mode[i]
+        self._p._refresh_valve_model()
+
+    @Slot(int)
+    def moveValveUp(self, i):
+        self._p._move_valve_up(i)
+
+    @Slot(int)
+    def moveValveDown(self, i):
+        self._p._move_valve_down(i)
+
+    @Slot(int)
+    def toggleValveJog(self, i):
+        self._p._on_jog_valve_toggled(i)
+
+    @Slot(int)
+    def jogOrderUp(self, i):
+        self._p._move_jog_order(i, -1)
+
+    @Slot(int)
+    def jogOrderDown(self, i):
+        self._p._move_jog_order(i, +1)
+
+    @Slot()
+    def addAlarm(self):
+        self._p._add_alarm()
+
+    @Slot(int)
+    def editAlarm(self, no):
+        self._p._edit_alarm(no)
+
+    @Slot(int)
+    def deleteAlarm(self, no):
+        self._p._delete_alarm(no)
+
+    @Slot()
+    def saveAlarms(self):
+        self._p._save_alarms()
+
+    @Slot()
+    def openInterlock(self):
+        self._p._open_interlock_dialog()
+
+    @Slot(str)
+    def wifiBtn(self, key):
+        self._p._wifi_btn(key)
+
+    @Slot(int)
+    def wifiItemActivated(self, idx):
+        self._p._on_wifi_item_activated(idx)
+
+
+# ───────────────────────── 페이지 ─────────────────────────
+class PageSettingsQml(QWidget):
+    sig_valve_config_changed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.plc_client = None
+
+        # ---- 상태 배열 (원본 위젯 내용과 1:1) ----
+        self._ip = "192.168.0.10"
+        self._port = "9094"
+        self._plc_connected = False
+        self._status_text = "● Disconnected"
+        self._status_color = "#FF4646"
+        self._lang = (LanguageManager.instance().current_lang
+                      if LanguageManager else "KR")
+
+        self._v_enabled = [i >= 16 for i in range(32)]
+        self._v_name = [(_DEF_Y2X[i - 16] if i >= 16 else _DEF_Y0X[i])
+                        for i in range(32)]
+        self._v_mode = [True] * 32          # True=toggle
+        self._jog_order = []
+        self._JOG_MAX = 6
+
+        self._p_use = [False] * 8
+        self._p_dir = [0] * 8
+        self._p_stroke = ["0.000 mm"] * 8
+        self._p_accel = ["100"] * 8
+        self._p_ppr = ["15000"] * 8
+        self._p_home = False
+
+        mgr = IOManager.instance() if IOManager else None
+        self._in_name = [(mgr.get_input_name(i) if mgr else "") for i in range(32)]
+        self._out_name = [(mgr.get_output_name(i) if mgr else "") for i in range(32)]
+
+        self._w = {"ssid": "-", "signal": "-", "ip": "-", "iface": "-",
+                   "toggle": "연결"}
+        self._e = {"iface": "-", "state": "-", "scolor": "#DDDDDD", "ip": "-",
+                   "method": "-", "gw": "-", "conn": "-"}
+        self._last_wifi_ssid = ""
+        self._wifi = None
+        self._scan_worker = None
+        self._wifi_status_worker = None
+        self._eth_status_worker = None
+        self._wifi_nets = []
+
+        # ---- 모델 ----
+        self._io_model = _ListModel(["xaddr", "inname", "yaddr", "outname"], self)
+        self._param_model = _ListModel(
+            ["axname", "axuse", "axdir", "axstroke", "axaccel", "axppr"], self)
+        self._valve_model = _ListModel(
+            ["vyaddr", "venabled", "vname", "vtoggle", "vjog"], self)
+        self._alarm_model = _ListModel(["ano", "amsg", "anoraw"], self)
+        self._wifi_model = _ListModel(["wtext"], self)
+        self._be = SettingsBackend(self)
+        self._be.sig_valve_config_changed.connect(self.sig_valve_config_changed)
+
+        # ---- QML ----
+        self._view = QQuickWidget(self)
+        self._view.setResizeMode(QQuickWidget.SizeRootObjectToView)
+        self._view.setClearColor(QColor("#16202B"))
+        ctx = self._view.rootContext()
+        ctx.setContextProperty("ioModel", self._io_model)
+        ctx.setContextProperty("paramModel", self._param_model)
+        ctx.setContextProperty("valveModel", self._valve_model)
+        ctx.setContextProperty("alarmModel", self._alarm_model)
+        ctx.setContextProperty("wifiModel", self._wifi_model)
+        ctx.setContextProperty("settingsBackend", self._be)
+        self._view.setSource(QUrl.fromLocalFile(_QML_PATH))
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._view)
+
+        # WiFi 주기 타이머 (page_settings 와 동일)
+        self._wifi_scan_timer = QTimer(self)
+        self._wifi_scan_timer.setInterval(15000)
+        self._wifi_scan_timer.timeout.connect(self._auto_scan_tick)
+        self._net_status_timer = QTimer(self)
+        self._net_status_timer.setInterval(3000)
+        self._net_status_timer.timeout.connect(self._net_status_tick)
+
+        if IOManager:
+            IOManager.instance().sig_names_changed.connect(self._on_manager_changed)
+
+        self._load_plc_settings()
+        self._load_valve_config()
+        self._load_io_input_names()
+        self._refresh_all_models()
+        self.update_language()
+
+    # ---- 모델 갱신 ----
+    def _refresh_io_model(self):
+        rows = []
+        for i in range(32):
+            xa = i if i < 16 else i + 16
+            ya = i if i < 16 else i + 16
+            rows.append({"xaddr": f"X{xa:02X}", "inname": self._in_name[i],
+                         "yaddr": f"Y{ya:02X}", "outname": self._out_name[i]})
+        self._io_model.reset(rows)
+
+    def _refresh_param_model(self):
+        rows = []
+        for i in range(8):
+            rows.append({"axname": AXIS_NAMES[i], "axuse": self._p_use[i],
+                         "axdir": self._p_dir[i], "axstroke": self._p_stroke[i],
+                         "axaccel": self._p_accel[i], "axppr": self._p_ppr[i]})
+        self._param_model.reset(rows)
+        self._be.changed.emit()
+
+    def _refresh_valve_model(self):
+        rows = []
+        for i in range(32):
+            ya = i if i < 16 else i + 16
+            rows.append({"vyaddr": f"Y{ya:02X}", "venabled": self._v_enabled[i],
+                         "vname": self._v_name[i], "vtoggle": self._v_mode[i],
+                         "vjog": i in self._jog_order})
+        self._valve_model.reset(rows)
+
+    def _refresh_alarm_model(self):
+        from ui.overlays.alarm_overlay import USER_ALARMS
+        rows = [{"ano": f"A-{no:03d}", "amsg": USER_ALARMS[no], "anoraw": no}
+                for no in sorted(USER_ALARMS.keys())]
+        self._alarm_model.reset(rows)
+
+    def _refresh_wifi_model(self):
+        self._wifi_model.reset([{"wtext": t} for t in self._wifi_nets])
+
+    def _refresh_all_models(self):
+        self._refresh_io_model()
+        self._refresh_param_model()
+        self._refresh_valve_model()
+        self._refresh_alarm_model()
+        self._refresh_wifi_model()
+
+    # ===================================================================
+    # 밸브 설정 — page_settings.py 와 동일 (값 출처만 상태배열)
+    # ===================================================================
+    def _edit_valve_name(self, idx):
+        if not TouchKeyboard:
+            return
+        dlg = TouchKeyboard("밸브 이름 입력", self._v_name[idx], self)
+        if dlg.exec() == QDialog.Accepted:
+            new_name = dlg.get_text()
+            if new_name:
+                self._v_name[idx] = new_name
+                self._refresh_valve_model()
+
+    def _move_valve_up(self, idx):
+        if idx == 0:
+            return
+        self._swap_valve_data(idx, idx - 1)
+
+    def _move_valve_down(self, idx):
+        if idx >= 31:
+            return
+        self._swap_valve_data(idx, idx + 1)
+
+    def _swap_valve_data(self, a, b):
+        self._v_enabled[a], self._v_enabled[b] = self._v_enabled[b], self._v_enabled[a]
+        self._v_name[a], self._v_name[b] = self._v_name[b], self._v_name[a]
+        self._v_mode[a], self._v_mode[b] = self._v_mode[b], self._v_mode[a]
+        self._refresh_valve_model()
+
+    def _on_jog_valve_toggled(self, valve_idx):
+        # 원본 _on_jog_valve_toggled 와 동일 로직 (체크 상태는 멤버십으로 표현)
+        if valve_idx not in self._jog_order:
+            if len(self._jog_order) >= self._JOG_MAX:
+                return
+            self._jog_order.append(valve_idx)
+        else:
+            self._jog_order.remove(valve_idx)
+        self._refresh_valve_model()
+
+    def _move_jog_order(self, valve_idx, direction):
+        if valve_idx not in self._jog_order:
+            return
+        pos = self._jog_order.index(valve_idx)
+        new_pos = pos + direction
+        if 0 <= new_pos < len(self._jog_order):
+            self._jog_order[pos], self._jog_order[new_pos] = \
+                self._jog_order[new_pos], self._jog_order[pos]
+        self._refresh_valve_model()
+
+    def _build_valve_config(self):
+        valve_config = []
+        for i in range(32):
+            mode = "toggle" if self._v_mode[i] else "momentary"
+            jog_pos = self._jog_order.index(i) if i in self._jog_order else -1
+            valve_config.append({
+                "index": i,
+                "name": self._v_name[i],
+                "mode": mode,
+                "enabled": self._v_enabled[i],
+                "jog_valve": i in self._jog_order,
+                "jog_order": jog_pos,
+                "order": i
+            })
+        return valve_config
+
+    def _save_valve_config_silent(self):
+        try:
+            path = _get_settings_path()
+            settings = load_json(path) or {}
+            settings["valve_config"] = self._build_valve_config()
+            save_json(path, settings)
+            self._be.sig_valve_config_changed.emit()
+            print("[Settings] 밸브 설정 자동 저장 완료")
+        except Exception as e:
+            print(f"[Settings] 밸브 설정 자동 저장 실패: {e}")
+
+    def _save_valve_config(self):
+        try:
+            path = _get_settings_path()
+            settings = load_json(path) or {}
+            settings["valve_config"] = self._build_valve_config()
+            save_json(path, settings)
+            print("[Settings] 밸브 설정 저장 완료")
+            self._be.sig_valve_config_changed.emit()
+            self._sync_valve_names_to_io()
+            dlg = ConfirmOverlay("저장 완료", "밸브 설정이 저장되었습니다.",
+                                 btn_yes="확인", parent=self.window())
+            dlg.btn_cancel.hide()
+            dlg.exec()
+        except Exception as e:
+            print(f"[Settings] 밸브 설정 저장 실패: {e}")
+
+    def _load_valve_config(self):
+        try:
+            path = _get_settings_path()
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    valve_config = settings.get("valve_config", None)
+                    if valve_config and len(valve_config) == 32:
+                        jog_entries = [(cfg.get("jog_order", -1), i)
+                                       for i, cfg in enumerate(valve_config)
+                                       if cfg.get("jog_valve", False)]
+                        jog_entries.sort(key=lambda x: x[0])
+                        self._jog_order = [idx for _, idx in jog_entries]
+                        for i, cfg in enumerate(valve_config):
+                            self._v_enabled[i] = cfg.get("enabled", True)
+                            self._v_name[i] = cfg.get("name", f"밸브 {i+1}")
+                            self._v_mode[i] = (cfg.get("mode", "toggle") == "toggle")
+                        print("[Settings] 밸브 설정 로드 완료")
+        except Exception as e:
+            print(f"[Settings] 밸브 설정 로드 실패: {e}")
+        self._sync_valve_names_to_io()
+
+    def _sync_valve_names_to_io(self):
+        if not IOManager:
+            return
+        mgr = IOManager.instance()
+        for i in range(32):
+            name = self._v_name[i] if i < len(self._v_name) else f"Y{i:02X}"
+            mgr.outputs[i] = name
+            self._out_name[i] = name
+        self._refresh_io_model()
+        mgr.sig_names_changed.emit()
+        print("[Settings] IO 출력 이름을 밸브 설정과 동기화 완료")
+
+    # ===================================================================
+    # 시스템 파라미터 — DT 패킹 IDENTICAL (page_settings._save/_load_params)
+    # ===================================================================
+    def _edit_stroke(self, i):
+        text = self._p_stroke[i].replace(" mm", "").strip()
+        dlg = NumberInputOverlay(text, is_ip=False, parent=self)
+        if dlg.exec():
+            try:
+                val = float(dlg.result_val)
+                self._p_stroke[i] = f"{val:.3f} mm"
+                self._refresh_param_model()
+            except ValueError:
+                pass
+
+    def _edit_num(self, arr, i):
+        dlg = NumberInputOverlay(arr[i], is_ip=False, parent=self)
+        if dlg.exec():
+            arr[i] = dlg.result_val
+            self._refresh_param_model()
+
+    def _on_home_toggle_clicked(self):
+        self._p_home = not self._p_home
+        self._be.changed.emit()
+        if self.plc_client and self.plc_client.is_connected:
+            self.plc_client.send_jog_mode(1 if self._p_home else 0)
+
+    def _on_dataset_pressed(self, axis_index):
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        val = (1 << axis_index)
+        self.plc_client.write_words(0x09, self.plc_client.ADDR_AXIS_DATASET, [val])
+
+    def _on_dataset_released(self, axis_index):
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        self.plc_client.write_words(0x09, self.plc_client.ADDR_AXIS_DATASET, [0])
+
+    def _load_params(self):
+        axis_uses_from_file = self._load_axis_settings()
+        if not self.plc_client or not self.plc_client.is_connected:
+            if axis_uses_from_file:
+                for i in range(8):
+                    if i < len(axis_uses_from_file):
+                        self._p_use[i] = bool(axis_uses_from_file[i])
+            self._refresh_param_model()
+            return
+        try:
+            data = self.plc_client.read_words(0x09, self.plc_client.AXIS_PARAM_ADDR, 50)
+            if not data or len(data) < 50:
+                return
+            use_bits = data[0]
+            for i in range(8):
+                self._p_use[i] = bool((use_bits >> i) & 1)
+            for i in range(8):
+                self._p_dir[i] = data[1 + i]
+            for i in range(8):
+                idx = 9 + (i * 2)
+                low, high = data[idx], data[idx + 1]
+                val = (high << 16) | low
+                if val > 0x7FFFFFFF:
+                    val -= 0x100000000
+                real_val = val / 1000.0
+                self._p_stroke[i] = f"{real_val:.3f} mm"
+            for i in range(8):
+                self._p_accel[i] = str(data[25 + i])
+            for i in range(8):
+                idx = 34 + i * 2
+                low = data[idx] if idx < len(data) else 0
+                high = data[idx + 1] if idx + 1 < len(data) else 0
+                val = low | (high << 16)
+                self._p_ppr[i] = str(val if val > 0 else 15000)
+        except Exception as e:
+            print(f"Param Load Error: {e}")
+        self._refresh_param_model()
+
+    def _save_params(self):
+        if not self.plc_client or not self.plc_client.is_connected:
+            dlg = ConfirmOverlay("전송 실패", "PLC가 연결되어 있지 않습니다.",
+                                 btn_yes="확인", parent=self.window())
+            dlg.btn_cancel.hide()
+            dlg.exec()
+            return
+        try:
+            send_data = [0] * 50
+            use_mask = 0
+            axis_uses_list = []
+            for i in range(8):
+                is_checked = self._p_use[i]
+                axis_uses_list.append(is_checked)
+                if is_checked:
+                    use_mask |= (1 << i)
+            send_data[0] = use_mask
+            for i in range(8):
+                send_data[1 + i] = self._p_dir[i]
+            axis_strokes_list = []
+            for i in range(8):
+                text = self._p_stroke[i].replace(" mm", "").strip()
+                try:
+                    val_float = float(text)
+                except Exception:
+                    val_float = 0.0
+                axis_strokes_list.append(val_float)
+                val = int(val_float * 1000)
+                low, high = val & 0xFFFF, (val >> 16) & 0xFFFF
+                idx = 9 + (i * 2)
+                send_data[idx] = low
+                send_data[idx + 1] = high
+            for i in range(8):
+                try:
+                    val = int(self._p_accel[i])
+                except Exception:
+                    val = 100
+                send_data[25 + i] = val
+            for i in range(8):
+                try:
+                    val = int(self._p_ppr[i])
+                except Exception:
+                    val = 15000
+                idx = 34 + i * 2
+                send_data[idx] = val & 0xFFFF
+                send_data[idx + 1] = (val >> 16) & 0xFFFF
+            self.plc_client.write_words(0x09, self.plc_client.AXIS_PARAM_ADDR,
+                                        send_data)
+            self._save_axis_settings(axis_uses_list, axis_strokes_list)
+            dlg = ConfirmOverlay("적용 완료",
+                                 "시스템 파라미터가 PLC와 파일에 저장되었습니다.",
+                                 btn_yes="확인", parent=self.window())
+            dlg.btn_cancel.hide()
+            dlg.exec()
+        except Exception as e:
+            dlg = ConfirmOverlay("오류", f"데이터 전송 중 오류가 발생했습니다.\n{e}",
+                                 btn_yes="확인", parent=self.window())
+            dlg.btn_cancel.hide()
+            dlg.exec()
+
+    def _save_axis_settings(self, axis_uses_list, axis_strokes_list=None):
+        try:
+            path = _get_settings_path()
+            settings = load_json(path) or {}
+            settings["axis_uses"] = axis_uses_list
+            if axis_strokes_list is not None:
+                settings["axis_strokes"] = axis_strokes_list
+            save_json(path, settings)
+            print(f"[Settings] 축 설정 저장 완료: uses={axis_uses_list}, strokes={axis_strokes_list}")
+        except Exception as e:
+            print(f"[Settings] 축 설정 저장 실패: {e}")
+
+    def _load_axis_settings(self):
+        try:
+            path = _get_settings_path()
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    axis_uses = settings.get("axis_uses", None)
+                    if axis_uses and len(axis_uses) == 8:
+                        print(f"[Settings] 축 설정 로드 완료: {axis_uses}")
+                        return axis_uses
+        except Exception as e:
+            print(f"[Settings] 축 설정 로드 실패: {e}")
+        return [True] * 8
+
+    # ===================================================================
+    # IO 이름 — page_settings 와 동일
+    # ===================================================================
+    def _edit_io_name(self, i, is_input):
+        if not TouchKeyboard:
+            return
+        arr = self._in_name if is_input else self._out_name
+        addr = (f"X{i if i<16 else i+16:02X}" if is_input
+                else f"Y{i if i<16 else i+16:02X}")
+        dlg = TouchKeyboard(addr, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            arr[i] = dlg.get_text()
+            self._refresh_io_model()
+
+    def _apply_io_names(self):
+        if not IOManager:
+            return
+        new_inputs = list(self._in_name)
+        new_outputs = list(self._out_name)
+        IOManager.instance().update_names(new_inputs, new_outputs)
+        for i in range(min(len(new_outputs), len(self._v_name))):
+            self._v_name[i] = new_outputs[i]
+        self._refresh_valve_model()
+        self._save_valve_config_silent()
+        try:
+            path = _get_settings_path()
+            settings = load_json(path) or {}
+            settings["io_input_names"] = new_inputs
+            save_json(path, settings)
+            print("[Settings] IO 입력 이름 저장 완료")
+        except Exception as e:
+            print(f"[Settings] IO 입력 이름 저장 실패: {e}")
+        dlg = ConfirmOverlay("적용 완료", "I/O 이름이 적용되었습니다.",
+                             btn_yes="확인", parent=self.window())
+        dlg.btn_cancel.hide()
+        dlg.exec()
+
+    def _load_io_input_names(self):
+        from utils.io_manager import DEFAULT_INPUTS
+        try:
+            saved = []
+            path = _get_settings_path()
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                saved = settings.get("io_input_names", [])
+            names = list(DEFAULT_INPUTS)
+            for i in range(min(len(saved), 32)):
+                names[i] = saved[i]
+            if IOManager:
+                mgr = IOManager.instance()
+                for i in range(32):
+                    mgr.inputs[i] = names[i]
+                    self._in_name[i] = names[i]
+                mgr.sig_names_changed.emit()
+            print("[Settings] IO 입력 이름 로드 완료")
+        except Exception as e:
+            print(f"[Settings] IO 입력 이름 로드 실패: {e}")
+
+    def _on_manager_changed(self):
+        if not IOManager:
+            return
+        mgr = IOManager.instance()
+        for i in range(32):
+            self._in_name[i] = mgr.get_input_name(i)
+            self._out_name[i] = mgr.get_output_name(i)
+        self._refresh_io_model()
+
+    # ===================================================================
+    # 알람 — page_settings 와 동일
+    # ===================================================================
+    def _alarm_next_no(self):
+        from ui.overlays.alarm_overlay import USER_ALARMS
+        return max(USER_ALARMS.keys(), default=0) + 1
+
+    def _alarm_input(self, title, current=""):
+        if TouchKeyboard:
+            kb = TouchKeyboard(title, current, self)
+            if kb.exec() != QDialog.Accepted:
+                return None
+            return kb.get_text().strip() or None
+        return None
+
+    def _add_alarm(self):
+        from ui.overlays.alarm_overlay import USER_ALARMS
+        no = self._alarm_next_no()
+        msg = self._alarm_input(f"A-{no:03d} 알람 메시지 입력")
+        if msg is None:
+            return
+        USER_ALARMS[no] = msg
+        self._refresh_alarm_model()
+
+    def _edit_alarm(self, no):
+        from ui.overlays.alarm_overlay import USER_ALARMS
+        current = USER_ALARMS.get(no, "")
+        msg = self._alarm_input(f"A-{no:03d} 알람 메시지 수정", current)
+        if msg is None:
+            return
+        USER_ALARMS[no] = msg
+        self._refresh_alarm_model()
+
+    def _delete_alarm(self, no):
+        from ui.overlays.alarm_overlay import USER_ALARMS
+        from ui.dialogs.sequence_utils import DarkConfirmDialog
+        dlg = DarkConfirmDialog("알람 삭제",
+                                f"A-{no:03d} 알람을 삭제하시겠습니까?", self)
+        if dlg.exec() == QDialog.Accepted:
+            USER_ALARMS.pop(no, None)
+            self._refresh_alarm_model()
+
+    def _save_alarms(self):
+        from ui.overlays.alarm_overlay import save_user_alarms
+        from ui.dialogs.sequence_utils import DarkMessageDialog
+        save_user_alarms()
+        DarkMessageDialog("저장 완료", "알람 메시지가 저장되었습니다.",
+                          parent=self).exec()
+
+    # ===================================================================
+    # 인터록 — page_settings 와 동일 (InterlockDialog 재사용)
+    # ===================================================================
+    def _open_interlock_dialog(self):
+        try:
+            from ui.pages.page_mode import InterlockDialog, TOTAL_SLOTS
+        except ImportError:
+            return
+        _GROUP_COLORS = [None, "#E74C3C", "#3498DB", "#2ECC71", "#F39C12",
+                         "#9B59B6", "#1ABC9C", "#E67E22", "#E91E63"]
+
+        def _load():
+            try:
+                with open(_get_settings_path(), "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                g = d.get("interlock_groups", [0] * TOTAL_SLOTS)
+                m = d.get("interlock_mandatory", [False] * 9)
+                e = d.get("interlock_exclusive", [True] * 9)
+                if len(g) < TOTAL_SLOTS:
+                    g += [0] * (TOTAL_SLOTS - len(g))
+                if len(m) < 9:
+                    m += [False] * (9 - len(m))
+                if len(e) < 9:
+                    e += [True] * (9 - len(e))
+                return g[:TOTAL_SLOTS], m[:9], e[:9]
+            except Exception:
+                return [0] * TOTAL_SLOTS, [False] * 9, [True] * 9
+
+        def _get_mode_name(idx):
+            default = [
+                "제품측 취출", "런너측 취출", "주행 대기", "하강 대기", "주행도중개방",
+                "복귀도중개방", "안전도어 회피", "안전도어 회피2", "낙하측 반전",
+                "주행도중 반전", "취출대기 반전", "고정측 취출", "제품 형내개방",
+                "런너 형내개방", "에젝터 연동", "언더컷 취출모드", "척1 사용",
+                "척1 감지", "척2 사용", "척2 감지", "척3 사용", "척3 감지",
+                "척4 사용", "척4 감지", "흡착1 사용", "흡착1 감지", "흡착2 사용",
+                "흡착2 감지", "흡착3 사용", "흡착3 감지", "흡착4 사용", "흡착4 감지",
+                "2포인트 개방", "공정감시 모드"]
+            try:
+                from utils.mode_manager import ModeManager
+                m = ModeManager.instance()
+                if m:
+                    return m.get_name(idx)
+            except Exception:
+                pass
+            return default[idx] if idx < len(default) else f"User Mode {idx-33}"
+
+        groups, mandatory, exclusive = _load()
+        dlg = InterlockDialog(groups, mandatory, exclusive, _get_mode_name,
+                              _GROUP_COLORS, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            path = _get_settings_path()
+            data = load_json(path) or {}
+            data["interlock_groups"] = dlg.get_groups()
+            data["interlock_mandatory"] = dlg.get_mandatory()
+            data["interlock_exclusive"] = dlg.get_exclusive()
+            save_json(path, data)
+
+    # ===================================================================
+    # 일반/PLC/언어 — page_settings 와 동일
+    # ===================================================================
+    def _edit_general(self, which):
+        is_ip = (which == "ip")
+        cur = self._ip if is_ip else self._port
+        dlg = NumberInputOverlay(cur, is_ip=is_ip, parent=self)
+        if dlg.exec():
+            if is_ip:
+                self._ip = dlg.result_val
+            else:
+                self._port = dlg.result_val
+            self._be.changed.emit()
+
+    def _on_connect_clicked(self):
+        if not self.plc_client:
+            return
+        if self._plc_connected:
+            self.plc_client.disconnect_plc()
+        else:
+            ip = self._ip.strip()
+            port = self._port.strip()
+            if not ip or not port:
+                return
+            self._save_plc_settings(ip, port)
+            self._status_text = "● Connecting..."
+            self._status_color = "orange"
+            self._be.changed.emit()
+            self.plc_client.connect_to_plc(ip, port)
+
+    def _on_plc_status_changed(self, connected):
+        self._plc_connected = bool(connected)
+        if connected:
+            self._status_text = "● Connected"
+            self._status_color = "#00FF00"
+            if self._cur_tab == 2:
+                self._load_params()
+        else:
+            self._status_text = "● Disconnected"
+            self._status_color = "#FF4646"
+        self._be.changed.emit()
+
+    def _save_plc_settings(self, ip, port):
+        try:
+            path = _get_settings_path()
+            settings = load_json(path) or {}
+            settings["plc_ip"] = ip
+            settings["plc_port"] = port
+            save_json(path, settings)
+        except Exception as e:
+            print(f"Settings Save Error: {e}")
+
+    def _load_plc_settings(self):
+        try:
+            settings = load_json(_get_settings_path()) or {}
+            self._ip = settings.get("plc_ip", "192.168.0.10")
+            self._port = settings.get("plc_port", "9094")
+        except Exception as e:
+            print(f"[Settings] PLC 설정 로드 실패: {e}")
+
+    def _on_exit_clicked(self):
+        dlg = ConfirmOverlay("프로그램 종료", "정말로 프로그램을 종료하시겠습니까?",
+                             btn_yes="종료", btn_no="취소", parent=self.window())
+        if dlg.exec():
+            QApplication.instance().quit()
+
+    def _set_language(self, code):
+        if not LanguageManager:
+            return
+        LanguageManager.instance().set_language(code)
+        self._lang = code
+        self.update_language()
+
+    def update_language(self, lang_code=None):
+        if LanguageManager:
+            self._lang = LanguageManager.instance().current_lang
+        self._be.changed.emit()
+
+    def set_plc_client(self, client):
+        self.plc_client = client
+        if self.plc_client:
+            try:
+                self.plc_client.sig_connected.connect(
+                    self._on_plc_status_changed, Qt.UniqueConnection)
+            except (RuntimeError, TypeError):
+                pass
+            self._on_plc_status_changed(self.plc_client.is_connected)
+
+    # ===================================================================
+    # WiFi / Ethernet — page_settings 와 동일 (워커 재사용)
+    # ===================================================================
+    def _ensure_wifi(self):
+        if self._wifi is None:
+            try:
+                from utils import wifi_manager
+                self._wifi = wifi_manager
+            except Exception:
+                self._wifi = None
+        return self._wifi
+
+    def _wifi_btn(self, key):
+        {"refreshWifi": self._refresh_wifi_status,
+         "scanWifi": lambda: self._scan_wifi(False),
+         "toggleWifi": self._toggle_wifi_connection,
+         "refreshEth": self._refresh_eth_status,
+         "ethDhcp": self._apply_eth_dhcp,
+         "ethStatic": self._open_eth_static_dialog}.get(key, lambda: None)()
+
+    def _refresh_wifi_status(self):
+        w = self._ensure_wifi()
+        if not w:
+            return
+        if not w.is_available():
+            self._w.update(ssid="nmcli 없음", ip="-", signal="-", iface="-")
+            self._be.changed.emit()
+            return
+        worker = self._wifi_status_worker
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    return
+            except RuntimeError:
+                self._wifi_status_worker = None
+        self._wifi_status_worker = WifiStatusWorker(w, self)
+        self._wifi_status_worker.sig_done.connect(self._on_wifi_status_done)
+        self._wifi_status_worker.finished.connect(
+            lambda: setattr(self, "_wifi_status_worker", None))
+        self._wifi_status_worker.finished.connect(
+            self._wifi_status_worker.deleteLater)
+        self._wifi_status_worker.start()
+
+    def _on_wifi_status_done(self, info):
+        self._w["ssid"] = info["ssid"] or "(미연결)"
+        self._w["ip"] = info["ip"] or "-"
+        self._w["signal"] = f"{info['signal']}%" if info["signal"] else "-"
+        self._w["iface"] = info["iface"] or "-"
+        connected = bool(info["ssid"])
+        if connected and info["ssid"]:
+            self._last_wifi_ssid = info["ssid"]
+        self._w["toggle"] = "연결 해제" if connected else "연결"
+        self._be.changed.emit()
+
+    def _scan_wifi(self, silent=False):
+        w = self._ensure_wifi()
+        if not w or not w.is_available():
+            return
+        worker = self._scan_worker
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    return
+            except RuntimeError:
+                self._scan_worker = None
+        self._scan_worker = WifiScanWorker(w, self)
+        self._scan_worker.sig_done.connect(
+            lambda nets, s=silent: self._on_scan_done(nets, s))
+        self._scan_worker.finished.connect(
+            lambda: setattr(self, "_scan_worker", None))
+        self._scan_worker.finished.connect(self._scan_worker.deleteLater)
+        self._scan_worker.start()
+
+    def _on_scan_done(self, networks, silent):
+        self._wifi_nets = []
+        self._scan_net_data = []
+        if not networks:
+            self._wifi_nets = ["(발견된 네트워크가 없습니다)"]
+            self._scan_net_data = [None]
+        else:
+            for net in networks:
+                ssid = net["ssid"]
+                sig = net["signal"] or "0"
+                lock = "🔒 " if net["security"] and net["security"] != "--" else ""
+                mark = "● " if net["in_use"] else "   "
+                self._wifi_nets.append(f"{mark}{lock}{ssid}   ({sig}%)")
+                self._scan_net_data.append(net)
+        self._refresh_wifi_model()
+
+    def _on_wifi_item_activated(self, idx):
+        data = getattr(self, "_scan_net_data", [])
+        if not (0 <= idx < len(data)):
+            return
+        net = data[idx]
+        if not net:
+            return
+        ssid = net["ssid"]
+        secured = bool(net["security"]) and net["security"] != "--"
+        password = None
+        if secured:
+            if TouchKeyboard is None:
+                self._show_wifi_msg("오류", "터치 키보드 모듈을 사용할 수 없습니다.")
+                return
+            kb = TouchKeyboard(title=f"'{ssid}' 암호", default_text="", parent=self)
+            if kb.exec() != QDialog.Accepted:
+                return
+            password = kb.get_text()
+            if not password:
+                return
+        try:
+            res = self._wifi.connect(ssid, password)
+        except Exception as e:
+            res = {"ok": "0", "error": str(e)}
+        if res.get("ok") == "1":
+            self._show_wifi_msg("연결 완료", f"'{ssid}' 에 연결되었습니다.")
+        else:
+            self._show_wifi_msg("연결 실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_wifi_status()
+
+    def _toggle_wifi_connection(self):
+        w = self._ensure_wifi()
+        if not w or not w.is_available():
+            return
+        connected = self._w["ssid"] not in ("", "-", "(미연결)", "nmcli 없음")
+        if connected:
+            res = w.disconnect()
+            if res.get("ok") != "1":
+                self._show_wifi_msg("해제 실패", res.get("error", "알 수 없는 오류"))
+        else:
+            ssid = self._last_wifi_ssid
+            if not ssid:
+                self._show_wifi_msg("재접속 불가",
+                                    "마지막으로 연결됐던 SSID 정보가 없습니다.\n"
+                                    "아래 목록에서 더블클릭으로 연결하세요.")
+                return
+            try:
+                res = w.connect_saved(ssid)
+            except Exception as e:
+                res = {"ok": "0", "error": str(e)}
+            if res.get("ok") != "1":
+                self._show_wifi_msg(
+                    "연결 실패",
+                    f"'{ssid}' 재접속 실패: {res.get('error', '알 수 없는 오류')}")
+        self._refresh_wifi_status()
+
+    def _show_wifi_msg(self, title, message):
+        dlg = ConfirmOverlay(title, message, btn_yes="확인", btn_no="닫기",
+                             parent=self)
+        dlg.btn_cancel.hide()
+        dlg.exec()
+
+    def _auto_scan_tick(self):
+        self._scan_wifi(silent=True)
+
+    def _net_status_tick(self):
+        self._refresh_wifi_status()
+        self._refresh_eth_status()
+
+    def _start_auto_scan(self):
+        if not self._wifi_scan_timer.isActive():
+            self._wifi_scan_timer.start()
+        if not self._net_status_timer.isActive():
+            self._net_status_timer.start()
+
+    def _stop_auto_scan(self):
+        if self._wifi_scan_timer.isActive():
+            self._wifi_scan_timer.stop()
+        if self._net_status_timer.isActive():
+            self._net_status_timer.stop()
+
+    def _refresh_eth_status(self):
+        w = self._ensure_wifi()
+        if not w:
+            return
+        worker = self._eth_status_worker
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    return
+            except RuntimeError:
+                self._eth_status_worker = None
+        self._eth_status_worker = EthernetStatusWorker(w, self)
+        self._eth_status_worker.sig_done.connect(self._on_eth_status_done)
+        self._eth_status_worker.finished.connect(
+            lambda: setattr(self, "_eth_status_worker", None))
+        self._eth_status_worker.finished.connect(
+            self._eth_status_worker.deleteLater)
+        self._eth_status_worker.start()
+
+    def _on_eth_status_done(self, info):
+        self._e["iface"] = info["iface"] or "-"
+        state = info["state"] or "-"
+        self._e["scolor"] = "#77FF88" if state == "connected" else "#FF7777"
+        self._e["state"] = state
+        self._e["ip"] = info["ip"] or "-"
+        self._e["gw"] = info["gateway"] or "-"
+        method_map = {"auto": "DHCP", "manual": "고정 IP"}
+        self._e["method"] = method_map.get(info["method"], info["method"] or "-")
+        self._e["conn"] = info["connection"] or "-"
+        self._be.changed.emit()
+
+    def _apply_eth_dhcp(self):
+        w = self._ensure_wifi()
+        if not w:
+            return
+        res = w.set_ethernet_dhcp()
+        if res.get("ok") == "1":
+            self._show_wifi_msg("DHCP 적용", "유선 연결을 DHCP로 변경했습니다.")
+        else:
+            self._show_wifi_msg("실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_eth_status()
+
+    def _open_eth_static_dialog(self):
+        w = self._ensure_wifi()
+        if not w:
+            return
+        cur = w.get_ethernet_status()
+        dlg = _EthernetStaticDialog(current_ip=cur["ip"],
+                                    current_gateway=cur["gateway"], parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        res = w.set_ethernet_static(dlg.ip_value, dlg.prefix_value,
+                                    dlg.gateway_value, dlg.dns_value)
+        if res.get("ok") == "1":
+            self._show_wifi_msg("고정 IP 적용",
+                                f"{dlg.ip_value}/{dlg.prefix_value} 로 설정했습니다.")
+        else:
+            self._show_wifi_msg("실패", res.get("error", "알 수 없는 오류"))
+        self._refresh_eth_status()
+
+    # ===================================================================
+    # 탭/표시 (page_settings 와 동일 동작)
+    # ===================================================================
+    _cur_tab = 0
+
+    def _on_tab_changed(self, index):
+        self._cur_tab = index
+        if index == 2:
+            self._load_params()
+        if index == 6:
+            self._refresh_wifi_status()
+            self._refresh_eth_status()
+            self._scan_wifi(silent=True)
+            self._start_auto_scan()
+        else:
+            self._stop_auto_scan()
+
+    def showEvent(self, event):
+        if not self.plc_client:
+            mw = self.window()
+            if hasattr(mw, 'plc_client'):
+                self.set_plc_client(mw.plc_client)
+        if self.plc_client:
+            self._on_plc_status_changed(self.plc_client.is_connected)
+        if self._cur_tab == 2:
+            self._load_params()
+        if self._cur_tab == 6:
+            self._refresh_wifi_status()
+            self._refresh_eth_status()
+            self._start_auto_scan()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self._stop_auto_scan()
+        super().hideEvent(event)
