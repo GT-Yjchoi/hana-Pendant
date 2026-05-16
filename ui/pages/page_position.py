@@ -174,10 +174,20 @@ class ClickableLabel(QLabel):
 
 class PositionOrderDialog(QDialog):
     def __init__(self, current_names, parent=None):
-        super().__init__(parent); self.name_list = list(current_names) 
-        self.setWindowTitle("위치 목록 순서 변경"); self.setModal(True); self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint); self.resize(500, 600)
-        self.setStyleSheet("QDialog { background: rgba(20, 30, 40, 250); border: 2px solid rgba(70, 140, 255, 120); border-radius: 12px; } QLabel { color: white; font-size: 18px; font-weight: bold; } QListWidget { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; font-size: 18px; color: #EEE; } QListWidget::item { height: 50px; padding-left: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); } QListWidget::item:selected { background: rgba(70, 140, 255, 0.4); border: 1px solid #468CFF; color: white; } QPushButton { background: rgba(255,255,255,0.1); border: 1px solid gray; border-radius: 6px; color: white; height: 50px; font-size: 16px; font-weight: bold; } QPushButton:pressed { background: rgba(255,255,255,0.3); }")
-        layout = QVBoxLayout(self); layout.setContentsMargins(20, 20, 20, 20)
+        super().__init__(parent); self.name_list = list(current_names)
+        # weston kiosk-shell 은 toplevel 을 풀스크린 강제 → resize() 무시되어
+        # 레이아웃이 화면을 벗어남. OverlayDialog 와 동일하게 풀스크린 반투명
+        # 백드롭 + 중앙 고정크기 content_frame 패턴으로.
+        self._bg_pixmap = parent.window().grab() if parent else None
+        self.setWindowTitle("위치 목록 순서 변경"); self.setModal(True)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        outer = QVBoxLayout(self); outer.setAlignment(Qt.AlignCenter)
+        cf = QFrame(); cf.setObjectName("OrderCF"); cf.setFixedSize(520, 660)
+        cf.setStyleSheet("QFrame#OrderCF { background: rgba(20, 30, 40, 250); border: 2px solid rgba(70, 140, 255, 120); border-radius: 12px; } QLabel { color: white; font-size: 18px; font-weight: bold; background: transparent; border: none; } QListWidget { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; font-size: 18px; color: #EEE; } QListWidget::item { height: 50px; padding-left: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); } QListWidget::item:selected { background: rgba(70, 140, 255, 0.4); border: 1px solid #468CFF; color: white; } QPushButton { background: rgba(255,255,255,0.1); border: 1px solid gray; border-radius: 6px; color: white; height: 50px; font-size: 16px; font-weight: bold; } QPushButton:pressed { background: rgba(255,255,255,0.3); }")
+        outer.addWidget(cf)
+        layout = QVBoxLayout(cf); layout.setContentsMargins(20, 20, 20, 20)
         layout.addWidget(QLabel("위치 명칭 보기 순서 변경")); layout.addWidget(QLabel("※ 실제 동작 순서는 변경되지 않습니다. (화면 표시용)"))
         self.list_widget = QListWidget()
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
@@ -187,6 +197,11 @@ class PositionOrderDialog(QDialog):
         btn_layout = QHBoxLayout(); btn_up = QPushButton("▲ 위로"); btn_down = QPushButton("▼ 아래로"); btn_ok = QPushButton("적용 (Apply)"); btn_ok.setStyleSheet("background: rgba(70,140,255,0.4); border: 1px solid #468CFF;"); btn_cancel = QPushButton("취소")
         btn_up.clicked.connect(self._move_up); btn_down.clicked.connect(self._move_down); btn_ok.clicked.connect(self.accept); btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_up); btn_layout.addWidget(btn_down); btn_layout.addWidget(btn_cancel); btn_layout.addWidget(btn_ok); layout.addLayout(btn_layout)
+    def paintEvent(self, e):
+        from PySide6.QtGui import QPainter
+        p = QPainter(self)
+        if self._bg_pixmap: p.drawPixmap(0, 0, self._bg_pixmap)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 150))
     def showEvent(self, e): super().showEvent(e); self.activateWindow(); self.raise_(); self.setFocus()
     def _load_list(self):
         self.list_widget.clear()

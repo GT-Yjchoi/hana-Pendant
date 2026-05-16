@@ -158,10 +158,61 @@ Rectangle {
                 Item { Layout.fillWidth: true }
                 ComboBox {
                     id: seqCombo
-                    Layout.preferredWidth: 160; Layout.preferredHeight: 40
+                    Layout.preferredWidth: 180; Layout.preferredHeight: 40
                     model: posBackend ? posBackend.seqKeys : []
                     currentIndex: posBackend ? posBackend.seqIndex : 0
                     onActivated: if (posBackend) posBackend.seqChanged(currentIndex)
+
+                    background: Rectangle {
+                        radius: 4
+                        color: "#1AFFFFFF"
+                        border.color: "#4DFFFFFF"; border.width: 1
+                    }
+                    contentItem: Text {
+                        leftPadding: 10; rightPadding: seqCombo.indicator.width + 6
+                        text: seqCombo.displayText
+                        color: "white"; font.pixelSize: 16; font.bold: true
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    indicator: Text {
+                        x: seqCombo.width - width - 10
+                        y: (seqCombo.height - height) / 2
+                        text: "▾"; color: "#9CC8FF"; font.pixelSize: 16
+                    }
+                    popup: Popup {
+                        y: seqCombo.height + 2
+                        width: seqCombo.width
+                        implicitHeight: Math.min(contentItem.implicitHeight + 8, 360)
+                        padding: 4
+                        background: Rectangle {
+                            color: "#141E28"; radius: 6
+                            border.color: "#468CFF"; border.width: 1
+                        }
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: seqCombo.popup.visible ? seqCombo.delegateModel : null
+                            currentIndex: seqCombo.highlightedIndex
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollIndicator.vertical: ScrollIndicator {}
+                        }
+                    }
+                    delegate: ItemDelegate {
+                        width: seqCombo.width
+                        height: 44
+                        contentItem: Text {
+                            text: modelData
+                            color: "white"; font.pixelSize: 18; font.bold: true
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: 10; elide: Text.ElideRight
+                        }
+                        background: Rectangle {
+                            color: highlighted ? "#468CFF" : "transparent"
+                            radius: 4
+                        }
+                        highlighted: seqCombo.highlightedIndex === index
+                    }
                 }
             }
             Rectangle {
