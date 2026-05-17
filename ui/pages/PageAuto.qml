@@ -121,14 +121,18 @@ Rectangle {
                 Layout.preferredHeight: 56; Layout.maximumHeight: 56
                 radius: 12
                 property bool hdone: autoBackend ? autoBackend.homeDone : false
-                color: hdone ? "#2ECC71" : (homeMa.pressed ? "#21618C" : "#2E86C1")
+                property bool hblk: autoBackend ? autoBackend.homeBlocked : false
+                color: hblk ? "#3E4A59"
+                       : (hdone ? "#2ECC71" : (homeMa.pressed ? "#21618C" : "#2E86C1"))
                 border.width: 3
-                border.color: hdone ? "#27AE60" : "#1B4F72"
+                border.color: hblk ? "#2C3E50" : (hdone ? "#27AE60" : "#1B4F72")
                 Text { anchors.centerIn: parent
-                       text: autoBackend ? autoBackend.homeText : "원점복귀"
-                       color: "white"; font.pixelSize: 20; font.bold: true }
+                       text: parent.hblk ? "원점복귀 (운전중 불가)"
+                             : (autoBackend ? autoBackend.homeText : "원점복귀")
+                       color: parent.hblk ? "#95A5A6" : "white"
+                       font.pixelSize: 20; font.bold: true }
                 MouseArea { id: homeMa; anchors.fill: parent
-                    onClicked: if (autoBackend) autoBackend.homeClicked() }
+                    onClicked: if (autoBackend && !parent.hblk) autoBackend.homeClicked() }
             }
 
             RowLayout {

@@ -92,6 +92,10 @@ class AutoBackend(QObject):
     def _home_done_v(self):
         return self._p._home_done
 
+    def _home_blocked(self):
+        # 자동운전/확인운전 중에는 원점복귀 차단(자동·확인 버튼과 동일 가드)
+        return self._p.current_mode in (1, 2)
+
     speedLevel = Property(int, _speed, notify=changed)
     speedColor = Property(str, _speed_color, notify=changed)
     btnStates = Property(list, _btn_states, notify=changed)
@@ -101,6 +105,7 @@ class AutoBackend(QObject):
     infoRows = Property(list, _info_rows, notify=changed)
     homeText = Property(str, _home_text, notify=changed)
     homeDone = Property(bool, _home_done_v, notify=changed)
+    homeBlocked = Property(bool, _home_blocked, notify=changed)
 
     # ---- slots ----
     @Slot(int)
@@ -253,6 +258,9 @@ class PageAutoQml(QWidget):
 
     def _on_home_clicked(self):
         # 원점복귀: 확인 후 DT164 에 1 기록(영역 0x09, write_words).
+        # 자동운전/확인운전 중에는 차단(자동·확인 버튼과 동일 가드).
+        if self.current_mode in (1, 2):
+            return
         if not self.plc_client or not self.plc_client.is_connected:
             return
         if AutoConfirmOverlay("원점복귀", "원점복귀를 하시겠습니까?",
