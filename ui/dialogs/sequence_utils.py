@@ -6,6 +6,9 @@ from PySide6.QtWidgets import (
     QWidget, QListWidget, QGridLayout, QFrame, QScrollArea, QScroller, QScrollerProperties
 )
 
+# 시퀀스 편집기 팝업 GPU(QML) 이식: 계약 유지, 내부 렌더만 QML.
+from ui.dialogs.qml_overlay import QmlMessageDialog
+
 
 def apply_touch_scroll(scroll_area):
     """QScrollArea에 터치 스크롤 적용 (Raspberry Pi 터치스크린 대응)"""
@@ -549,62 +552,20 @@ class CardListDialog(OverlayDialog):
 # =========================================================
 # [1] 알림 메시지 다이얼로그
 # =========================================================
-class DarkMessageDialog(OverlayDialog):
+# [QML 이식] 계약(생성자·.exec()→Accepted/Rejected) 동일, 렌더만 GPU.
+class DarkMessageDialog(QmlMessageDialog):
     def __init__(self, title, message, is_error=False, parent=None):
-        super().__init__(parent)
-        self.setFixedContentSize(520, 280)
-        color = "#FF4646" if is_error else "#468CFF"
-        self.setStyleSheet(f"""
-            QLabel {{ color: white; font-size: 18px; font-weight: bold; background: transparent; border: none; }}
-            QPushButton {{ background: rgba(70, 140, 255, 40); border: 1px solid {color}; border-radius: 8px; color: white; font-size: 17px; font-weight: bold; height: 52px; }}
-            QPushButton:pressed {{ background: rgba(70, 140, 255, 80); }}
-        """)
-        lbl_title = QLabel(title)
-        lbl_title.setStyleSheet(f"color: {color}; font-size: 22px; margin-bottom: 8px;")
-        self.layout.addWidget(lbl_title)
-        lbl_msg = QLabel(message)
-        lbl_msg.setWordWrap(True)
-        lbl_msg.setAlignment(Qt.AlignCenter)
-        lbl_msg.setStyleSheet("color: white; font-size: 18px; font-weight: bold; background: transparent; border: none; line-height: 140%;")
-        self.layout.addWidget(lbl_msg)
-        self.layout.addStretch(1)
-        btn_ok = QPushButton("확인")
-        btn_ok.clicked.connect(self.accept)
-        self.layout.addWidget(btn_ok)
+        accent = "#FF4646" if is_error else "#468CFF"
+        super().__init__(title, message, accent=accent, two_buttons=False,
+                         frame_w=520, frame_h=280, parent=parent)
 
 # =========================================================
-# [2] 다크 테마 확인 다이얼로그
+# [2] 다크 테마 확인 다이얼로그  (QML 이식, 계약 동일)
 # =========================================================
-class DarkConfirmDialog(OverlayDialog):
+class DarkConfirmDialog(QmlMessageDialog):
     def __init__(self, title, message, parent=None):
-        super().__init__(parent)
-        self.setFixedContentSize(400, 220)
-        self.setStyleSheet("""
-            QLabel { color: white; font-size: 16px; font-weight: bold; background: transparent; border: none; }
-            QPushButton { border-radius: 8px; font-size: 15px; font-weight: bold; height: 45px; }
-            QPushButton#Yes { background: rgba(70, 140, 255, 40); border: 1px solid rgba(70, 140, 255, 100); color: white; }
-            QPushButton#Yes:pressed { background: rgba(70, 140, 255, 80); }
-            QPushButton#No { background: rgba(255, 70, 70, 40); border: 1px solid rgba(255, 70, 70, 100); color: white; }
-            QPushButton#No:pressed { background: rgba(255, 70, 70, 80); }
-        """)
-        lbl_title = QLabel(title)
-        lbl_title.setStyleSheet("color: #468CFF; font-size: 19px; margin-bottom: 5px;")
-        self.layout.addWidget(lbl_title)
-        lbl_msg = QLabel(message)
-        lbl_msg.setWordWrap(True)
-        lbl_msg.setAlignment(Qt.AlignCenter)
-        self.layout.addWidget(lbl_msg)
-        self.layout.addStretch(1)
-        btn_layout = QHBoxLayout()
-        btn_no = QPushButton("취소")
-        btn_no.setObjectName("No")
-        btn_no.clicked.connect(self.reject)
-        btn_yes = QPushButton("확인")
-        btn_yes.setObjectName("Yes")
-        btn_yes.clicked.connect(self.accept)
-        btn_layout.addWidget(btn_no)
-        btn_layout.addWidget(btn_yes)
-        self.layout.addLayout(btn_layout)
+        super().__init__(title, message, accent="#468CFF", two_buttons=True,
+                         frame_w=400, frame_h=220, parent=parent)
 
 # =========================================================
 # [3] 팝업 리스트 선택기 (ComboBox 대체)
