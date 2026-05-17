@@ -395,7 +395,22 @@ class CardListDialog(OverlayDialog):
                     "rgba(0,255,127,0.15)" if is_current(item) else "rgba(255,255,255,0.05)",
                     "2px solid #00FF7F"    if is_current(item) else "1px solid #555",
                 ))
-                frame.mousePressEvent = lambda e, i=item: self._on_selected(i)
+                # 누를 때가 아니라 뗄 때(탭) 선택. 스크롤하려고 눌러
+                # 드래그한 경우(이동 > THRESHOLD)는 선택하지 않음.
+                # _on_selected/선택값/accept() 거동은 불변(시점만 press→tap).
+                def _card_press(e, fr=frame):
+                    fr._press_pos = e.globalPosition().toPoint()
+
+                def _card_release(e, fr=frame, it=item):
+                    pp = getattr(fr, "_press_pos", None)
+                    fr._press_pos = None
+                    if pp is not None and (
+                        e.globalPosition().toPoint() - pp
+                    ).manhattanLength() <= DragScrollFilter.THRESHOLD:
+                        self._on_selected(it)
+
+                frame.mousePressEvent = _card_press
+                frame.mouseReleaseEvent = _card_release
 
                 f_layout = QVBoxLayout(frame)
                 f_layout.setContentsMargins(6, 6, 6, 6)
