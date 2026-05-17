@@ -114,6 +114,23 @@ Rectangle {
                 }
             }
 
+            // 원점복귀 (자동운전 버튼 행 바로 아래). 누르면 확인 →
+            // DT164=1. DT165==1 이면 라벨이 '원점복귀완료'(초록).
+            Rectangle {
+                Layout.fillWidth: true; Layout.fillHeight: false
+                Layout.preferredHeight: 56; Layout.maximumHeight: 56
+                radius: 12
+                property bool hdone: autoBackend ? autoBackend.homeDone : false
+                color: hdone ? "#2ECC71" : (homeMa.pressed ? "#21618C" : "#2E86C1")
+                border.width: 3
+                border.color: hdone ? "#27AE60" : "#1B4F72"
+                Text { anchors.centerIn: parent
+                       text: autoBackend ? autoBackend.homeText : "원점복귀"
+                       color: "white"; font.pixelSize: 20; font.bold: true }
+                MouseArea { id: homeMa; anchors.fill: parent
+                    onClicked: if (autoBackend) autoBackend.homeClicked() }
+            }
+
             RowLayout {
                 Layout.fillWidth: true; Layout.fillHeight: false
                 Layout.preferredHeight: 50; Layout.maximumHeight: 50

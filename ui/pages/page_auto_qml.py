@@ -5,7 +5,7 @@ UI/스크롤만 QML. 로직(속도·운전모드·확인창·monitor)은 PageAut
 """
 import os
 
-from PySide6.QtCore import (Qt, QObject, Signal, Slot, Property, QUrl)
+from PySide6.QtCore import (Qt, QObject, Signal, Slot, Property, QUrl, QTimer)
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 from PySide6.QtQuickWidgets import QQuickWidget
@@ -86,6 +86,12 @@ class AutoBackend(QObject):
             {"name": nm("lbl_mold_time", "성형시간"), "val": f"{mt:.1f} 초"},
         ]
 
+    def _home_text(self):
+        return "원점복귀완료" if self._p._home_done else "원점복귀"
+
+    def _home_done_v(self):
+        return self._p._home_done
+
     speedLevel = Property(int, _speed, notify=changed)
     speedColor = Property(str, _speed_color, notify=changed)
     btnStates = Property(list, _btn_states, notify=changed)
@@ -93,6 +99,8 @@ class AutoBackend(QObject):
     subStates = Property(list, _sub_states, notify=changed)
     infoTitle = Property(str, _info_title, notify=changed)
     infoRows = Property(list, _info_rows, notify=changed)
+    homeText = Property(str, _home_text, notify=changed)
+    homeDone = Property(bool, _home_done_v, notify=changed)
 
     # ---- slots ----
     @Slot(int)
@@ -112,6 +120,10 @@ class AutoBackend(QObject):
     def subClicked(self, idx):
         self._p._send_check_state(1 if idx == 0 else 0)
 
+    @Slot()
+    def homeClicked(self):
+        self._p._on_home_clicked()
+
 
 class PageAutoQml(QWidget):
     sig_speed_changed = Signal(int)
@@ -123,6 +135,7 @@ class PageAutoQml(QWidget):
         self._prev_op_status = 0
         self._check_run_state = 0
         self._info = (0, 0, 0.0)
+        self._home_done = False        # DT165==1 이면 True (원점복귀완료 표시)
         self.speed_state = speed_state if speed_state is not None else {"speed_level": 10}
         self.speed_level = int(self.speed_state.get("speed_level", 10))
 
@@ -148,6 +161,12 @@ class PageAutoQml(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._view)
+
+        # 원점복귀 상태(DT165)는 모니터 범위(DT100~163) 밖이라 별도 폴링.
+        # 안전 핵심 모니터 파이프라인(MONITOR_COUNT/파서)은 건드리지 않음.
+        self._home_timer = QTimer(self)
+        self._home_timer.setInterval(500)
+        self._home_timer.timeout.connect(self._poll_home_status)
 
         if self.plc_client:
             self.plc_client.sig_monitor_data.connect(self._on_monitor_data)
@@ -232,6 +251,38 @@ class PageAutoQml(QWidget):
             except Exception:
                 pass
 
+    def _on_home_clicked(self):
+        # 원점복귀: 확인 후 DT164 에 1 기록(영역 0x09, write_words).
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        if AutoConfirmOverlay("원점복귀", "원점복귀를 하시겠습니까?",
+                              self.window()).exec():
+            try:
+                self.plc_client.write_words(0x09, 164, [1])
+            except Exception as e:
+                print(f"[Auto] 원점복귀 명령(DT164) 실패: {e}")
+                return
+            self._home_done = False        # 진행 시작 — DT165 폴링이 완료 반영
+            self._be.changed.emit()
+            try:
+                from utils.op_history import record as op_record
+                op_record("RUN", "원점복귀 명령(DT164=1)")
+            except Exception:
+                pass
+
+    def _poll_home_status(self):
+        # DT165==1 → 원점복귀완료. (모니터 범위 밖이라 별도 read_words 폴링)
+        if not self.plc_client or not self.plc_client.is_connected:
+            return
+        try:
+            vals = self.plc_client.read_words(0x09, 165, 1)
+        except Exception:
+            return
+        done = bool(vals and vals[0] == 1)
+        if done != self._home_done:
+            self._home_done = done
+            self._be.changed.emit()
+
     def _on_monitor_data(self, data):
         mode = data.get('op_status', 0)
         if self._prev_op_status == 2 and mode == 0:
@@ -266,8 +317,13 @@ class PageAutoQml(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._refresh_axis_visibility)
+        QTimer.singleShot(0, self._poll_home_status)
+        self._home_timer.start()
+
+    def hideEvent(self, event):
+        self._home_timer.stop()
+        super().hideEvent(event)
 
     def update_language(self, lang_code=None):
         self._io_be.refresh_titles()
