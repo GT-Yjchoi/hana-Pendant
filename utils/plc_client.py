@@ -841,21 +841,34 @@ class PLCClient(QObject):
             is_conditional = step_data.get("condition", False)
 
             if is_conditional:
-                # 조건부 점프 (opt=1)
-                opt = 1
                 p1 = int(step_data.get("target_step", 0))
-
                 cond_type = step_data.get("cond_type", "PORT")
-                if cond_type == "MODE":
-                    p2 = 1
-                elif cond_type == "STATE":
-                    p2 = 2
-                else:
-                    p2 = 0
-                p3 = int(step_data.get("cond_value", 0))
-                p4 = 1 if step_data.get("cond_on", True) else 0
 
-                print(f"[DEBUG JMP 조건부] target={p1}, type={cond_type}({p2}), value={p3}, on={p4}")
+                if cond_type == "DTCMP":
+                    # ── 조건부·데이터값 비교 점프 (opt=2) [신규] ──────────────
+                    # PLC 계약: cmd==40 && opt==2 이면
+                    #   DT[p2] 값을 p3 연산자로 p4(상수)와 비교, 참이면 p1 스텝으로 점프.
+                    #   연산자(p3): 0:==  1:≠  2:>  3:≥  4:<  5:≤
+                    # ⚠ PLC 펌웨어가 opt==2 분기를 구현해야 동작. 미구현 시 무동작.
+                    #   실장비 검증 전 라이브 레시피 투입 금지.
+                    opt = 2
+                    p2 = int(step_data.get("cmp_dt_addr", 0))
+                    p3 = int(step_data.get("cmp_op", 0))
+                    p4 = int(step_data.get("cmp_const", 0))
+                    print(f"[DEBUG JMP DT비교] target={p1}, DT{p2} (op={p3}) const={p4} (opt=2)")
+                else:
+                    # 조건부·비트 점프 (opt=1)
+                    opt = 1
+                    if cond_type == "MODE":
+                        p2 = 1
+                    elif cond_type == "STATE":
+                        p2 = 2
+                    else:
+                        p2 = 0
+                    p3 = int(step_data.get("cond_value", 0))
+                    p4 = 1 if step_data.get("cond_on", True) else 0
+
+                    print(f"[DEBUG JMP 조건부] target={p1}, type={cond_type}({p2}), value={p3}, on={p4}")
 
             else:
                 # 무조건 점프 (opt=0)

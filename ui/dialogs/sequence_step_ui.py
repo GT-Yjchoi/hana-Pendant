@@ -713,6 +713,7 @@ class StepUIGenerator:
         dlg.rb_src_mode  = QRadioButton("모드")
 
         dlg.rb_src_state = QRadioButton("운전상태")
+        dlg.rb_src_dtcmp = QRadioButton("데이터값")  # ★ 신규: DT 레지스터 vs 상수 비교
 
         dlg.src_grp = QButtonGroup(w)
         dlg.src_grp.addButton(dlg.rb_src_input)
@@ -720,8 +721,10 @@ class StepUIGenerator:
         dlg.src_grp.addButton(dlg.rb_src_bit)
         dlg.src_grp.addButton(dlg.rb_src_mode)
         dlg.src_grp.addButton(dlg.rb_src_state)
+        dlg.src_grp.addButton(dlg.rb_src_dtcmp)
 
-        for rb in [dlg.rb_src_input, dlg.rb_src_valve, dlg.rb_src_bit, dlg.rb_src_mode, dlg.rb_src_state]:
+        for rb in [dlg.rb_src_input, dlg.rb_src_valve, dlg.rb_src_bit,
+                   dlg.rb_src_mode, dlg.rb_src_state, dlg.rb_src_dtcmp]:
             rb.toggled.connect(dlg._on_jmp_value_changed)
 
         src_lay.addWidget(dlg.rb_src_input)
@@ -729,6 +732,7 @@ class StepUIGenerator:
         src_lay.addWidget(dlg.rb_src_bit)
         src_lay.addWidget(dlg.rb_src_mode)
         src_lay.addWidget(dlg.rb_src_state)
+        src_lay.addWidget(dlg.rb_src_dtcmp)
         src_lay.addStretch(1)
         fl.addWidget(src_bg)
 
@@ -830,25 +834,95 @@ class StepUIGenerator:
         dlg.jmp_run_state_rbs[2].setChecked(True)  # 기본: 확인운전
         dlg.stack_cond_source.addWidget(state_widget)
 
+        # ★ 5. 데이터값 비교 (DT 레지스터 vs 상수) [신규 — PLC opt=2]
+        #    참(DT op 상수)이면 목표 스텝으로 점프. ON/OFF 행은 이 모드에서 숨김.
+        dtcmp_widget = QWidget()
+        dtcmp_lay = QVBoxLayout(dtcmp_widget)
+        dtcmp_lay.setContentsMargins(0, 4, 0, 0)
+        dtcmp_lay.setSpacing(6)
+
+        _dt_lbl_style = ("color:#CCCCCC; font-size:14px; font-weight:bold; "
+                         "background:transparent; border:none;")
+        _op_btn_style = """
+            QPushButton { background: rgba(255,255,255,0.08); border:1px solid #888;
+                          border-radius:4px; color:white; font-size:19px; font-weight:bold; }
+            QPushButton:checked { background: rgba(70,140,255,140); border:1px solid #468CFF; }
+        """
+
+        # DT 주소 행
+        dt_row = QWidget()
+        dt_row_l = QHBoxLayout(dt_row)
+        dt_row_l.setContentsMargins(0, 0, 0, 0)
+        dt_row_l.setSpacing(8)
+        _dt_lbl = QLabel("DT 주소")
+        _dt_lbl.setStyleSheet(_dt_lbl_style)
+        _dt_lbl.setFixedWidth(64)
+        dlg.jmp_dt_addr_btn = QPushButton("DT100")
+        dlg.jmp_dt_addr_btn.setFixedHeight(42)
+        dlg.jmp_dt_addr_btn.setStyleSheet(_btn_style)
+        dlg.jmp_dt_addr_btn.clicked.connect(dlg._open_jmp_dt_addr)
+        dt_row_l.addWidget(_dt_lbl)
+        dt_row_l.addWidget(dlg.jmp_dt_addr_btn)
+        dtcmp_lay.addWidget(dt_row)
+
+        # 연산자 행 (== ≠ > ≥ < ≤ → 코드 0~5, PLC 계약과 동일)
+        op_row = QWidget()
+        op_row_l = QHBoxLayout(op_row)
+        op_row_l.setContentsMargins(0, 0, 0, 0)
+        op_row_l.setSpacing(4)
+        _op_lbl = QLabel("연산자")
+        _op_lbl.setStyleSheet(_dt_lbl_style)
+        _op_lbl.setFixedWidth(64)
+        op_row_l.addWidget(_op_lbl)
+        dlg.jmp_dtcmp_op_grp = QButtonGroup(w)
+        for code, sym in [(0, "="), (1, "≠"), (2, ">"), (3, "≥"), (4, "<"), (5, "≤")]:
+            ob = QPushButton(sym)
+            ob.setCheckable(True)
+            ob.setFixedHeight(40)
+            ob.setStyleSheet(_op_btn_style)
+            dlg.jmp_dtcmp_op_grp.addButton(ob, code)
+            ob.toggled.connect(dlg._on_jmp_value_changed)
+            op_row_l.addWidget(ob)
+        dlg.jmp_dtcmp_op_grp.button(3).setChecked(True)  # 기본: ≥
+        dtcmp_lay.addWidget(op_row)
+
+        # 상수 행
+        const_row = QWidget()
+        const_row_l = QHBoxLayout(const_row)
+        const_row_l.setContentsMargins(0, 0, 0, 0)
+        const_row_l.setSpacing(8)
+        _const_lbl = QLabel("상수")
+        _const_lbl.setStyleSheet(_dt_lbl_style)
+        _const_lbl.setFixedWidth(64)
+        dlg.jmp_dt_const_btn = QPushButton("0")
+        dlg.jmp_dt_const_btn.setFixedHeight(42)
+        dlg.jmp_dt_const_btn.setStyleSheet(_btn_style)
+        dlg.jmp_dt_const_btn.clicked.connect(dlg._open_jmp_dt_const)
+        const_row_l.addWidget(_const_lbl)
+        const_row_l.addWidget(dlg.jmp_dt_const_btn)
+        dtcmp_lay.addWidget(const_row)
+
+        dlg.stack_cond_source.addWidget(dtcmp_widget)
+
         fl.addWidget(dlg.stack_cond_source)
-        
-        bg2 = QWidget()
-        bl2 = QHBoxLayout(bg2)
+
+        dlg.jmp_onoff_row = QWidget()
+        bl2 = QHBoxLayout(dlg.jmp_onoff_row)
         bl2.setContentsMargins(0, 0, 0, 0)
         dlg.rb_jmp_on = QRadioButton("ON")
         dlg.rb_jmp_off = QRadioButton("OFF")
-        
+
         dlg.jmp_state_grp = QButtonGroup(w)
         dlg.jmp_state_grp.addButton(dlg.rb_jmp_on)
         dlg.jmp_state_grp.addButton(dlg.rb_jmp_off)
-        
+
         for rb in [dlg.rb_jmp_on, dlg.rb_jmp_off]:
             rb.toggled.connect(dlg._on_jmp_value_changed)
-            
+
         bl2.addWidget(dlg.rb_jmp_on)
         bl2.addWidget(dlg.rb_jmp_off)
         bl2.addStretch(1)
-        fl.addWidget(bg2)
+        fl.addWidget(dlg.jmp_onoff_row)
         
         l2.addWidget(dlg.jmp_cond_frame)
         lay.addWidget(gb_cond)

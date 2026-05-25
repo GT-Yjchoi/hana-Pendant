@@ -730,7 +730,21 @@ class SequenceEditorDialog(QDialog):
                     ct = "INPUT"
             cond_value = data.get("cond_value", 0)
 
-            if ct == "STATE":
+            if ct == "DTCMP":
+                # 데이터값 비교 (DT vs 상수). ON/OFF 무관.
+                self.rb_src_dtcmp.setChecked(True)
+                self.stack_cond_source.setCurrentIndex(5)
+                op = int(data.get("cmp_op", 3))
+                _ob = self.jmp_dtcmp_op_grp.button(op)
+                if _ob:
+                    _ob.setChecked(True)
+                addr = int(data.get("cmp_dt_addr", 100))
+                const = int(data.get("cmp_const", 0))
+                if hasattr(self, 'jmp_dt_addr_btn'):
+                    self.jmp_dt_addr_btn.setText(f"DT{addr}")
+                if hasattr(self, 'jmp_dt_const_btn'):
+                    self.jmp_dt_const_btn.setText(str(const))
+            elif ct == "STATE":
                 self.rb_src_state.setChecked(True)
                 self.stack_cond_source.setCurrentIndex(4)
                 rb = getattr(self, 'jmp_run_state_rbs', {}).get(cond_value)
@@ -755,7 +769,12 @@ class SequenceEditorDialog(QDialog):
                 bit_idx = max(0, cond_value - 100)
                 self.jmp_bit_combo.setCurrentIndex(bit_idx)
                 if hasattr(self, 'jmp_bit_btn'):
-                    self.jmp_bit_btn.setText(f"M{bit_idx:02d} (내부비트)")
+                    try:
+                        from utils.internal_bit_names import get_name as _ibn_get
+                        _nm = _ibn_get(f"M{bit_idx:02d}")
+                    except Exception:
+                        _nm = ""
+                    self.jmp_bit_btn.setText(f"M{bit_idx:02d} {_nm}" if _nm else f"M{bit_idx:02d}")
             else:  # INPUT (X00~X0F)
                 self.rb_src_input.setChecked(True)
                 self.stack_cond_source.setCurrentIndex(0)
@@ -765,7 +784,11 @@ class SequenceEditorDialog(QDialog):
             
             if data.get("cond_on", True): self.rb_jmp_on.setChecked(True)
             else: self.rb_jmp_off.setChecked(True)
-            
+
+            # DTCMP 모드에선 ON/OFF 행 숨김 (의미 없음)
+            if hasattr(self, 'jmp_onoff_row'):
+                self.jmp_onoff_row.setVisible(cond and ct != "DTCMP")
+
         elif type_code == "CALL":
             self.call_combo.blockSignals(True)
             self.call_combo.clear()
@@ -1047,6 +1070,15 @@ class SequenceEditorDialog(QDialog):
             if d.get("cond_value", 0) < 100 or d.get("cond_value", 0) > 131:
                 d["cond_value"] = 100  # M00
             self.stack_cond_source.setCurrentIndex(2)
+        elif hasattr(self, 'rb_src_dtcmp') and self.rb_src_dtcmp.isChecked():
+            # 데이터값 비교 (DT vs 상수). 주소/상수는 팝업이 직접 기록,
+            # 연산자만 여기서 읽음. ON/OFF 무관.
+            d["cond_type"] = "DTCMP"
+            op = self.jmp_dtcmp_op_grp.checkedId() if hasattr(self, 'jmp_dtcmp_op_grp') else 3
+            d["cmp_op"] = op if op >= 0 else 3
+            d.setdefault("cmp_dt_addr", 100)
+            d.setdefault("cmp_const", 0)
+            self.stack_cond_source.setCurrentIndex(5)
         else:  # INPUT (X00~X0F)
             d["cond_type"] = "INPUT"
             if d.get("cond_value", -1) < 0 or d.get("cond_value", 0) > 15:
@@ -1054,6 +1086,10 @@ class SequenceEditorDialog(QDialog):
             self.stack_cond_source.setCurrentIndex(0)
 
         d["cond_on"] = self.rb_jmp_on.isChecked()
+
+        # DTCMP 모드에선 ON/OFF 행 숨김 (의미 없음)
+        if hasattr(self, 'jmp_onoff_row'):
+            self.jmp_onoff_row.setVisible(d["condition"] and d.get("cond_type") != "DTCMP")
 
     def _on_call_value_changed(self):
         if self._is_loading: return
@@ -1165,7 +1201,14 @@ class SequenceEditorDialog(QDialog):
         elif t == "JMP":
             target_idx = int(step.get("target_idx", 0))
             target_name = self._get_jmp_target_name(target_idx)
-            label = f"{label}  ({target_name})" if target_name else label
+            if step.get("condition") and step.get("cond_type") == "DTCMP":
+                _ops = {0: "=", 1: "≠", 2: ">", 3: "≥", 4: "<", 5: "≤"}
+                expr = (f"DT{int(step.get('cmp_dt_addr', 100))} "
+                        f"{_ops.get(int(step.get('cmp_op', 3)), '?')} "
+                        f"{int(step.get('cmp_const', 0))}")
+                label = f"{label}  ({expr} → {target_name})" if target_name else f"{label}  ({expr})"
+            else:
+                label = f"{label}  ({target_name})" if target_name else label
         elif t == "TMR":
             ref = step.get("timer_ref", "")
             if ref:
@@ -1293,7 +1336,8 @@ class SequenceEditorDialog(QDialog):
         elif type_code == "OUT": data["port"]=0; data["on"]=True; data["out_type"]=0; data["delay_enable"]=False
         elif type_code == "IN": data["port"]=0; data["on"]=True; data["in_type"]=0
         elif type_code == "TMR": data["time"] = 1.0
-        elif type_code == "JMP": data.update({"target_idx":0, "condition":False})
+        elif type_code == "JMP": data.update({"target_idx":0, "condition":False,
+                                               "cmp_dt_addr":100, "cmp_op":3, "cmp_const":0})
         elif type_code == "CALL": data["target_seq"] = ""
         elif type_code == "END": data["name"] = "END"
         
@@ -1929,10 +1973,11 @@ class SequenceEditorDialog(QDialog):
                     self.jmp_valve_btn.setText(selected)
 
     def _open_jmp_bit_selector(self):
-        """JMP 조건 - 내부비트 (M) 선택 팝업"""
+        """JMP 조건 - 내부비트 (M) 선택 팝업 — 이름 표시/편집 지원 (IN/OUT 과 동일)."""
         if not hasattr(self, 'jmp_bit_combo'): return
 
-        items = [f"M{i:02d} (내부비트)" for i in range(32)]
+        from utils.internal_bit_names import format_card, set_name, get_name, parse_key
+        items = [format_card(i) for i in range(32)]
         port_indices = [100 + i for i in range(32)]
 
         current_val = self.active_step_data.get("cond_value", 100) if self.active_step_data else 100
@@ -1942,18 +1987,60 @@ class SequenceEditorDialog(QDialog):
         except ValueError:
             pass
 
+        def _rename_m(old_item, parent_dlg):
+            from ui.dialogs.sequence_utils import RenameDialog
+            key = parse_key(old_item)
+            cur_nm = get_name(key)
+            dlg_rn = RenameDialog(key, [], parent=parent_dlg, confirm_text="변경",
+                                  initial_text=cur_nm, allow_empty=True)
+            if dlg_rn.exec() != QDialog.Accepted:
+                return None
+            new_name = dlg_rn.get_new_name().strip()
+            set_name(key, new_name)
+            return f"{key}\n{new_name}" if new_name else key
+
         from ui.dialogs.sequence_utils import CardListDialog
-        dlg = CardListDialog(items, current, " 내부비트를 선택하세요", columns=4, parent=self)
+        dlg = CardListDialog(items, current, " 내부비트를 선택하세요", columns=4, parent=self,
+                             rename_handler=_rename_m)
         if dlg.exec() == QDialog.Accepted:
             selected = dlg.get_selected()
-            if selected and selected in items:
-                port_idx = port_indices[items.index(selected)]
+            if selected:
+                key = parse_key(selected)
+                try:
+                    bit_idx = int(key[1:])
+                except ValueError:
+                    bit_idx = 0
+                port_idx = 100 + bit_idx
                 if self.active_step_data:
                     self.active_step_data["cond_value"] = port_idx
-                self.jmp_bit_combo.setCurrentIndex(port_idx - 100)
+                self.jmp_bit_combo.setCurrentIndex(bit_idx)
                 if hasattr(self, 'jmp_bit_btn'):
-                    self.jmp_bit_btn.setText(selected)
+                    self.jmp_bit_btn.setText(selected.replace("\n", " "))
     
+    def _open_jmp_dt_addr(self):
+        """JMP 데이터값 비교 - DT 주소 입력 (숫자 키패드)."""
+        if self.active_step_data is None or NumericKeypad is None:
+            return
+        cur = int(self.active_step_data.get("cmp_dt_addr", 100))
+        dlg = NumericKeypad("비교할 DT 주소 (0~9999)", cur, 0, self)
+        if dlg.exec() == QDialog.Accepted:
+            addr = max(0, min(9999, int(dlg.get_value())))
+            self.active_step_data["cmp_dt_addr"] = addr
+            if hasattr(self, 'jmp_dt_addr_btn'):
+                self.jmp_dt_addr_btn.setText(f"DT{addr}")
+
+    def _open_jmp_dt_const(self):
+        """JMP 데이터값 비교 - 비교 상수 입력 (부호 허용, 숫자 키패드)."""
+        if self.active_step_data is None or NumericKeypad is None:
+            return
+        cur = int(self.active_step_data.get("cmp_const", 0))
+        dlg = NumericKeypad("비교 상수 입력", cur, 0, self)
+        if dlg.exec() == QDialog.Accepted:
+            val = int(dlg.get_value())
+            self.active_step_data["cmp_const"] = val
+            if hasattr(self, 'jmp_dt_const_btn'):
+                self.jmp_dt_const_btn.setText(str(val))
+
     def _open_jmp_mode_selector(self):
         """JMP 조건 - 모드 선택 팝업"""
         if not hasattr(self, 'jmp_mode_combo'): return
