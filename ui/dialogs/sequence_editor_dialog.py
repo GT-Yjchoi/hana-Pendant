@@ -419,6 +419,9 @@ class SequenceEditorDialog(QDialog):
                     chk.toggled.connect(lambda checked, idx=i: self._on_axis_checkbox_changed(idx, checked))
             if hasattr(self, 'chk_pack_base'):
                 self.chk_pack_base.toggled.connect(self._on_pack_base_changed)
+            if hasattr(self, 'pos_exec_grp'):
+                for b in self.pos_exec_grp.buttons():
+                    b.toggled.connect(self._on_pos_exec_mode_changed)
 
             self.stack.addWidget(StepUIGenerator.create_io_editor(self))
             # OUT/IN 라디오버튼 시그널 1회만 연결 (_load_data_to_ui에서 반복 연결 제거)
@@ -511,6 +514,16 @@ class SequenceEditorDialog(QDialog):
                 self.chk_pack_base.blockSignals(True)
                 self.chk_pack_base.setChecked(bool(data.get("pack_base", False)))
                 self.chk_pack_base.blockSignals(False)
+
+            # 이행 모드 로드 (wait_completion 누락 시 True=완료 후 이행 → 기존 레시피 하위호환)
+            if hasattr(self, 'pos_exec_grp'):
+                wait_c = bool(data.get("wait_completion", True))
+                self.rb_pos_wait.blockSignals(True)
+                self.rb_pos_parallel.blockSignals(True)
+                self.rb_pos_wait.setChecked(wait_c)
+                self.rb_pos_parallel.setChecked(not wait_c)
+                self.rb_pos_wait.blockSignals(False)
+                self.rb_pos_parallel.blockSignals(False)
 
             # ★ active_axes로 통일 (PLC 전송과 동일한 키 사용)
             axes = data.get("active_axes", data.get("axes", [False]*8))
@@ -798,6 +811,16 @@ class SequenceEditorDialog(QDialog):
             self.active_step_data["pack_base"] = True
         else:
             self.active_step_data.pop("pack_base", None)
+
+    def _on_pos_exec_mode_changed(self, checked=None):
+        if self._is_loading: return
+        if self.active_step_data is None: return
+        if self.active_step_data.get("type") != "POS": return
+        # 완료 후 이행(기본)이면 키 제거, 동시 이행이면 False 저장 → 기존 레시피 diff 최소화
+        if self.rb_pos_parallel.isChecked():
+            self.active_step_data["wait_completion"] = False
+        else:
+            self.active_step_data.pop("wait_completion", None)
 
     def _on_step_name_changed(self, text):
         if self._is_loading: return

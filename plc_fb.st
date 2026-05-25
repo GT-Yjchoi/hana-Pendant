@@ -321,7 +321,14 @@ CASE i_SeqState OF
         IF b_AnyBusy THEN
             b_TimerStart := FALSE;
             FOR i_LoopAxis := 1 TO 5 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
-            i_SeqState := 30;
+            (* [NEW] diParam2 = 이행 모드: 0=완료 후 이행(완료대기 state 30 경유),
+               1=동시 이행(기동 확인만 하고 즉시 다음 스텝, 이동은 백그라운드 계속).
+               diParam2 미설정(0) → 기존 동작 유지(하위호환). *)
+            IF di_StepP2 = 1 THEN
+                i_SeqState := 99;
+            ELSE
+                i_SeqState := 30;
+            END_IF;
         ELSE
             b_TimerStart := TRUE;
             IF b_WaitDone THEN

@@ -105,6 +105,26 @@ class StepUIGenerator:
         )
         lay.addWidget(dlg.chk_pack_base)
 
+        # 다음 스텝 이행 모드 (diParam2): 완료 후 이행 / 동시 이행
+        gb_exec = QGroupBox("다음 스텝 이행")
+        gb_exec.setStyleSheet(StepUIGenerator._groupbox_style())
+        exec_layout = QHBoxLayout(gb_exec)
+        exec_layout.setContentsMargins(10, 5, 10, 5)
+        dlg.rb_pos_wait     = QRadioButton("완료 후 이행")
+        dlg.rb_pos_parallel = QRadioButton("동시 이행")
+        dlg.rb_pos_wait.setChecked(True)  # 기본값: 완료 후 이행 (기존 동작)
+        dlg.pos_exec_grp = QButtonGroup(w)
+        dlg.pos_exec_grp.addButton(dlg.rb_pos_wait,     0)
+        dlg.pos_exec_grp.addButton(dlg.rb_pos_parallel, 1)
+        for rb in (dlg.rb_pos_wait, dlg.rb_pos_parallel):
+            rb.setStyleSheet(
+                "QRadioButton { color: #FFFFFF; font-size: 14px; font-weight: bold; padding: 4px; } "
+                "QRadioButton::indicator { width: 20px; height: 20px; }"
+            )
+            exec_layout.addWidget(rb)
+        exec_layout.addStretch(1)
+        lay.addWidget(gb_exec)
+
         # 축/속도 설정 그룹
         gb_axes = QGroupBox("축 선택 및 속도")
         gb_axes.setStyleSheet(StepUIGenerator._groupbox_style())

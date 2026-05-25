@@ -746,6 +746,11 @@ class PLCClient(QObject):
             if step_data.get("pack_base"):
                 opt |= 0x0100
 
+            # ★ 이행 모드 (diParam2): 0=완료 후 이행(기본), 1=동시 이행
+            #   wait_completion 키 누락 시 True(완료 후 이행)로 간주 → 기존 레시피 하위호환
+            wait_completion = step_data.get("wait_completion", True)
+            p2 = 0 if wait_completion else 1
+
             # 디버그 출력
             axes_str = "".join(["X" if active_axes[0] else "-",
                                "Y" if active_axes[1] else "-",
@@ -756,7 +761,8 @@ class PLCClient(QObject):
                                "R1" if active_axes[6] else "-",
                                "R2" if active_axes[7] else "-"])
             pb = " [PB]" if step_data.get("pack_base") else ""
-            print(f"    → 사용축: {axes_str} (0x{opt:04X}){pb}")
+            ex = "완료후" if wait_completion else "동시"
+            print(f"    → 사용축: {axes_str} (0x{opt:04X}){pb} 이행={ex}(p2={p2})")
             
         elif step_type == "OUT":
             cmd = 20
