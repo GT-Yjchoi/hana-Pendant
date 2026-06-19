@@ -687,11 +687,11 @@ CASE i_SeqState OF
             END_IF;
         END_IF;
 
-    30: (* 완료 대기 *)
+    30: (* 완료 대기 - BUSY 하강 + INP(DONE) 확인 *)
         b_AllDone := TRUE;
         FOR i_LoopAxis := 1 TO 5 DO
             IF (w_EffOpt AND SHL(WORD#1, INT_TO_WORD(i_LoopAxis - 1))) <> 0 THEN
-                IF arr_bBusy[i_LoopAxis] THEN b_AllDone := FALSE; END_IF;
+                IF arr_bBusy[i_LoopAxis] OR (NOT arr_bDone[i_LoopAxis]) THEN b_AllDone := FALSE; END_IF;
             END_IF;
         END_FOR;
         IF b_AllDone THEN i_SeqState := 99; END_IF;
