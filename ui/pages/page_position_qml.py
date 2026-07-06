@@ -449,12 +449,25 @@ class PagePositionQml(QWidget):
 
     # ---- 실시간 (PagePosition._update_realtime_values 와 동일) ----
     def _update_realtime_values(self, data):
+        if isinstance(data, dict):
+            # Manual page keeps the valve lock/status in sync from the same
+            # monitor packet; mirror that here so the shared valve tiles do
+            # not show stale state on the position page.
+            op_status = data.get('op_status', 0)
+            self._valve_be.set_locked(op_status in (1, 2))
+        else:
+            op_status = 0
+
         if not self.isVisible():
             return
         axis_data = data.get('axis_pos', []) if isinstance(data, dict) else data
         self._axis.set_cur(axis_data)
 
-        op_status = data.get('op_status', 0) if isinstance(data, dict) else 0
+        if isinstance(data, dict) and 'outputs' in data:
+            outs = data['outputs']
+            if outs and len(outs) >= 2:
+                self._valve_be.sync_from_outputs(outs)
+
         current_step = data.get('current_step', -1) if isinstance(data, dict) else -1
         self._current_op_status = op_status
         self._be.changed.emit()
