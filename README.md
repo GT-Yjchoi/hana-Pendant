@@ -1,6 +1,6 @@
 # Pendant — 산업용 서보 제어 HMI
 
-라즈베리파이 기반 PySide6 풀스크린 HMI 앱.
+ODROID-M1S 기반 PySide6 풀스크린 HMI 앱.
 파나소닉 PLC(FPWIN Pro)와 TCP(MEWTOCOL-style) 통신으로 8축 서보 시스템을 제어하고 시퀀스·포인트를 관리합니다.
 
 ---
@@ -9,19 +9,41 @@
 
 | 항목 | 값 |
 |---|---|
-| 플랫폼 | Raspberry Pi 5 (aarch64) |
-| OS | Raspberry Pi OS **Lite** (Debian Trixie) — 데스크탑 없음 |
-| Python | 시스템 `python3` + `--system-site-packages` venv (pip 패키지 없음) |
-| 프로젝트 경로 | `/home/yjchoi/Pendant/` |
-| 가상환경 | `/home/yjchoi/Pendant/.venv` (apt 의 `python3-pyside6.*` 공유) |
-| Qt 플랫폼 | **`eglfs` + KMS/GBM** (`QT_QPA_EGLFS_INTEGRATION=eglfs_kms`, `KMS_ATOMIC=1`) — GPU 가속 렌더 + 회전 |
-| 디스플레이 | **Waveshare 10.1" DSI v2** (800×1280 IPS, `video=DSI-1:800x1280e,rotate=270` 으로 landscape 1280×800 사용) |
-| 터치 입력 | DSI 패널 정전식 멀티터치. evdev 좌표 회전: `QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS=/dev/input/event1:rotate=270` |
-| 자동 실행 | `pendant.service` (systemd, `Conflicts=getty@tty1`) — 부팅 시 tty1 점유하며 앱 기동 |
+| 플랫폼 | ODROID-M1S (aarch64, Cortex-A55 / Mali-G52) |
+| OS | Ubuntu 24.04 Server — 데스크탑 없음 |
+| Python | `/home/odroid/pyside-env/bin/python` + PySide6 venv |
+| 프로젝트 경로 | `/home/odroid/hana-Pendant/` |
+| 가상환경 | `/home/odroid/pyside-env` |
+| Qt 플랫폼 | **Wayland on weston kiosk** (`QT_QPA_PLATFORM=wayland`, `wayland-egl`) — Mali EGL GPU 렌더 |
+| 디스플레이 | ODROID DSI 패널 구성 (`weston.ini`에서 kiosk/출력/회전 관리) |
+| 터치 입력 | weston/libinput 입력 처리 |
+| 자동 실행 | `pendant.service` → `launch.sh` → weston kiosk + `main.py` |
 | WiFi 스캔 권한 | polkit 규칙 `/etc/polkit-1/rules.d/50-netdev-wifi.rules` + `netdev` 그룹 |
 | 유선 이더넷 | NM 프로파일에 `ipv4.never-default=yes` — PLC 전용 LAN 이 디폴트 라우트로 승격되는 것 차단 |
 
-> **왜 eglfs KMS/GBM** 인가: Qt 6 부터 `linuxfb` 가 소프트웨어 회전을 제거. 회전·GPU 가속·부드러운 터치 스크롤을 한꺼번에 얻으려면 KMS/GBM 이 유일한 경로. 단, 시스템 `apt` 의 PySide6 (`python3-pyside6.*`) 에만 `libQt6EglFsKmsGbmSupport` 가 포함되므로 pip 설치는 쓰지 않는다 — `setup.sh` 가 venv 를 `--system-site-packages` 로 만들어 apt PySide6 를 공유.
+> M1S에서는 `scripts/m1s-bootstrap.sh`가 libmali g24p0, DSI overlay, weston kiosk, PySide6 venv를 먼저 구성하고, `setup.sh`가 NetworkManager/polkit/udev/systemd 등록을 마무리한다. 앱은 `eglfs`가 아니라 `launch.sh`에서 띄운 weston 위의 Qt Wayland 클라이언트로 실행된다.
+
+### M1S GPU 드라이버 조합
+
+현재 검증된 조합은 **Mali-G52 g24p0 ARM blob + weston Wayland EGL** 이다. 여러 libmali/Mesa/Panfrost 조합을 테스트한 뒤, 실제 kiosk 렌더링과 PySide6 QML 스크롤에서 안정적으로 동작한 버전은 아래 패키지였다.
+
+- 패키지: `libmali-bifrost-g52-g24p0-wayland-gbm_1.9-1_arm64.deb`
+- 출처: `scripts/m1s-bootstrap.sh` 의 `MALI_DEB_URL`
+- build tag: `g24p0-00eac0`
+- 설치 파일: `/usr/lib/aarch64-linux-gnu/libmali.so.1.9.0`
+- 실행 방식: `libmali-setup.service` 가 `libEGL`, `libGLESv2`, `libgbm`, `libwayland-egl` 을 Mali blob 쪽으로 bind-mount
+- 앱 환경: `QT_QPA_PLATFORM=wayland`, `QT_WAYLAND_CLIENT_BUFFER_INTEGRATION=wayland-egl`
+
+정상 동작 시 weston 로그에는 다음 계열이 찍힌다.
+
+```text
+EGL vendor: ARM
+EGL version: 1.5 Bifrost-"g24p0-00eac0"
+GL version: OpenGL ES 3.2 v1.g24p0-00eac0...
+GL renderer: Mali-G52
+```
+
+`libmali-bifrost-g52-g24p0-wayland-gbm` 패키지는 apt 업그레이드로 다른 blob/stub 으로 바뀌지 않도록 `apt-mark hold` 상태로 둔다. GPU 표시가 느려지거나 QML 스크롤이 끊기면 먼저 `/tmp/pendant-weston.log`, `systemctl status libmali-setup`, `apt-mark showhold` 를 확인한다.
 
 ---
 
@@ -31,12 +53,11 @@
 Pendant/
 ├── main.py                        # 진입점 (QApplication, PLCClient, MainWindow) + 스크린샷 핫키(F12) / 우상단 3초 롱프레스
 ├── main.spec                      # PyInstaller 빌드 스펙
-├── pendant.service                # systemd 서비스 파일 (eglfs KMS/GBM 환경변수 포함)
-├── setup.sh                       # 신규 Pi 일괄 세팅 (apt + venv + cmdline + polkit + NM + systemd)
+├── pendant.service                # systemd 서비스 파일 (M1S weston kiosk 런처 호출)
+├── setup.sh                       # 신규 M1S 일괄 세팅 (NM + polkit + udev + systemd)
 ├── settings.json                  # 사용자 설정 (PLC IP/Port, 밸브, IO 이름, 축 등)
 ├── style.qss                      # 전역 스타일시트 (Fusion 기반)
-├── new_plc_fb.st                  # PLC 펑션블록 (현재 사용, 2-instance + 콜스택 + 파렛타이징 통합)
-├── plc_fb.st                      # 구버전 FB (3-tier, 미사용 - 참고용)
+├── new_plc_fb.st                  # PLC 펑션블록 (현재 사용, 3-instance + 콜스택 + 파렛타이징 통합)
 ├── fb_WriteMotionTable.st         # RTEX 모션 테이블 일괄 쓰기 FB (포인트 60개 분량)
 ├── fb_MainAxis.st                 # 메인 축 제어 FB
 ├── fb_RTEX_Amp_Param.st           # RTEX 앰프 파라미터 FB
@@ -123,14 +144,16 @@ Pendant/
 | | DT116~119 | 입력(X) 상태 (WORD×4, 64점) |
 | | DT120~123 | 출력(Y) 상태 (WORD×4). 이 PLC 는 `DT120=Y00~Y0F`, `DT121=Y20~Y2F` 매핑 |
 | | DT124~125 | 밸브 동작 상태 (32개 밸브 비트) |
-| | DT126~128 | 미사용 |
+| | DT126 | 병렬 워커2 실행 슬롯 (FB_Worker2.i_CurrentSlot, 0=idle) |
+| | DT127 | 병렬 워커2 실행 스텝 (FB_Worker2.i_CurrentStep) |
+| | DT128 | 미사용 |
 | | DT129 | 운전 상태 (op_status: 0=정지, 1=자동, 2=확인운전) |
 | | DT130 | 확인운전 상태 (check_run_status) |
 | | DT131 | 현재 실행 스텝 (FB.i_CurrentStep, 스택 top 기준) |
-| | DT132 | 현재 실행 슬롯 (FB.i_CurrentSlot: Main=0, 서브=1~N, Monitor=39) |
+| | DT132 | 현재 실행 슬롯 (FB.i_CurrentSlot: Main=0, 서브=1~N) |
 | | DT133 | 콜 스택 깊이 (FB.i_StackDepth, 0~3) |
-| | DT134 | 병렬 실행 슬롯 (FB_Monitor.i_CurrentSlot, 0=idle) |
-| | DT135 | 병렬 실행 스텝 (FB_Monitor.i_CurrentStep) |
+| | DT134 | 병렬 워커1 실행 슬롯 (FB_Sub.i_CurrentSlot, 0=idle) |
+| | DT135 | 병렬 워커1 실행 스텝 (FB_Sub.i_CurrentStep) |
 | | DT136~137 | 총 취출 횟수 (DINT) |
 | | DT138~139 | 현재 성형 시간 (DINT, 0.1초 단위) |
 | | DT140~141 | 현재 취출 시간 (DINT, 0.1초 단위) |
@@ -245,14 +268,16 @@ bit 3 : 4축 (Y2)     bit 7 : 8축 (R2)
 
 ---
 
-### PLC 펑션블록 (`new_plc_fb.st`) — 2-instance + 내부 콜 스택
+### PLC 펑션블록 (`new_plc_fb.st`) — 3-instance + 내부 콜 스택
 
-시퀀스 실행 FB 는 **2개 인스턴스**로 배선. 동기 CALL 은 FB 내부 콜 스택(4레벨)으로 처리하고, 병렬 CALL 만 Monitor 인스턴스로 외부 기동합니다.
+시퀀스 실행 FB 는 **3개 인스턴스**로 배선. 동기 CALL 은 FB 내부 콜 스택(4레벨)으로 처리하고, 병렬 CALL 은 워커 2개 중 빈 워커로 외부 기동합니다.
 
 ```
 FB_Main    (slot 0 고정, 모든 동기 CALL 처리, 내부 스택 최대 4레벨)
-   ↓ b_ParallelStart / i_ParallelSlot (병렬 CALL 시 1스캔 펄스)
-FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
+   ↓ b_ParallelStart1 / i_ParallelSlot1 (병렬 CALL 워커1)
+   ↓ b_ParallelStart2 / i_ParallelSlot2 (병렬 CALL 워커2)
+FB_Sub     (병렬 워커1, b_NoSubCall=TRUE)
+FB_Worker2 (병렬 워커2, b_NoSubCall=TRUE)
 ```
 
 #### VAR_INPUT (주요)
@@ -263,11 +288,11 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 | `b_Run` | 외부 자동운전 명령 |
 | `b_Reset` | **운전정지 상승펄스** — 스택/타이머/SystemOutput/내부비트 초기화 (에러/Valve 유지) |
 | `b_AlarmReset` | **알람 리셋 상승펄스 (DT212)** — UserAlarm/StepAlarm 모두 클리어 + state 900 트랩 탈출 |
-| `b_NoSubCall` | TRUE면 이 인스턴스는 CALL 불가 (Monitor 용) |
+| `b_NoSubCall` | TRUE면 이 인스턴스는 CALL 불가 (병렬 워커 용) |
 | `t_WaitTime` | state 21 BUSY 감지 타임아웃 (PROGRAM에서 T#500MS 이상 배선 필수) |
 | `w_AxisEnable` | DT15000 축 사용 비트마스크 — POS 스텝 자동 마스킹 (3축/5축 공용 레시피 지원) |
 
-#### VAR_IN_OUT (공유 변수, Main/Monitor 같은 전역변수 배선)
+#### VAR_IN_OUT (공유 변수, 모든 시퀀스 FB 같은 전역변수 배선)
 
 | 이름 | 매핑 | 용도 |
 |---|---|---|
@@ -287,7 +312,9 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 - `b_Step_End` — 최상위 END 도달 펄스 (카운터 증가 등에 사용)
 - `b_IsBusy` — FB 실행 중 (i_SeqState <> 0 또는 스택 깊이 > 0)
 - `i_CurrentStep`, `i_CurrentSlot`, `i_StackDepth` — HMI 모니터링용
-- `i_ParallelSlot`, `b_ParallelStart` — Main → Monitor 병렬 CALL 기동
+- `i_ParallelSlot1`, `b_ParallelStart1` — Main → 병렬 워커1 기동
+- `i_ParallelSlot2`, `b_ParallelStart2` — Main → 병렬 워커2 기동
+- `i_ParallelSlot`, `b_ParallelStart` — 워커1 호환용 alias
 
 #### 스텝 알람 ID (`i_StepAlarmID`)
 
@@ -295,9 +322,9 @@ FB_Monitor (병렬 슬롯 전담, b_NoSubCall=TRUE)
 |---|---|
 | 21 | POS 축 이동 확인 실패 (BUSY 상승 미감지) — 타임아웃 후 INP 체크 백업까지 실패한 경우 |
 | 22 | **파렛타이징 베이스 인덱스 범위 오류** — `pack_base` 스텝의 `point_index` 가 0~59 를 벗어남 |
-| 50 | 예약 (미사용) |
+| 50 | 병렬 CALL 실패 — 병렬 워커 2개 모두 실행중 |
 | 93 | 동기 CALL 스택 오버플로 (4레벨 초과) |
-| 94 | CALL 사용 불가 — 이 인스턴스는 `b_NoSubCall=TRUE` (Monitor 등) |
+| 94 | CALL 사용 불가 — 이 인스턴스는 `b_NoSubCall=TRUE` (병렬 워커 등) |
 | 95 | JMP 타겟 스텝 번호 범위 초과 (0~99) |
 | 96 | CALL 슬롯 번호 범위 초과 (0~39) |
 | 97 | 실행 슬롯 번호 범위 초과 (0~39) |
@@ -553,8 +580,8 @@ HMI 가 PLC 에 새로 연결되거나 레시피가 교체될 때 **백그라운
 ### 스크린샷 (사용설명서 캡처용)
 
 - **F12** 키 또는 화면 **우상단 100×100 영역 3초 롱프레스** → `~/screenshots/pendant_YYYYMMDD_HHMMSS.png` 저장 + 하단 토스트 알림
-- 저장 함수는 `QWidget.grab()` 기반이라 eglfs 환경에서도 풀스크린 캡처 가능
-- 원격 SSH 로 가져오려면: `scp pi@pendant:/home/yjchoi/screenshots/* .`
+- 저장 함수는 `QWidget.grab()` 기반이라 weston kiosk 환경에서도 풀스크린 캡처 가능
+- 원격 SSH 로 가져오려면: `scp odroid@pendant:/home/odroid/screenshots/* .`
 
 ### UI 터치 최적화 (2026-04)
 
@@ -598,26 +625,44 @@ FB_Main.b_StepAlarm    := g_StepAlarm;
 FB_Main.i_StepAlarmID  := g_StepAlarmID;
 (* ... 서보/입력/모드 변수 연결 ... *)
 
-(* FB_Monitor *)
-FB_Monitor.i_SlotNo     := FB_Main.i_ParallelSlot;
-FB_Monitor.b_Run        := FB_Main.b_ParallelStart;
-FB_Monitor.b_NoSubCall  := TRUE;
-FB_Monitor.b_Reset      := b_AutoStopRising;
-FB_Monitor.b_AlarmReset := b_DT212_Rising;
-FB_Monitor.t_WaitTime   := T#500MS;
-FB_Monitor.w_AxisEnable := DT15000;
-FB_Monitor.i_ControlCmd := DT200;
-FB_Monitor.w_UserAlarm  := g_UserAlarm;
-FB_Monitor.b_StepAlarm  := g_StepAlarm;
-FB_Monitor.i_StepAlarmID:= g_StepAlarmID;
+FB_Main.b_ParallelBusy1 := FB_Sub.b_IsBusy;
+FB_Main.b_ParallelBusy2 := FB_Worker2.b_IsBusy;
+
+(* FB_Sub: 병렬 워커1 *)
+FB_Sub.i_SlotNo     := FB_Main.i_ParallelSlot1;
+FB_Sub.b_Run        := FB_Main.b_ParallelStart1;
+FB_Sub.b_NoSubCall  := TRUE;
+FB_Sub.b_Reset      := b_AutoStopRising;
+FB_Sub.b_AlarmReset := b_DT212_Rising;
+FB_Sub.t_WaitTime   := T#500MS;
+FB_Sub.w_AxisEnable := DT15000;
+FB_Sub.i_ControlCmd := DT200;
+FB_Sub.w_UserAlarm  := g_UserAlarm;
+FB_Sub.b_StepAlarm  := g_StepAlarm;
+FB_Sub.i_StepAlarmID:= g_StepAlarmID;
+
+(* FB_Worker2: 병렬 워커2 *)
+FB_Worker2.i_SlotNo     := FB_Main.i_ParallelSlot2;
+FB_Worker2.b_Run        := FB_Main.b_ParallelStart2;
+FB_Worker2.b_NoSubCall  := TRUE;
+FB_Worker2.b_Reset      := b_AutoStopRising;
+FB_Worker2.b_AlarmReset := b_DT212_Rising;
+FB_Worker2.t_WaitTime   := T#500MS;
+FB_Worker2.w_AxisEnable := DT15000;
+FB_Worker2.i_ControlCmd := DT200;
+FB_Worker2.w_UserAlarm  := g_UserAlarm;
+FB_Worker2.b_StepAlarm  := g_StepAlarm;
+FB_Worker2.i_StepAlarmID:= g_StepAlarmID;
 (* 동일한 I/O 변수 공유 *)
 
 (* HMI 모니터링 *)
 DT131 := FB_Main.i_CurrentStep;
 DT132 := FB_Main.i_CurrentSlot;
 DT133 := FB_Main.i_StackDepth;
-DT134 := FB_Monitor.i_CurrentSlot;
-DT135 := FB_Monitor.i_CurrentStep;
+DT134 := FB_Sub.i_CurrentSlot;
+DT135 := FB_Sub.i_CurrentStep;
+DT126 := FB_Worker2.i_CurrentSlot;
+DT127 := FB_Worker2.i_CurrentStep;
 DT160 := INT_TO_WORD(g_StepAlarmID);
 
 (* 자동정지 트리거 - 에러 발생 시 *)
@@ -629,21 +674,22 @@ g_StepAlarmPrev := g_StepAlarm;
 
 ---
 
-## 신규 라즈베리파이 초기 세팅
+## 신규 ODROID-M1S 초기 세팅
 
 ```bash
-git clone git@github.com:GT-Yjchoi/Pendant.git
-cd Pendant
-./setup.sh         # 6단계 — apt + venv + cmdline + polkit + never-default + systemd
-sudo reboot        # pendant.service 자동 실행
+git clone git@github.com:GT-Yjchoi/hana-Pendant.git
+cd hana-Pendant
+bash scripts/m1s-bootstrap.sh
+bash setup.sh
+sudo reboot
 ```
 
 `setup.sh` 가 수행하는 일:
-1. apt 패키지 (`python3-pyside6.*`, libegl/libgl, network-manager)
-2. `python3 -m venv --system-site-packages .venv` — apt PySide6 공유
-3. `/boot/firmware/cmdline.txt` 에 콘솔 커서/로고 제거 + DSI 회전 플래그 (`rotate=270`) 추가
-4. polkit 규칙 + 현 사용자 `netdev` 그룹 추가 (WiFi nmcli 허용)
-5. 이더넷 프로파일에 `ipv4.never-default=yes` (LAN 전용 PLC 네트워크)
+1. `scripts/m1s-bootstrap.sh` 결과 확인 (`~/pyside-env`, PySide6, weston)
+2. NetworkManager / `python3-lgpio` 패키지 확인 및 설치
+3. polkit 규칙 + 현 사용자 `netdev` 그룹 추가 (WiFi nmcli 허용)
+4. 이더넷 프로파일에 `ipv4.never-default=yes` (LAN 전용 PLC 네트워크)
+5. 백라이트 udev 권한 적용 (`video` 그룹 쓰기)
 6. `pendant.service` → `/etc/systemd/system/` 복사 + `systemctl enable`
 
 SSH 키 미등록 시:
@@ -652,10 +698,7 @@ ssh-keygen -t ed25519 -C "<email>"
 cat ~/.ssh/id_ed25519.pub   # GitHub → Settings → SSH keys 에 등록
 ```
 
-> ⚠ **터치 디바이스 번호** — `pendant.service` 의 `/dev/input/event1` 이 하드코딩돼 있음. 다른 번호라면:
-> ```bash
-> for d in /dev/input/event*; do udevadm info --query=property --name="$d" | grep -q TOUCHSCREEN && echo "$d"; done
-> ```
+> M1S의 디스플레이/GPU/weston 기본 구성은 `scripts/m1s-bootstrap.sh`가 담당한다. 앱 서비스 구성만 다시 적용할 때는 `bash setup.sh`를 재실행하면 된다.
 
 ---
 
@@ -673,8 +716,8 @@ journalctl -u pendant -f           # 실시간 로그
 ## 빌드 방법 (PyInstaller)
 
 ```bash
-cd /home/yjchoi/Pendant
-source .venv/bin/activate
+cd /home/odroid/hana-Pendant
+source /home/odroid/pyside-env/bin/activate
 pyinstaller --clean -y main.spec
 ```
 
@@ -686,20 +729,11 @@ pyinstaller --clean -y main.spec
 
 ```bash
 sudo systemctl stop pendant   # tty1 점유 해제
-cd /home/yjchoi/Pendant
-# pendant.service 와 동일한 환경변수 세팅
-QT_QPA_PLATFORM=eglfs \
-QT_QPA_EGLFS_INTEGRATION=eglfs_kms \
-QT_QPA_EGLFS_KMS_ATOMIC=1 \
-QT_QPA_EGLFS_KMS_DEVICE=/dev/dri/card0 \
-QT_QPA_EGLFS_ROTATION=-90 \
-QT_QPA_EGLFS_HIDECURSOR=1 \
-QT_QPA_EGLFS_NO_LIBINPUT=1 \
-QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS=/dev/input/event1:rotate=270 \
-.venv/bin/python main.py
+cd /home/odroid/hana-Pendant
+./launch.sh
 ```
 
-> SSH 세션에서 직접 실행하려면 `sudo` 권한이 필요할 수 있음 (DRM/KMS 장치 접근). 보통은 `journalctl -u pendant -f` 로 서비스 로그를 보면서 작업하는 것이 편하다.
+> `launch.sh`는 weston kiosk를 띄운 뒤 같은 Wayland 소켓에서 `main.py`를 실행한다. 보통은 `journalctl -u pendant -f`, `/tmp/pendant-app.log`, `/tmp/pendant-weston.log`를 보면서 작업하는 것이 편하다.
 
 ---
 
