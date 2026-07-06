@@ -69,6 +69,11 @@ RULE
 sudo systemctl restart polkit 2>/dev/null || true
 echo "  polkit netdev 규칙 적용"
 
+# NetworkManager 자체는 유지하되, 부팅 때 네트워크가 online 될 때까지 기다리는 서비스만 끈다.
+# SSH/LAN/WiFi 연결은 NetworkManager.service 가 계속 처리한다.
+sudo systemctl disable --now NetworkManager-wait-online.service 2>/dev/null || true
+echo "  NetworkManager-wait-online 비활성화 (부팅 대기 제거)"
+
 echo
 echo "=== [4/6] 이더넷 never-default (PLC 전용 LAN 가정) ==="
 if systemctl is-active --quiet NetworkManager; then

@@ -857,7 +857,7 @@ class StepUIGenerator:
         _dt_lbl = QLabel("DT 주소")
         _dt_lbl.setStyleSheet(_dt_lbl_style)
         _dt_lbl.setFixedWidth(64)
-        dlg.jmp_dt_addr_btn = QPushButton("DT100")
+        dlg.jmp_dt_addr_btn = QPushButton("DT60000")
         dlg.jmp_dt_addr_btn.setFixedHeight(42)
         dlg.jmp_dt_addr_btn.setStyleSheet(_btn_style)
         dlg.jmp_dt_addr_btn.clicked.connect(dlg._open_jmp_dt_addr)
@@ -995,7 +995,75 @@ class StepUIGenerator:
         
         # 기본 선택: 대기 후 실행
         dlg.rb_call_wait.setChecked(True)
-        
+
+        vbox.addStretch(1)
+        lay.addWidget(gb)
+        return w
+
+    @staticmethod
+    def create_dat_editor(dlg):
+        """데이터연산(DAT) 편집기 — g_DTPool(DT60000~60099) 상수 대입/가산/감산."""
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        gb = QGroupBox("데이터 연산")
+        gb.setStyleSheet(StepUIGenerator._groupbox_style())
+        vbox = QVBoxLayout(gb)
+        vbox.setSpacing(12)
+        vbox.setContentsMargins(10, 20, 10, 10)
+
+        _btn_style = """
+            QPushButton {
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid #888; border-radius: 4px;
+                color: white; font-size: 15px; font-weight: bold;
+                text-align: left; padding-left: 15px;
+            }
+            QPushButton:pressed { background: rgba(255, 255, 255, 0.2); }
+        """
+
+        # 대상 DT 주소 (60000~60099)
+        vbox.addWidget(QLabel("대상 DT (60000~60099)"))
+        dlg.dat_addr_btn = QPushButton("DT60000")
+        dlg.dat_addr_btn.setFixedHeight(45)
+        dlg.dat_addr_btn.setStyleSheet(_btn_style)
+        dlg.dat_addr_btn.clicked.connect(dlg._open_dat_addr)
+        vbox.addWidget(dlg.dat_addr_btn)
+
+        # 연산자 (대입 / 가산 / 감산 → 코드 0/1/2, PLC 계약과 동일)
+        vbox.addWidget(QLabel("연산"))
+        op_row = QWidget()
+        op_lay = QHBoxLayout(op_row)
+        op_lay.setContentsMargins(0, 0, 0, 0)
+        op_lay.setSpacing(8)
+        dlg.rb_dat_mov = QRadioButton("대입 =")
+        dlg.rb_dat_add = QRadioButton("가산 +=")
+        dlg.rb_dat_sub = QRadioButton("감산 -=")
+        dlg.dat_op_grp = QButtonGroup(w)
+        dlg.dat_op_grp.addButton(dlg.rb_dat_mov, 0)
+        dlg.dat_op_grp.addButton(dlg.rb_dat_add, 1)
+        dlg.dat_op_grp.addButton(dlg.rb_dat_sub, 2)
+        dlg.rb_dat_mov.setChecked(True)
+        for rb in (dlg.rb_dat_mov, dlg.rb_dat_add, dlg.rb_dat_sub):
+            rb.setStyleSheet(
+                "QRadioButton { color: #FFFFFF; font-size: 14px; font-weight: bold; padding: 4px; } "
+                "QRadioButton::indicator { width: 20px; height: 20px; }"
+            )
+            op_lay.addWidget(rb)
+        op_lay.addStretch(1)
+        vbox.addWidget(op_row)
+
+        # 상수 (피연산자): 대입/가산/감산 모두 이 값을 사용한다.
+        dlg.dat_const_label = QLabel("대입 값")
+        vbox.addWidget(dlg.dat_const_label)
+        dlg.dat_const_btn = QPushButton("0")
+        dlg.dat_const_btn.setFixedHeight(45)
+        dlg.dat_const_btn.setStyleSheet(_btn_style)
+        dlg.dat_const_btn.clicked.connect(dlg._open_dat_const)
+        vbox.addWidget(dlg.dat_const_btn)
+
         vbox.addStretch(1)
         lay.addWidget(gb)
         return w

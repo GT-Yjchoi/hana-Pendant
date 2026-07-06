@@ -22,6 +22,8 @@ class PLCClient(QObject):
         # 사용자가 "연결끊기"를 눌렀는지 구분.
         # True 인 동안에는 재연결 루프를 자동으로 띄우지 않음(사용자 의도 존중).
         self._manual_disconnect = False
+        self._last_monitor_data = {}
+        self._recipe_transfer_active = False
 
         # --- PLC 통신 설정 ---
         self.USE_HEADER = True      
@@ -241,7 +243,7 @@ class PLCClient(QObject):
         v = int(value)
         low = v & 0xFFFF
         high = (v >> 16) & 0xFFFF
-        self.write_words(area_code, addr, [low, high])
+        return self.write_words(area_code, addr, [low, high])
 
     def patch_tmr_step_time(self, slot_id, step_idx, time_sec):
         """TMR 스텝의 diParam1(시간값)만 PLC에 직접 패치 (슬롯 전체 재전송 없이)"""
@@ -269,6 +271,19 @@ class PLCClient(QObject):
         print(f"[PLC] OUT 지연 패치 Slot={slot_id} Step={step_idx} DT{addr} = {value} ({time_sec}s)")
         return result
 
+    def patch_sequence_step(self, slot_id, step_idx, step_data):
+        """단일 시퀀스 스텝(10 Words)을 전체 전송과 같은 인코더로 재생성해 패치."""
+        if not self.is_connected:
+            return False
+        if not (0 <= slot_id < self.MAX_SLOTS) or not (0 <= step_idx < 100):
+            return False
+
+        words = self._convert_json_step_to_10words(step_data)
+        addr = self.SEQ_BASE_ADDR + slot_id * self.SLOT_SIZE + step_idx * 10
+        result = self.write_words(0x09, addr, words)
+        print(f"[PLC] STEP 패치 Slot={slot_id} Step={step_idx} DT{addr}~{addr+9} ({step_data.get('type', 'NOP')})")
+        return result
+
     # =========================================================
     # 제어 명령 (HMI → PLC) - DT200~208
     # =========================================================
@@ -280,6 +295,9 @@ class PLCClient(QObject):
         - 1: 자동 (AUTO RUN)
         - 2: 확인운전 (CHECK RUN)
         """
+        if int(mode) in (1, 2) and self.is_recipe_transfer_active():
+            print("[PLC] X 레시피/시퀀스 전송 중이라 운전 시작 차단")
+            return False
         print(f"[PLC] 운전 제어 명령 → DT{self.ADDR_CTRL_CMD} = {mode}")
         return self.write_words(0x09, self.ADDR_CTRL_CMD, [mode])
     
@@ -297,6 +315,9 @@ class PLCClient(QObject):
         DT202: 확인운전 제어
         - 확인운전 시작/중지 명령
         """
+        if int(state) == 1 and self.is_recipe_transfer_active():
+            print("[PLC] X 레시피/시퀀스 전송 중이라 확인운전 진행 차단")
+            return False
         print(f"[PLC] 확인운전 제어 → DT{self.ADDR_CHECK_RUN} = {state}")
         return self.write_words(0x09, self.ADDR_CHECK_RUN, [state])
     
@@ -541,6 +562,7 @@ class PLCClient(QObject):
             if raw and len(raw) >= 40:  # 최소 40개 이상
                 try:
                     res = self._parse_monitor_data(raw)
+                    self._last_monitor_data = res
                     self.sig_monitor_data.emit(res)
                 except Exception as e:
                     print(f"[PLC] 모니터링 파싱 에러: {e}")
@@ -572,6 +594,10 @@ class PLCClient(QObject):
         # ===== 3. 출력(Y) 상태 (DT120~123) =====
         # WORD * 4 = Y0~Y3F (64점 모니터링)
         res['outputs'] = raw[20:24]  # DT120, 121, 122, 123
+
+        # DT126~127: 병렬 워커2 실행 상태 (워커1은 DT134~135)
+        res['parallel2_slot'] = raw[26] if len(raw) > 26 else 0
+        res['parallel2_step'] = raw[27] if len(raw) > 27 else 0
         
         # ===== 4. 밸브 동작 상태 (DT124~125) =====
         # WORD * 2 = 32개 밸브 On/Off
@@ -591,16 +617,17 @@ class PLCClient(QObject):
         
         # ===== 9. 현재 실행 슬롯 + 콜 스택 깊이 (DT132~133) =====
         # DT132: 현재 실행 중 슬롯 번호 (FB.i_CurrentSlot) - 스택 top이 가리키는 슬롯
-        #        Main=0, 서브시퀀스=1~N(이름 정렬), Monitor(병렬)=39
+        #        Main=0, 서브시퀀스=1~N(이름 정렬)
         # DT133: 동기 CALL 스택 깊이 (FB.i_StackDepth) - 0~3
         #        0=Main만 실행, 1=Main→Sub, 2=Main→Sub→SubSub, 3=최대 중첩
         # ※ 키명 sub_seq_idx/sub_step은 구버전 호환 유지. 실제 의미는 위 주석 기준.
         res['sub_seq_idx']  = raw[32] if len(raw) > 32 else 0  # DT132 = 현재 슬롯
         res['sub_step']     = raw[33] if len(raw) > 33 else 0  # DT133 = 스택 깊이
 
-        # ===== 10. Monitor(병렬) 실행 상태 (DT134~135) =====
-        # DT134: FB_Monitor.i_CurrentSlot (병렬 워커가 실행 중인 슬롯, 0=idle)
-        # DT135: FB_Monitor.i_CurrentStep (병렬 워커가 실행 중인 스텝)
+        # ===== 10. 병렬 워커1 실행 상태 (DT134~135) =====
+        # DT134: FB_Sub.i_CurrentSlot (병렬 워커1이 실행 중인 슬롯, 0=idle)
+        # DT135: FB_Sub.i_CurrentStep (병렬 워커1이 실행 중인 스텝)
+        # 키명 monitor_slot/monitor_step은 구버전 호환 유지.
         res['monitor_slot'] = raw[34] if len(raw) > 34 else 0  # DT134
         res['monitor_step'] = raw[35] if len(raw) > 35 else 0  # DT135
 
@@ -667,6 +694,30 @@ class PLCClient(QObject):
     # =========================================================
     # 유틸리티
     # =========================================================
+
+    def current_op_status(self):
+        """마지막 모니터링값 기준 운전 상태. 0=정지, 1=자동, 2=확인운전."""
+        try:
+            return int(self._last_monitor_data.get("op_status", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def is_sequence_running(self):
+        return self.current_op_status() in (1, 2)
+
+    def begin_recipe_transfer(self):
+        """시퀀스/포인트 전체 전송 시작. 운전 중이면 DT 영역 갱신을 금지한다."""
+        if self.is_sequence_running():
+            print(f"[PLC] X 운전 중(op_status={self.current_op_status()})이라 시퀀스/포인트 전송 차단")
+            return False
+        self._recipe_transfer_active = True
+        return True
+
+    def end_recipe_transfer(self):
+        self._recipe_transfer_active = False
+
+    def is_recipe_transfer_active(self):
+        return self._recipe_transfer_active
     
     def read_dint(self, area_code, addr):
         """DINT(32비트) 읽기"""
@@ -886,9 +937,20 @@ class PLCClient(QObject):
             
             print(f"[DEBUG CALL] seq_id={p1}, parallel={is_parallel}({opt})")
             
+        elif step_type == "DAT":
+            # ── 데이터연산 (cmd 60): g_DTPool(DT60000~60099) 상수 대입/가산/감산 ──
+            #   p1 = 대상 DT 절대주소(60000~60099), p2 = 연산자(0:대입 1:가산 2:감산), p3 = 상수
+            #   ⚠ PLC FB 가 cmd 60 / state 100 을 구현해야 동작. 빌드·다운로드 전 라이브 투입 금지.
+            cmd = 60
+            p1 = int(step_data.get("dat_dt_addr", 60000))
+            p2 = int(step_data.get("dat_op", 0))      # 0:대입 1:가산 2:감산
+            p3 = int(step_data.get("dat_const", 0))   # 16비트 부호 상수
+            _opname = {0: "대입", 1: "가산", 2: "감산"}.get(p2, "?")
+            print(f"[DEBUG DAT] DT{p1} {_opname}(op={p2}) const={p3}")
+
         elif step_type == "END":
             cmd = 99
-        
+
         # 32비트 값을 Low/High Word로 분리
         p1_l, p1_h = self._split_32bit(p1)
         p2_l, p2_h = self._split_32bit(p2)
@@ -906,6 +968,9 @@ class PLCClient(QObject):
         
         반환: True=성공, False=실패
         """
+        if self.is_sequence_running():
+            print(f"[PLC] X 운전 중(op_status={self.current_op_status()})이라 Slot {slot_id} 시퀀스 전송 차단")
+            return False
         if not (0 <= slot_id < self.MAX_SLOTS):
             print(f"[PLC] X 잘못된 슬롯 번호: {slot_id}")
             return False
@@ -921,6 +986,11 @@ class PLCClient(QObject):
         # JSON 스텝을 10 Words씩 변환
         flat_data = []
         for idx, step in enumerate(steps_with_end):
+            if step.get("type") == "POS":
+                active_axes = step.get("active_axes", step.get("axes", []))
+                if self._convert_active_axes_to_word(active_axes) == 0:
+                    print(f"  X Step {idx}: POS 사용축이 0개라 전송 중단")
+                    return False
             try:
                 words = self._convert_json_step_to_10words(step)
                 flat_data.extend(words)
@@ -956,6 +1026,9 @@ class PLCClient(QObject):
         
         반환: True=성공, False=실패
         """
+        if self.is_sequence_running():
+            print(f"[PLC] X 운전 중(op_status={self.current_op_status()})이라 포인트 테이블 전송 차단")
+            return False
         print(f"[PLC] → 포인트 테이블 전송 시작 ({len(ordered_names)}개 포인트)")
         
         # 100개 포인트 × 32 Words = 3200 Words 버퍼 생성

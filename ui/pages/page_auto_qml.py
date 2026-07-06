@@ -232,8 +232,20 @@ class PageAutoQml(QWidget):
         if self.plc_client:
             self.plc_client.send_check_run_command(state)
 
-    def _on_auto_clicked(self):
+    def _show_home_required(self):
+        AutoConfirmOverlay("원점복귀 필요", "원점복귀를 먼저 완료해주세요.",
+                           self.window(), btn_yes="확인", btn_no=None).exec()
+
+    def _can_start_run(self):
         if self.current_mode in (1, 2):
+            return False
+        if not self._home_done:
+            self._show_home_required()
+            return False
+        return True
+
+    def _on_auto_clicked(self):
+        if not self._can_start_run():
             return
         if AutoConfirmOverlay("자동 운전", "자동 운전을 시작하시겠습니까?",
                               self.window()).exec():
@@ -245,7 +257,7 @@ class PageAutoQml(QWidget):
                 pass
 
     def _on_check_clicked(self):
-        if self.current_mode in (1, 2):
+        if not self._can_start_run():
             return
         if AutoConfirmOverlay("확인 운전", "확인 운전을 시작하시겠습니까?",
                               self.window()).exec():

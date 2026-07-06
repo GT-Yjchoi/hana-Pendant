@@ -1,0 +1,2555 @@
+{
+    "version": 1.5,
+    "saved_at": "2026-07-06 04:48:03.715787",
+    "sequence": {
+        "Main": [
+            {
+                "type": "CALL",
+                "name": "호출_4",
+                "target_seq": "초기화",
+                "parallel": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름공급판단"
+            },
+            {
+                "type": "CALL",
+                "name": "호출_2",
+                "target_seq": "필름수취Prog",
+                "parallel": true
+            },
+            {
+                "type": "COMMENT",
+                "text": "제품스택 On"
+            },
+            {
+                "type": "CALL",
+                "name": "호출_1",
+                "target_seq": "제품스택Prog",
+                "parallel": true
+            },
+            {
+                "type": "COMMENT",
+                "text": "제품씰링Prog 시작"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_2",
+                "port": 105,
+                "on": true,
+                "in_type": 2
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 5,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 0,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_1",
+                "port": 39,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 18
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 5,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "삽입후 하강대기",
+                "time": 0.2,
+                "timer_ref": "삽입후 하강대기"
+            },
+            {
+                "type": "COMMENT",
+                "text": "Y축 하강지령"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_3",
+                "port": 106,
+                "on": true,
+                "in_type": 2
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 6,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_5",
+                "port": 6,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_6",
+                "port": 14,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_4",
+                "port": 6,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 10
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_5",
+                "port": 5,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 21
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_7",
+                "port": 6,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "메인그리퍼 회전"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_6",
+                "port": 35,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 5
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_8",
+                "port": 2,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_9",
+                "port": 1,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_7",
+                "port": 38,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 16
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름공급 싸이클스타트"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_8",
+                "port": 103,
+                "on": true,
+                "in_type": 2
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_10",
+                "port": 7,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_11",
+                "port": 3,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "씰링위치이동"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_1",
+                "point_name": "씰링위치",
+                "active_axes": [
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "COMMENT",
+                "text": "가이드하강"
+            },
+            {
+                "type": "TMR",
+                "name": "씰링가이드 하강지연",
+                "time": 0.5,
+                "timer_ref": "씰링가이드 하강지연"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_2",
+                "point_name": "씰링 그립위치",
+                "active_axes": [
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_12",
+                "port": 12,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "씰링 2단하강지연",
+                "time": 3.0,
+                "timer_ref": "씰링 2단하강지연"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_3",
+                "point_name": "씰링위치",
+                "active_axes": [
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_13",
+                "port": 3,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "씰링시작"
+            },
+            {
+                "type": "TMR",
+                "name": "씰링실린더 동작지연",
+                "time": 1.0,
+                "timer_ref": "씰링실린더 동작지연"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_14",
+                "port": 4,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_15",
+                "port": 4,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": true,
+                "delay_timer_ref": "씰링시간",
+                "delay_time": 0.8
+            },
+            {
+                "type": "COMMENT",
+                "text": "가이드상승"
+            },
+            {
+                "type": "TMR",
+                "name": "씰링가이드 상승지연",
+                "time": 0.1,
+                "timer_ref": "씰링가이드 상승지연"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_4",
+                "point_name": "초기위치",
+                "active_axes": [
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_9",
+                "port": 41,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 22
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_16",
+                "port": 0,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_17",
+                "port": 3,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_10",
+                "port": 40,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 23
+            },
+            {
+                "type": "COMMENT",
+                "text": "X축 복귀"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_18",
+                "port": 1,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_19",
+                "port": 2,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_11",
+                "port": 37,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 17
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_5",
+                "point_name": "제품그립위치",
+                "active_axes": [
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_20",
+                "port": 12,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "컨베어기동"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_21",
+                "port": 3,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_22",
+                "port": 3,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": true,
+                "delay_timer_ref": "컨베어 기동시간",
+                "delay_time": 10.0
+            },
+            {
+                "type": "COMMENT",
+                "text": "점프"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_2",
+                "target_idx": 6,
+                "condition": false,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 3,
+                "cmp_const": 0,
+                "cond_type": "INPUT",
+                "cond_value": 0,
+                "cond_on": true
+            }
+        ],
+        "Monitor": [
+            {
+                "type": "JMP",
+                "name": "점프_1",
+                "target_idx": 4,
+                "condition": true,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 3,
+                "cmp_const": 0,
+                "cond_type": "STATE",
+                "cond_value": 1,
+                "cond_on": true
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 4,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 5,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "END",
+                "name": "END"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 4,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 5,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            }
+        ],
+        "초기화": [
+            {
+                "type": "COMMENT",
+                "text": "프리오프너 초기화"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_9",
+                "port": 15,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_10",
+                "port": 8,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_4",
+                "port": 8,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 11
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_5",
+                "port": 9,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 12
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_6",
+                "port": 10,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 13
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_7",
+                "port": 11,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 14
+            },
+            {
+                "type": "COMMENT",
+                "text": "메인그리퍼 초기화"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_5",
+                "port": 0,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름 유무확인"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_1",
+                "target_idx": 16,
+                "condition": true,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 3,
+                "cmp_const": 0,
+                "cond_type": "INPUT",
+                "cond_value": 7,
+                "cond_on": true
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 6,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_11",
+                "port": 14,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "초기화공통",
+                "time": 1.0,
+                "tmr_mode": "simple",
+                "timer_ref": "초기화공통"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_6",
+                "port": 14,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "씰링오프너 초기화"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 12,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_1",
+                "port": 44,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_2",
+                "port": 45,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "COMMENT",
+                "text": "씰링 실린더 초기화"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 3,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 4,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_8",
+                "port": 41,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 22
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_9",
+                "port": 43,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 23
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_10",
+                "port": 40,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 22
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_11",
+                "port": 42,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 23
+            },
+            {
+                "type": "COMMENT",
+                "text": "초기위치 이동"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_1",
+                "point_name": "초기위치",
+                "active_axes": [
+                    false,
+                    true,
+                    true,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_2",
+                "point_name": "제품그립위치",
+                "active_axes": [
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_7",
+                "port": 1,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_8",
+                "port": 2,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_3",
+                "port": 37,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            }
+        ],
+        "필름수취Prog": [
+            {
+                "type": "COMMENT",
+                "text": "필름유무체크"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_5",
+                "target_idx": 77,
+                "condition": true,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 3,
+                "cmp_const": 0,
+                "cond_type": "INPUT",
+                "cond_value": 7,
+                "cond_on": true
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_26",
+                "port": 9,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "필름감지대기",
+                "time": 0.5,
+                "timer_ref": "필름감지대기"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_2",
+                "target_idx": 28,
+                "condition": true,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 3,
+                "cmp_const": 0,
+                "cond_type": "VALVE",
+                "cond_value": 34,
+                "cond_on": true
+            },
+            {
+                "type": "COMMENT",
+                "text": "트랜스퍼 초기화"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_23",
+                "port": 5,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_25",
+                "port": 9,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름수취 하강전"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 15,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_3",
+                "port": 14,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 4
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_20",
+                "port": 11,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름수취하강"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_1",
+                "point_name": "필름고속수취위치",
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_3",
+                "point_name": "필름수취위치",
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "wait_completion": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_1",
+                "port": 15,
+                "on": true,
+                "in_type": 0,
+                "timeout": 20.0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 1
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 30,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 30,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "필름수취상승대기",
+                "time": 1.0,
+                "timer_ref": "필름수취상승대기"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_2",
+                "point_name": "필름공급위치",
+                "active_axes": [
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_35",
+                "port": 3,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 15,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_2",
+                "port": 13,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_12",
+                "port": 15,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask"
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름공급싸이클스타트"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_3",
+                "target_idx": 28,
+                "condition": true,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 3,
+                "cmp_const": 0,
+                "cond_type": "BIT",
+                "cond_value": 102,
+                "cond_on": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_13",
+                "port": 107,
+                "on": true,
+                "in_type": 2,
+                "timeout_enabled": false,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_22",
+                "port": 7,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_31",
+                "port": 2,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름준비완료"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_24",
+                "port": 14,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_5",
+                "port": 5,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_4",
+                "port": 35,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 5
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름그립후 흡착감지"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_8",
+                "port": 9,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_6",
+                "port": 14,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_5",
+                "port": 34,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 2
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_27",
+                "port": 9,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "흡착감지되면 수취흡착OFF"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_18",
+                "port": 11,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_21",
+                "port": 11,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_33",
+                "port": 12,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "블로우타임",
+                "time": 2.0,
+                "timer_ref": "블로우타임"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_32",
+                "port": 11,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_34",
+                "port": 12,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_9",
+                "port": 5,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_6",
+                "port": 36,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 6
+            },
+            {
+                "type": "COMMENT",
+                "text": "오픈위치에서 트랜스퍼 흡착Off"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_7",
+                "port": 9,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "프리오프너 시작"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_9",
+                "port": 5,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "alarm_go",
+                "timeout_alarm_no": 21
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_19",
+                "port": 6,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "프리오프너 전진대기",
+                "time": 1.0,
+                "timer_ref": "프리오프너 전진대기"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_11",
+                "port": 10,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_12",
+                "port": 15,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_7",
+                "port": 12,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 19
+            },
+            {
+                "type": "TMR",
+                "name": "프리오프너 후퇴대기",
+                "time": 0.5,
+                "timer_ref": "프리오프너 후퇴대기"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_10",
+                "port": 8,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "메인오프너 상승시작"
+            },
+            {
+                "type": "TMR",
+                "name": "메인오프너 상승대기",
+                "time": 0.5,
+                "timer_ref": "메인오프너 상승대기"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_13",
+                "port": 14,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_8",
+                "port": 4,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 20
+            },
+            {
+                "type": "OUT",
+                "name": "필름하단척 온딜레이",
+                "port": 13,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": true,
+                "delay_timer_ref": "필름하단척 온딜레이",
+                "delay_time": 0.8,
+                "timer_ref": "필름하단척 온딜레이",
+                "time": 0.5
+            },
+            {
+                "type": "OUT",
+                "name": "필름하단척 오프딜레이",
+                "port": 13,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": true,
+                "timer_ref": "필름하단척 오프딜레이",
+                "time": 3.0,
+                "delay_timer_ref": "필름하단척 오프딜레이",
+                "delay_time": 1.9
+            },
+            {
+                "type": "COMMENT",
+                "text": "프리오프너 후퇴"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_15",
+                "port": 10,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_14",
+                "port": 15,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_16",
+                "port": 8,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_10",
+                "port": 9,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 12
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_11",
+                "port": 11,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 11
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_14",
+                "port": 8,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 14
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_15",
+                "port": 10,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 13
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름 오픈시작"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_17",
+                "port": 6,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "메인오프너 감지대기",
+                "time": 2.0,
+                "timer_ref": "메인오프너 감지대기"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_16",
+                "port": 7,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 9,
+                "timeout": 2.0
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_29",
+                "port": 9,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_30",
+                "port": 0,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_28",
+                "port": 2,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "JMP",
+                "name": "점프_1",
+                "target_idx": 6,
+                "condition": false,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 3,
+                "cmp_const": 0,
+                "cond_type": "INPUT",
+                "cond_value": 0,
+                "cond_on": true
+            },
+            {
+                "type": "END",
+                "name": "END"
+            }
+        ],
+        "제품스택Prog": [
+            {
+                "type": "JMP",
+                "name": "점프_1",
+                "target_idx": 19,
+                "condition": true,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 0,
+                "cmp_const": 20,
+                "cond_type": "DTCMP",
+                "cond_value": 0,
+                "cond_on": true
+            },
+            {
+                "type": "COMMENT",
+                "text": "라운드컨베어 기동"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 1,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "제품감지되면"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_1",
+                "port": 1,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": false,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "OUT",
+                "name": "컨베어 Toff",
+                "port": 1,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": true,
+                "timer_ref": "컨베어 Toff",
+                "time": 0.1,
+                "delay_timer_ref": "컨베어 Toff",
+                "delay_time": 0.1
+            },
+            {
+                "type": "COMMENT",
+                "text": "스택상승"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 7,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "스택상승딜레이",
+                "time": 0.0,
+                "timer_ref": "스택상승딜레이"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_1",
+                "point_name": "스택상승위치",
+                "active_axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "TMR",
+                "name": "스택포크 복귀지연",
+                "time": 0.0,
+                "timer_ref": "스택포크 복귀지연"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 7,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_2",
+                "point_name": "스택하강위치",
+                "active_axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "COMMENT",
+                "text": "스택카운트 업"
+            },
+            {
+                "type": "DAT",
+                "name": "데이터연산_1",
+                "dat_dt_addr": 60000,
+                "dat_op": 1,
+                "dat_const": 1
+            },
+            {
+                "type": "TMR",
+                "name": "SysOutput",
+                "time": 0.1,
+                "timer_ref": "SysOutput"
+            },
+            {
+                "type": "COMMENT",
+                "text": "설정값 미만이면"
+            },
+            {
+                "type": "JMP",
+                "name": "점프_3",
+                "target_idx": 2,
+                "condition": true,
+                "cmp_dt_addr": 60000,
+                "cmp_op": 4,
+                "cmp_const": 20,
+                "cond_type": "DTCMP",
+                "cond_value": 0,
+                "cond_on": true
+            },
+            {
+                "type": "COMMENT",
+                "text": "설정값 이상이면"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_4",
+                "port": 100,
+                "on": true,
+                "in_type": 2
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_2",
+                "port": 7,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 22
+            },
+            {
+                "type": "DAT",
+                "name": "데이터연산_2",
+                "dat_dt_addr": 60000,
+                "dat_op": 0,
+                "dat_const": 0
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 14,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": true,
+                "delay_timer_ref": "필름그립 Off지연",
+                "delay_time": 1.0
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_5",
+                "point_name": "포장고속삽입위치",
+                "active_axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_3",
+                "point_name": "포장저속삽입위치",
+                "active_axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_5",
+                "port": 5,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "SysDelay",
+                "time": 0.1,
+                "timer_ref": "SysDelay"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_3",
+                "port": 105,
+                "on": false,
+                "in_type": 2,
+                "timeout_enabled": false,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_4",
+                "point_name": "스택하강위치",
+                "active_axes": [
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_9",
+                "port": 6,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_10",
+                "port": 0,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "JMP",
+                "name": "점프_2",
+                "target_idx": 2,
+                "condition": false
+            }
+        ],
+        "제품씰링Prog": [
+            {
+                "type": "IN",
+                "name": "입력 대기_1",
+                "port": 105,
+                "on": true,
+                "in_type": 2
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_16",
+                "port": 5,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_1",
+                "port": 0,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_9",
+                "port": 39,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 18
+            },
+            {
+                "type": "TMR",
+                "name": "삽입후 하강대기",
+                "time": 0.2,
+                "timer_ref": "삽입후 하강대기"
+            },
+            {
+                "type": "COMMENT",
+                "text": "Y축하강지령"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_2",
+                "port": 5,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "오프너 회피"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_3",
+                "port": 106,
+                "on": true,
+                "in_type": 2
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_18",
+                "port": 6,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_5",
+                "port": 6,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_6",
+                "port": 14,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_4",
+                "port": 6,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_5",
+                "port": 5,
+                "on": true,
+                "in_type": 0,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_9",
+                "port": 6,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "메인그리퍼 회전"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_10",
+                "port": 35,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "ask",
+                "timeout_alarm_no": 5
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_7",
+                "port": 2,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_3",
+                "port": 1,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_6",
+                "port": 38,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "COMMENT",
+                "text": "필름공급시작 싸이클스타트"
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_11",
+                "port": 103,
+                "on": true,
+                "in_type": 2
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_10",
+                "port": 7,
+                "on": true,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_19",
+                "port": 3,
+                "on": false,
+                "out_type": 2,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "씰링위치이동"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_2",
+                "point_name": "씰링위치",
+                "active_axes": [
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "COMMENT",
+                "text": "가이드하강"
+            },
+            {
+                "type": "TMR",
+                "name": "씰링가이드 하강지연",
+                "time": 0.5,
+                "timer_ref": "씰링가이드 하강지연"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_3",
+                "point_name": "씰링 그립위치",
+                "active_axes": [
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_11",
+                "port": 12,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "TMR",
+                "name": "씰링 2단하강지연",
+                "time": 3.0,
+                "timer_ref": "씰링 2단하강지연"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_4",
+                "point_name": "씰링위치",
+                "active_axes": [
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_12",
+                "port": 3,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "씰링시작"
+            },
+            {
+                "type": "TMR",
+                "name": "씰링실린더 동작지연",
+                "time": 1.0,
+                "timer_ref": "씰링실린더 동작지연"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_13",
+                "port": 4,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false,
+                "delay_timer_ref": "씰링시간",
+                "delay_time": 0.8
+            },
+            {
+                "type": "OUT",
+                "name": "씰링시간",
+                "port": 4,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": true,
+                "timer_ref": "씰링시간",
+                "time": 5.0,
+                "delay_timer_ref": "씰링시간",
+                "delay_time": 0.8
+            },
+            {
+                "type": "COMMENT",
+                "text": "가이드상승"
+            },
+            {
+                "type": "TMR",
+                "name": "씰링가이드 상승지연",
+                "time": 0.1,
+                "timer_ref": "씰링가이드 상승지연"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_5",
+                "point_name": "초기위치",
+                "active_axes": [
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "wait_completion": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_7",
+                "port": 41,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_14",
+                "port": 0,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_15",
+                "port": 3,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_8",
+                "port": 40,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "COMMENT",
+                "text": "X축 복귀"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_4",
+                "port": 1,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_8",
+                "port": 2,
+                "on": true,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "IN",
+                "name": "입력 대기_2",
+                "port": 37,
+                "on": true,
+                "in_type": 1,
+                "timeout_enabled": true,
+                "timeout_action": "continue"
+            },
+            {
+                "type": "POS",
+                "name": "위치 이동_1",
+                "point_name": "제품그립위치",
+                "active_axes": [
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ]
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_17",
+                "port": 12,
+                "on": false,
+                "out_type": 1,
+                "delay_enable": false
+            },
+            {
+                "type": "COMMENT",
+                "text": "컨베이어 기동"
+            },
+            {
+                "type": "OUT",
+                "name": "출력 제어_20",
+                "port": 3,
+                "on": true,
+                "out_type": 0,
+                "delay_enable": false
+            },
+            {
+                "type": "OUT",
+                "name": "컨베어 기동시간",
+                "port": 3,
+                "on": false,
+                "out_type": 0,
+                "delay_enable": true,
+                "timer_ref": "컨베어 기동시간",
+                "time": 3.0,
+                "delay_timer_ref": "컨베어 기동시간",
+                "delay_time": 10.0
+            }
+        ]
+    },
+    "position_points": {
+        "필름공급위치": {
+            "coords": [
+                293.0,
+                0.0,
+                67.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                40,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "필름수취위치": {
+            "coords": [
+                0.0,
+                0.0,
+                600.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                5,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "스택상승위치": {
+            "coords": [
+                0.0,
+                26.5,
+                1.113,
+                0.008,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                50,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "스택하강위치": {
+            "coords": [
+                0.0,
+                0.0,
+                1.113,
+                0.008,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "필름고속수취위치": {
+            "coords": [
+                0.0,
+                0.0,
+                445.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "제품그립위치": {
+            "coords": [
+                293.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                20,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "씰링위치": {
+            "coords": [
+                9.8,
+                0.0,
+                0.0,
+                85.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                60,
+                100.0,
+                100.0,
+                50,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "초기위치": {
+            "coords": [
+                100.0,
+                0.0,
+                280.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                100,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "씰링 그립위치": {
+            "coords": [
+                0.0,
+                0.0,
+                0.0,
+                75.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                100.0,
+                100.0,
+                50,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "포장저속삽입위치": {
+            "coords": [
+                0.0,
+                443.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                2,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        },
+        "포장고속삽입위치": {
+            "coords": [
+                0.0,
+                420.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "speeds": [
+                100.0,
+                35,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0
+            ],
+            "visible_mode": []
+        }
+    },
+    "timer_library": {
+        "SysOutput": 0.1,
+        "필름수취상승대기": 1.0,
+        "메인오프너 상승대기": 0.5,
+        "스택상승딜레이": 0.0,
+        "스택포크 복귀지연": 0.0,
+        "컨베어 Toff": 0.1,
+        "필름감지대기": 0.5,
+        "삽입후 하강대기": 0.2,
+        "SysDelay": 0.1,
+        "필름그립 Off지연": 1.0,
+        "씰링가이드 상승지연": 0.1,
+        "씰링시간": 0.8,
+        "씰링 2단하강지연": 3.0,
+        "씰링실린더 동작지연": 1.0,
+        "필름하단척 온딜레이": 0.8,
+        "블로우타임": 2.0,
+        "컨베어 기동시간": 10.0,
+        "씰링가이드 하강지연": 0.5,
+        "필름하단척 오프딜레이": 1.9,
+        "프리오프너 후퇴대기": 0.5,
+        "메인오프너 감지대기": 2.0,
+        "초기화공통": 1.0,
+        "프리오프너 전진대기": 1.0
+    },
+    "mode": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+    ],
+    "view_order": [
+        "필름공급위치",
+        "필름수취위치",
+        "스택상승위치",
+        "스택하강위치",
+        "제품그립위치",
+        "필름고속수취위치",
+        "초기위치",
+        "씰링 그립위치",
+        "씰링위치",
+        "포장고속삽입위치",
+        "포장저속삽입위치"
+    ],
+    "speed_level": 10,
+    "packing_config": {
+        "x_count": 2,
+        "x_pitch": 10.0,
+        "x_dir": 1,
+        "y_count": 2,
+        "y_pitch": 10.0,
+        "y_dir": 1,
+        "z_count": 1,
+        "z_pitch": 10.0,
+        "z_dir": -1,
+        "stack_order": 4,
+        "enabled": false
+    },
+    "user_modes": {
+        "34": "User Mode 35",
+        "0": "User Mode 1",
+        "1": "User Mode 2",
+        "2": "User Mode 3",
+        "3": "User Mode 4",
+        "4": "User Mode 5",
+        "5": "User Mode 6",
+        "6": "User Mode 7",
+        "7": "User Mode 8",
+        "8": "User Mode 9",
+        "9": "User Mode 10",
+        "10": "User Mode 11",
+        "11": "User Mode 12",
+        "12": "User Mode 13",
+        "13": "User Mode 14",
+        "14": "User Mode 15",
+        "15": "User Mode 16",
+        "16": "User Mode 17",
+        "17": "User Mode 18",
+        "18": "User Mode 19",
+        "19": "User Mode 20",
+        "20": "User Mode 21",
+        "21": "User Mode 22",
+        "22": "User Mode 23",
+        "23": "User Mode 24",
+        "24": "User Mode 25",
+        "25": "User Mode 26",
+        "26": "User Mode 27",
+        "27": "User Mode 28",
+        "28": "User Mode 29",
+        "29": "User Mode 30",
+        "30": "User Mode 31",
+        "35": "User Mode 36",
+        "31": "User Mode 32",
+        "36": "User Mode 37",
+        "32": "User Mode 33",
+        "33": "User Mode 34",
+        "37": "User Mode 38",
+        "38": "User Mode 39",
+        "39": "User Mode 40",
+        "40": "User Mode 41",
+        "41": "User Mode 42",
+        "42": "User Mode 43",
+        "43": "User Mode 44"
+    }
+}

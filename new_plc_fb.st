@@ -1,36 +1,48 @@
 (* ===========================================================================
-   [FB 본문]  ── 2개 인스턴스 + 내부 콜 스택 운용 ──
-   (구버전 plc_fb.st 의 4-인스턴스 / 3-tier 구조를 단일 FB + 콜 스택으로 통합)
+   [FB 본문]  ── 3개 인스턴스 + 내부 콜 스택 운용 ──
+   (메인 1개 + 병렬 워커 2개. 동기 CALL 은 단일 FB 내부 콜 스택으로 처리)
 
    ─ PROGRAM 인스턴스 선언 ─
        FB_Main    : <이FB타입명>;   (* 슬롯 0 + 모든 동기 CALL 처리 *)
-       FB_Monitor : <이FB타입명>;   (* 병렬 CALL 대상 (모니터링) 1개 전담 *)
+       FB_Sub     : <이FB타입명>;   (* 병렬 CALL 워커 1 *)
+       FB_Worker2 : <이FB타입명>;   (* 병렬 CALL 워커 2 (구 Monitor 를 일반 실행 워커로 사용) *)
 
    ─ PROGRAM 배선 ─
        (* FB_Main *)
        FB_Main.i_SlotNo     := 0;                    (* Main 슬롯 고정 *)
        FB_Main.b_NoSubCall  := FALSE;                (* CALL 허용 *)
        FB_Main.b_Run        := <외부 자동운전 명령>;
+       FB_Main.b_ParallelBusy1 := FB_Sub.b_IsBusy;
+       FB_Main.b_ParallelBusy2 := FB_Worker2.b_IsBusy;
        FB_Main.i_ControlCmd := DT200;
        FB_Main.t_WaitTime   := T#500MS;              (* ★ 필수 - state 21 BUSY 감지 타임아웃 *)
        (* 서보/입력/모드 등 외부 변수 연결 *)
+       (* g_DTPool(AT DT60000) 은 VAR_EXTERNAL 직접참조 → 배선 불필요 (g_SeqData 와 동일) *)
 
-       (* FB_Monitor *)
-       FB_Monitor.i_SlotNo    := FB_Main.i_ParallelSlot;   (* 병렬 호출된 슬롯 *)
-       FB_Monitor.b_Run       := FB_Main.b_ParallelStart;  (* 1스캔 기동 펄스 *)
-       FB_Monitor.b_NoSubCall := TRUE;                     (* Monitor에서 CALL 시 에러 94 *)
-       FB_Monitor.i_ControlCmd := DT200;                   (* 같은 명령 공유 *)
-       FB_Monitor.t_WaitTime   := T#500MS;                 (* ★ 필수 - state 21 BUSY 감지 타임아웃 *)
-       (* 동일한 외부 변수 공유 *)
+       (* FB_Sub / FB_Worker2 *)
+       FB_Sub.i_SlotNo       := FB_Main.i_ParallelSlot1;
+       FB_Sub.b_Run          := FB_Main.b_ParallelStart1;
+       FB_Sub.b_NoSubCall    := TRUE;                      (* 병렬 워커 내부 CALL 금지 *)
+       FB_Sub.i_ControlCmd   := DT200;
+       FB_Sub.t_WaitTime     := T#500MS;
 
-       (* 실행 순서: FB_Main → FB_Monitor (동일 스캔에서 ParallelStart 펄스 전달) *)
+       FB_Worker2.i_SlotNo       := FB_Main.i_ParallelSlot2;
+       FB_Worker2.b_Run          := FB_Main.b_ParallelStart2;
+       FB_Worker2.b_NoSubCall    := TRUE;                  (* 병렬 워커 내부 CALL 금지 *)
+       FB_Worker2.i_ControlCmd   := DT200;
+       FB_Worker2.t_WaitTime     := T#500MS;
+       (* 동일한 외부 변수 공유. g_DTPool 은 VAR_EXTERNAL 이라 인스턴스 공통 직접참조 *)
+
+       (* 실행 순서: FB_Main → FB_Sub → FB_Worker2 *)
 
        (* HMI 모니터링 (DT131~135) *)
        DT131 := FB_Main.i_CurrentStep;      (* Main 현재 실행 중 스텝 *)
        DT132 := FB_Main.i_CurrentSlot;      (* Main 현재 실행 중 슬롯 번호 *)
        DT133 := FB_Main.i_StackDepth;       (* Main 콜 스택 깊이 0~3 *)
-       DT134 := FB_Monitor.i_CurrentSlot;   (* Monitor 병렬 실행 중 슬롯 (0=idle) *)
-       DT135 := FB_Monitor.i_CurrentStep;   (* Monitor 병렬 실행 중 스텝 *)
+       DT134 := FB_Sub.i_CurrentSlot;       (* 병렬 워커1 실행 중 슬롯 (0=idle) *)
+       DT135 := FB_Sub.i_CurrentStep;       (* 병렬 워커1 실행 중 스텝 *)
+       DT126 := FB_Worker2.i_CurrentSlot;   (* 병렬 워커2 실행 중 슬롯 (0=idle) *)
+       DT127 := FB_Worker2.i_CurrentStep;   (* 병렬 워커2 실행 중 스텝 *)
 
    ─ 스텝 데이터 메모리 레이아웃 (DT20000~, 슬롯당 1000 Words) ─
        Word +0  : iCommand  (WORD)
@@ -45,7 +57,7 @@
        b_Run           : BOOL;
        b_Reset         : BOOL;   (* 운전정지 상승펄스. 스택/타이머/SystemOutput/InternalBit 초기화 (에러/Valve 유지) *)
        b_AlarmReset    : BOOL;   (* [NEW] 알람 리셋 상승펄스 (DT212). UserAlarm/StepAlarm 모두 클리어 *)
-       b_NoSubCall     : BOOL;   (* TRUE면 이 인스턴스는 CALL 불가 (Monitor용). 시도 시 에러 94 *)
+       b_NoSubCall     : BOOL;   (* TRUE면 이 인스턴스는 CALL 불가 (병렬 워커용). 시도 시 에러 94 *)
 
        w_ServoBusy     : WORD;
        w_ServoDone     : WORD;
@@ -59,6 +71,8 @@
        w_AxisEnable    : WORD;   (* [NEW] 실 사용 축 비트마스크 (DT15000, bit0~7 = 1~8축).
                                      POS 스텝의 w_StepOpt 과 AND 마스킹하여 미연결 축 명령 자동 스킵.
                                      → 3축/5축 공용 레시피 지원. *)
+       b_ParallelBusy1 : BOOL;   (* Main 전용: 병렬 워커1 Busy 입력 *)
+       b_ParallelBusy2 : BOOL;   (* Main 전용: 병렬 워커2 Busy 입력 *)
 
    ─ VAR_IN_OUT ─
        i_ControlCmd    : INT;    (* 0=정지, 1=자동, 2=확인운전 *)
@@ -68,11 +82,11 @@
        w_internal_Bit0 : WORD;
        w_internal_Bit1 : WORD;
        w_UserAlarm     : WORD;   (* [구 w_UserAlarm] IN 스텝에서 사용자가 정의한 알람 번호 → DT159.
-                                    VAR_IN_OUT - Main/Monitor 공유. 0=알람없음. *)
+                                   VAR_IN_OUT - 모든 시퀀스 FB 공유. 0=알람없음. *)
        b_StepAlarm     : BOOL;   (* [구 b_StepAlarm] 스텝 진행 에러 플래그. PROGRAM에서 자동정지 트리거 조건으로 사용.
-                                    VAR_IN_OUT - Main/Monitor 공유. *)
+                                   VAR_IN_OUT - 모든 시퀀스 FB 공유. *)
        i_StepAlarmID   : INT;    (* [구 i_StepAlarmID] 스텝 진행 에러 코드 → DT160. 0=정상.
-                                    VAR_IN_OUT - Main/Monitor 공유. *)
+                                   VAR_IN_OUT - 모든 시퀀스 FB 공유. *)
 
    ─ VAR_OUTPUT ─
        b_StepDone      : BOOL;
@@ -81,13 +95,19 @@
        i_CurrentStep   : INT;    (* 현재 실행 중 스텝 (스택 top 기준) *)
        i_CurrentSlot   : INT;    (* [NEW] 현재 실행 중 슬롯 번호 *)
        i_StackDepth    : INT;    (* [NEW] 콜 스택 깊이 0~3 *)
-       i_ParallelSlot  : INT;    (* [renamed from i_CallSlotOut] 병렬 CALL 대상 슬롯 *)
-       b_ParallelStart : BOOL;   (* [renamed from b_CallStart] 병렬 CALL 1스캔 기동 펄스 *)
+       i_ParallelSlot  : INT;    (* [legacy alias] 병렬 워커1 CALL 대상 슬롯 *)
+       b_ParallelStart : BOOL;   (* [legacy alias] 병렬 워커1 CALL 1스캔 기동 펄스 *)
+       i_ParallelSlot1 : INT;    (* 병렬 워커1 CALL 대상 슬롯 *)
+       b_ParallelStart1 : BOOL;  (* 병렬 워커1 CALL 1스캔 기동 펄스 *)
+       i_ParallelSlot2 : INT;    (* 병렬 워커2 CALL 대상 슬롯 *)
+       b_ParallelStart2 : BOOL;  (* 병렬 워커2 CALL 1스캔 기동 펄스 *)
 
    ─ 스텝 알람 ID (i_StepAlarmID) ─
        21 : POS 축 이동 확인 실패 (BUSY 상승 미감지 - 트리거 거부 또는 RTEX 전파 실패)
        22 : 패킹 베이스 인덱스 범위 오류 (pack_base 스텝의 point_index 가 0~59 초과)
-       50 : (예약, 미사용)
+       23 : JMP 데이터값 비교 DT 주소 범위 초과 (60000~60099)
+       24 : DAT 데이터연산 DT 주소 범위 초과 (60000~60099)
+       50 : 병렬 CALL 실패 (워커 2개 모두 실행중)
        93 : 동기 CALL 스택 오버플로 (4 레벨 초과)
        94 : CALL 사용 불가 (이 인스턴스는 b_NoSubCall=TRUE)
        95 : JMP 타겟 스텝 번호 범위 초과(0~99)
@@ -104,7 +124,10 @@
        i_StackTop      : INT;    (* 0 = 최상위, 3 = 최대 깊이 *)
 
        (* 슬롯/스텝 작업 변수 (스캔마다 ctx[i_StackTop]에서 로드 → 끝에 저장) *)
-       (* 전역변수 필요: g_SeqData AT DT20000 : ARRAY[0..3999] OF DUT_STEP_DATA *)
+       (* 전역변수 필요(둘 다 VAR_EXTERNAL 로 FB 에 선언, GVL 에 AT 매핑):
+            g_SeqData AT DT20000 : ARRAY[0..3999] OF DUT_STEP_DATA
+            g_DTPool  AT DT60000 : ARRAY[0..99]   OF INT   ([NEW] JMP 데이터값 비교용)
+          → FB 본문에서 g_SeqData[...], g_DTPool[...] 로 직접 참조(복사·배선 없음, 읽기/쓰기 가능). *)
        i_ActiveSlotNo  : INT;
        di_StepBase     : DINT;
        i_StepCmd       : INT;
@@ -214,6 +237,14 @@
        i_JmpBit        : INT;
        b_JmpCond       : BOOL;
        b_JmpDoJump     : BOOL;
+       (* [NEW] JMP 데이터값 비교 (wOption=2) *)
+       i_CmpIdx        : INT;    (* g_DTPool 인덱스 0~99 (= diParam2 - 60000). 주소(60000~)는 INT 초과라 DINT 로 비교 *)
+       i_CmpVal        : INT;    (* g_DTPool[i_CmpIdx] 읽은 값 (16비트 부호) *)
+       i_CmpConst      : INT;    (* 비교 상수 (diParam4) *)
+       b_JmpAddrErr    : BOOL;   (* DT 주소 범위 초과 플래그 *)
+       (* [NEW] DAT 데이터연산 (cmd 60) *)
+       i_DatIdx        : INT;    (* g_DTPool 인덱스 0~99 (= diParam1 - 60000) *)
+       i_DatOperand    : INT;    (* 피연산자 상수 (diParam3) *)
 
        (* CALL *)
        i_CallSlot      : INT;
@@ -232,6 +263,8 @@
 
 (* ── 0. 펄스 클리어 + 상승 에지 검출 ── *)
 b_ParallelStart  := FALSE;   (* 이전 스캔 발생 펄스 자동 클리어 *)
+b_ParallelStart1 := FALSE;
+b_ParallelStart2 := FALSE;
 b_RunRising      := b_Run AND NOT b_RunPrev;
 b_RunPrev        := b_Run;
 b_CheckRunRising := (i_CheckRunState = 1) AND NOT b_CheckRunPrev;
@@ -283,7 +316,11 @@ IF b_Reset THEN
        팝업은 b_AlarmReset 경로에서만 지움. *)
     w_PopupResp      := 0;
     b_ParallelStart  := FALSE;
+    b_ParallelStart1 := FALSE;
+    b_ParallelStart2 := FALSE;
     i_ParallelSlot   := 0;
+    i_ParallelSlot1  := 0;
+    i_ParallelSlot2  := 0;
     i_CallSlot       := 0;
     b_CallParallel   := FALSE;
 
@@ -295,8 +332,8 @@ IF b_Reset THEN
 
     FOR i_LoopAxis := 1 TO 5 DO arr_bStart[i_LoopAxis] := FALSE; END_FOR;
 
-    (* [변경] System Output + 내부 비트 클리어. Valve 는 유지 (척·진공 등 안전 물림 상태 보호) *)
-    w_system_Output  := 0;
+    (* [변경] 내부 비트만 클리어. System/Valve 출력은 유지 (척·진공 등 안전 물림 상태 보호) *)
+    (* w_system_Output  := 0; *)
     w_internal_Bit0  := 0;
     w_internal_Bit1  := 0;
 
@@ -376,7 +413,7 @@ CASE i_SeqState OF
         b_TimerStart     := FALSE;
         b_DelayStart     := FALSE;
         b_Step_End       := FALSE;
-        IF i_ControlCmd = 1 AND b_Run THEN
+        IF ((i_ControlCmd = 1) OR (i_SlotNo = 39)) AND b_Run THEN
             IF i_SlotNo < 0 OR i_SlotNo > 39 THEN
                 i_StepAlarmID  := 97;
                 i_SeqState := 900;
@@ -419,6 +456,7 @@ CASE i_SeqState OF
             30: i_SeqState := 50;
             40: i_SeqState := 70;
             50: i_SeqState := 80;
+            60: i_SeqState := 100;   (* [NEW] DAT 데이터연산 *)
             99: (* END 명령 - [NEW] 스택 팝 또는 최상위 종료 *)
                 IF i_StackTop > 0 THEN
                     (* 동기 sub 종료 → caller 복귀 *)
@@ -434,11 +472,11 @@ CASE i_SeqState OF
                     (* 최상위 종료 — 한 사이클 완료 *)
                     i_CurrentStep := 0;
                     b_Step_End    := TRUE;
-                    IF i_ControlCmd = 2 THEN i_CheckRunState := 0; END_IF;
+                    IF (i_ControlCmd = 2) AND (i_ActiveSlotNo <> 39) THEN i_CheckRunState := 0; END_IF;
                     i_SeqState := 0;
 
                     (* [NEW] pack_idx 증가 (사이클 완료 시 1회)
-                       - b_NoSubCall=TRUE 인 FB_Monitor 는 증가 금지 (Main 만 증가)
+                       - b_NoSubCall=TRUE 인 병렬 워커는 증가 금지 (Main 만 증가)
                        - gw_PackEnable=0 이면 패킹 미사용 → 카운터 유지
                        - [C-3] gi_CountX/Y/Z 중 하나라도 <= 0 이면 무의미한 연쇄 증가 방지
                        - stack_order (0~5) 에 따라 6 케이스 오도미터 캐스케이드 *)
@@ -529,7 +567,7 @@ CASE i_SeqState OF
            조건 3 가지 모두 충족 시만 스크래치 테이블 사용:
              (a) wOption bit 8 == 1     (이 스텝이 pack_base)
              (b) gw_PackEnable <> 0     (마스터 스위치 ON)
-             (c) NOT b_NoSubCall        (FB_Monitor 는 차단 — Main 과 table63 race 방지)
+             (c) NOT b_NoSubCall        (병렬 워커는 차단 — Main 과 table63 race 방지)
            위 중 하나라도 미충족 → 기존 로직 (point_index + 10026) 로 일반 이동. *)
         IF (w_StepOpt AND 16#0100) <> 0 AND (gw_PackEnable <> 0) AND NOT b_NoSubCall THEN
             i_PackBaseIdx := DINT_TO_INT(di_StepP1);
@@ -805,17 +843,29 @@ CASE i_SeqState OF
         b_CallParallel := (w_StepOpt = 1);
 
         IF b_NoSubCall THEN
-            (* Monitor 인스턴스 등 - CALL 불가 *)
+            (* 병렬 워커 인스턴스 등 - CALL 불가 *)
             i_StepAlarmID  := 94;
             i_SeqState := 900;
         ELSIF i_CallSlot < 0 OR i_CallSlot > 39 THEN
             i_StepAlarmID  := 96;
             i_SeqState := 900;
         ELSIF b_CallParallel THEN
-            (* 병렬 CALL → 외부 워커(FB_Monitor)에게 1스캔 펄스, 캘러는 다음 스텝 *)
-            i_ParallelSlot  := i_CallSlot;
-            b_ParallelStart := TRUE;
-            i_SeqState      := 99;
+            (* 병렬 CALL → 빈 워커 1/2 중 하나에 1스캔 펄스, 캘러는 다음 스텝 *)
+            IF NOT b_ParallelBusy1 THEN
+                i_ParallelSlot1  := i_CallSlot;
+                b_ParallelStart1 := TRUE;
+                (* legacy alias: 기존 1워커 배선과 HMI 모니터링 호환 *)
+                i_ParallelSlot   := i_CallSlot;
+                b_ParallelStart  := TRUE;
+                i_SeqState       := 99;
+            ELSIF NOT b_ParallelBusy2 THEN
+                i_ParallelSlot2  := i_CallSlot;
+                b_ParallelStart2 := TRUE;
+                i_SeqState       := 99;
+            ELSE
+                i_StepAlarmID    := 50;       (* 병렬 워커 2개 모두 실행중 *)
+                i_SeqState       := 900;
+            END_IF;
         ELSE
             (* 동기 CALL → 내부 스택 푸시 *)
             IF i_StackTop >= 3 THEN
@@ -843,8 +893,33 @@ CASE i_SeqState OF
     (* ──── [점프 JMP] ──── *)
     70:
         (* ─ 조건식 평가 ─ *)
+        b_JmpAddrErr := FALSE;
         IF w_StepOpt = 0 THEN
             b_JmpCond := TRUE;
+        ELSIF w_StepOpt = 2 THEN
+            (* [NEW] 데이터값 비교 점프 (wOption=2):
+               diParam2=비교 DT주소(60000~60099), diParam3=연산자(0:= 1:≠ 2:> 3:≥ 4:< 5:≤), diParam4=비교상수.
+               g_DTPool[주소-60000](16비트 부호 INT)을 상수와 비교해 참이면 diParam1 스텝으로 점프.
+               ★ 주소 60000 은 INT(±32767) 범위 초과 → di_StepP2(DINT)를 DINT 로 비교하고
+                 인덱스(0~99)만 INT 로 변환 (INT 로 주소를 받으면 형식 불일치 컴파일 에러).
+               diParam4 는 여기선 '상수'이므로 아래 do-jump 의 ON/OFF 반전 로직을 적용하지 않는다. *)
+            IF di_StepP2 < DINT#60000 OR di_StepP2 > DINT#60099 THEN
+                b_JmpAddrErr := TRUE;
+                b_JmpCond    := FALSE;
+            ELSE
+                i_CmpIdx   := DINT_TO_INT(di_StepP2 - DINT#60000);   (* 0~99, INT 범위 안전 *)
+                i_CmpVal   := g_DTPool[i_CmpIdx];
+                i_CmpConst := DINT_TO_INT(di_StepP4);
+                CASE DINT_TO_INT(di_StepP3) OF
+                    0: b_JmpCond := (i_CmpVal =  i_CmpConst);
+                    1: b_JmpCond := (i_CmpVal <> i_CmpConst);
+                    2: b_JmpCond := (i_CmpVal >  i_CmpConst);
+                    3: b_JmpCond := (i_CmpVal >= i_CmpConst);
+                    4: b_JmpCond := (i_CmpVal <  i_CmpConst);
+                    5: b_JmpCond := (i_CmpVal <= i_CmpConst);
+                    ELSE b_JmpCond := FALSE;
+                END_CASE;
+            END_IF;
         ELSE
             i_JmpPort := DINT_TO_INT(di_StepP3);
             IF DINT_TO_INT(di_StepP2) = 2 THEN
@@ -881,13 +956,18 @@ CASE i_SeqState OF
         (* ─ 실제 점프 여부 결정 ─ *)
         IF w_StepOpt = 0 THEN
             b_JmpDoJump := TRUE;
+        ELSIF w_StepOpt = 2 THEN
+            b_JmpDoJump := b_JmpCond;          (* DTCMP: 조건 참이면 점프 (P4 는 상수라 반전 없음) *)
         ELSIF DINT_TO_INT(di_StepP4) = 1 THEN
             b_JmpDoJump := b_JmpCond;
         ELSE
             b_JmpDoJump := NOT b_JmpCond;
         END_IF;
 
-        IF b_JmpDoJump THEN
+        IF b_JmpAddrErr THEN
+            i_StepAlarmID := 23;               (* DT 비교 주소 범위 초과 *)
+            i_SeqState    := 900;
+        ELSIF b_JmpDoJump THEN
             IF DINT_TO_INT(di_StepP1) < 0 OR DINT_TO_INT(di_StepP1) > 99 THEN
                 i_StepAlarmID  := 95;
                 i_SeqState := 900;
@@ -942,11 +1022,31 @@ CASE i_SeqState OF
         END_IF;
 
 
+    (* ──── [데이터연산 DAT] ──── *)
+    100: (* g_DTPool(DT60000~60099) 에 상수 대입/가산/감산. 한 스캔에 완료 후 다음 스텝 *)
+        (* diParam1=대상 DT주소(60000~60099), diParam2=연산자(0:대입 1:가산 2:감산), diParam3=상수.
+           주소 60000 은 INT(±32767) 초과 → di_StepP1(DINT)을 DINT 로 비교, 인덱스(0~99)만 INT 변환. *)
+        IF di_StepP1 < DINT#60000 OR di_StepP1 > DINT#60099 THEN
+            i_StepAlarmID := 24;   (* DAT 데이터연산 DT 주소 범위 초과 *)
+            i_SeqState    := 900;
+        ELSE
+            i_DatIdx     := DINT_TO_INT(di_StepP1 - DINT#60000);   (* 0~99 *)
+            i_DatOperand := DINT_TO_INT(di_StepP3);                (* 상수 (16비트 부호) *)
+            CASE DINT_TO_INT(di_StepP2) OF
+                0: g_DTPool[i_DatIdx] := i_DatOperand;                        (* 대입 *)
+                1: g_DTPool[i_DatIdx] := g_DTPool[i_DatIdx] + i_DatOperand;   (* 가산 (INT 오버플로 시 래핑) *)
+                2: g_DTPool[i_DatIdx] := g_DTPool[i_DatIdx] - i_DatOperand;   (* 감산 (INT 언더플로 시 래핑) *)
+                ELSE ;   (* 알 수 없는 연산자 → 무동작 *)
+            END_CASE;
+            i_SeqState := 99;
+        END_IF;
+
+
     99: (* 스텝 완료 *)
         b_StepDone := TRUE;
         i_CurrentStep := i_CurrentStep + 1;
         IF i_CurrentStep > 99 THEN i_CurrentStep := 0; END_IF;
-        IF i_ControlCmd = 2 THEN
+        IF (i_ControlCmd = 2) AND (i_ActiveSlotNo <> 39) THEN
             i_CheckRunState := 0;
             i_SeqState      := 1;
         ELSE

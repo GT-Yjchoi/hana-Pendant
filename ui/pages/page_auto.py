@@ -61,7 +61,7 @@ STYLE_RED_ON    = "background-color: #E74C3C; color: white; border: 3px solid #C
 # [기존 유지] 자동/확인운전 전용 오버레이 확인창
 # =========================================================
 class AutoConfirmOverlay(QWidget):
-    def __init__(self, title, message, parent=None):
+    def __init__(self, title, message, parent=None, btn_yes="예", btn_no="아니오"):
         super().__init__(parent)
         # QQuickWidget(QML) 호스트 위 자식 오버레이 첫입력 가로채임 방지 —
         # OverlayDialog 와 동일하게 top-level 프레임리스 모달로.
@@ -106,17 +106,20 @@ class AutoConfirmOverlay(QWidget):
         vbox.addWidget(lbl_msg)
         
         btn_layout = QHBoxLayout()
-        self.btn_no = QPushButton("아니오")
-        self.btn_no.setFixedSize(120, 45)
-        self.btn_no.setStyleSheet("background: #34495E; color: white;")
-        self.btn_no.clicked.connect(self.reject)
+        self.btn_no = None
+        if btn_no:
+            self.btn_no = QPushButton(btn_no)
+            self.btn_no.setFixedSize(120, 45)
+            self.btn_no.setStyleSheet("background: #34495E; color: white;")
+            self.btn_no.clicked.connect(self.reject)
         
-        self.btn_yes = QPushButton("예")
+        self.btn_yes = QPushButton(btn_yes)
         self.btn_yes.setFixedSize(120, 45)
         self.btn_yes.setStyleSheet("background: #2980B9; color: white;")
         self.btn_yes.clicked.connect(self.accept)
         
-        btn_layout.addWidget(self.btn_no)
+        if self.btn_no:
+            btn_layout.addWidget(self.btn_no)
         btn_layout.addWidget(self.btn_yes)
         vbox.addLayout(btn_layout)
         

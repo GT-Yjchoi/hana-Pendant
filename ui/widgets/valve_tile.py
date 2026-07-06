@@ -234,6 +234,7 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
         if self.plc_client and self.plc_client.is_connected:
             try:
                 dt_addr, bit_pos = self._valve_dt_addr(bit_index)
+                print(f"[ValvePanel] toggle request bit={bit_index} DT{dt_addr} bit{bit_pos} checked={checked}")
                 data = self.plc_client.read_words(0x09, dt_addr, 1)
                 if data and len(data) >= 1:
                     current_value = data[0]
@@ -241,9 +242,12 @@ class ValvePanel(QScrollArea):  # [변경] QWidget -> QScrollArea 상속
                         new_value = current_value | (1 << bit_pos)
                     else:
                         new_value = current_value & ~(1 << bit_pos)
-                    self.plc_client.write_words(0x09, dt_addr, [new_value & 0xFFFF])
-                    print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) {'ON' if checked else 'OFF'}")
+                    result = self.plc_client.write_words(0x09, dt_addr, [new_value & 0xFFFF])
+                    print(f"[ValvePanel] 밸브 {bit_index} (DT{dt_addr} bit{bit_pos}) {'ON' if checked else 'OFF'} "
+                          f"{current_value:#06x}->{new_value & 0xFFFF:#06x} write={'OK' if result else 'FAIL'}")
                     self._log_valve_op(bit_index, "ON" if checked else "OFF")
+                else:
+                    print(f"[ValvePanel] read failed DT{dt_addr} for bit={bit_index}")
             except Exception as e:
                 print(f"[ValvePanel] 밸브 제어 실패: {e}")
 

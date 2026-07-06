@@ -1,7 +1,7 @@
 """
 타이머 라이브러리 페이지 QML(GPU) — PageTimer drop-in.
 6열 카드 GPU 스크롤. active 깜빡임/큐잉·_sync_steps_time(PLC patch)·
-reorder 로직은 PageTimer 와 동일(verbatim). 다이얼로그 재사용.
+reorder 로직은 PageTimer 와 동일. 다이얼로그 재사용.
 """
 import os
 import time
@@ -163,6 +163,10 @@ class PageTimerQml(QWidget):
             seq_map[k] = i + 1
         plc = self.plc_client
         patch_count = 0
+        try:
+            from ui.dialogs.sequence_editor_dialog import normalize_step
+        except Exception:
+            normalize_step = None
         for seq_name, steps in self.sequence_data.items():
             if not isinstance(steps, list):
                 continue
@@ -174,16 +178,20 @@ class PageTimerQml(QWidget):
                 if step.get("type") == "TMR" and step.get("timer_ref") == timer_name:
                     step["time"] = new_sec
                     if plc and getattr(plc, 'is_connected', False) and slot_id is not None:
-                        plc.patch_tmr_step_time(slot_id, plc_idx, new_sec)
+                        if normalize_step:
+                            normalize_step(step, self.timer_library)
+                        plc.patch_sequence_step(slot_id, plc_idx, step)
                     patch_count += 1
                 elif step.get("type") == "OUT" and step.get("delay_timer_ref") == timer_name:
                     step["delay_time"] = new_sec
                     if plc and getattr(plc, 'is_connected', False) and slot_id is not None:
-                        plc.patch_out_delay_step_time(slot_id, plc_idx, new_sec)
+                        if normalize_step:
+                            normalize_step(step, self.timer_library)
+                        plc.patch_sequence_step(slot_id, plc_idx, step)
                     patch_count += 1
                 plc_idx += 1
         if patch_count:
-            print(f"[Timer Library] Synced+Patched {patch_count} step(s) referencing '{timer_name}'")
+            print(f"[Timer Library] Synced+StepPatched {patch_count} step(s) referencing '{timer_name}'")
         self.sig_timer_changed.emit()
 
     def _on_reorder_clicked(self):

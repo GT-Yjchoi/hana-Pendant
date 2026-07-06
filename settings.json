@@ -1,5 +1,5 @@
 {
-    "last_recipe": "STD",
+    "last_recipe": "20pcs",
     "plc_ip": "192.168.1.10",
     "plc_port": "60001",
     "axis_uses": [
@@ -33,9 +33,9 @@
         },
         {
             "index": 2,
-            "name": "Y02",
+            "name": "히터",
             "mode": "toggle",
-            "enabled": false,
+            "enabled": true,
             "jog_valve": false,
             "jog_order": -1,
             "order": 2
@@ -114,47 +114,47 @@
         },
         {
             "index": 11,
-            "name": "예비 Y0B",
+            "name": "에어블로우1",
             "mode": "toggle",
-            "enabled": false,
+            "enabled": true,
             "jog_valve": false,
             "jog_order": -1,
             "order": 11
         },
         {
             "index": 12,
-            "name": "예비 Y0C",
+            "name": "에어블로우2",
             "mode": "toggle",
-            "enabled": false,
+            "enabled": true,
             "jog_valve": false,
             "jog_order": -1,
             "order": 12
         },
         {
             "index": 13,
-            "name": "예비 Y0D",
+            "name": "필름하단척 SOL",
             "mode": "toggle",
-            "enabled": false,
+            "enabled": true,
             "jog_valve": false,
             "jog_order": -1,
             "order": 13
         },
         {
             "index": 14,
-            "name": "예비 Y0E",
+            "name": "오프너 승강 SOL",
             "mode": "toggle",
-            "enabled": false,
+            "enabled": true,
             "jog_valve": false,
             "jog_order": -1,
             "order": 14
         },
         {
             "index": 15,
-            "name": "예비 Y0F",
+            "name": "프리오프너2 SOL",
             "mode": "toggle",
-            "enabled": false,
-            "jog_valve": false,
-            "jog_order": -1,
+            "enabled": true,
+            "jog_valve": true,
+            "jog_order": 6,
             "order": 15
         },
         {
@@ -163,25 +163,25 @@
             "mode": "toggle",
             "enabled": true,
             "jog_valve": true,
-            "jog_order": 0,
+            "jog_order": 2,
             "order": 16
         },
         {
             "index": 17,
-            "name": "메인회전CW SOL",
+            "name": "메인회전 CCW SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": true,
-            "jog_order": 1,
+            "jog_valve": false,
+            "jog_order": -1,
             "order": 17
         },
         {
             "index": 18,
-            "name": "메인회전 CCW SOL",
+            "name": "메인회전 CW SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": true,
-            "jog_order": 4,
+            "jog_valve": false,
+            "jog_order": -1,
             "order": 18
         },
         {
@@ -189,8 +189,8 @@
             "name": "씰링회피 SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": true,
-            "jog_order": 5,
+            "jog_valve": false,
+            "jog_order": -1,
             "order": 19
         },
         {
@@ -198,8 +198,8 @@
             "name": "씰링 SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": true,
-            "jog_order": 2,
+            "jog_valve": false,
+            "jog_order": -1,
             "order": 20
         },
         {
@@ -207,8 +207,8 @@
             "name": "필름 트랜스퍼 SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": true,
-            "jog_order": 3,
+            "jog_valve": false,
+            "jog_order": -1,
             "order": 21
         },
         {
@@ -217,7 +217,7 @@
             "mode": "toggle",
             "enabled": true,
             "jog_valve": true,
-            "jog_order": 7,
+            "jog_order": 0,
             "order": 22
         },
         {
@@ -225,17 +225,17 @@
             "name": "스택 포크 SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": true,
-            "jog_order": 6,
+            "jog_valve": false,
+            "jog_order": -1,
             "order": 23
         },
         {
             "index": 24,
-            "name": "필름 프리오픈 SOL",
+            "name": "프리오프너1 SOL",
             "mode": "toggle",
             "enabled": true,
             "jog_valve": true,
-            "jog_order": 8,
+            "jog_order": 5,
             "order": 24
         },
         {
@@ -243,8 +243,8 @@
             "name": "트랜스퍼 흡착SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": true,
-            "jog_order": 9,
+            "jog_valve": false,
+            "jog_order": -1,
             "order": 25
         },
         {
@@ -252,22 +252,22 @@
             "name": "프리오프너 흡착SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": false,
-            "jog_order": -1,
+            "jog_valve": true,
+            "jog_order": 4,
             "order": 26
         },
         {
             "index": 27,
-            "name": "씰링오프너 SOL",
+            "name": "필름수취흡착SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": false,
-            "jog_order": -1,
+            "jog_valve": true,
+            "jog_order": 3,
             "order": 27
         },
         {
             "index": 28,
-            "name": "필름하강공급SOL",
+            "name": "필름씰링오프너SOL",
             "mode": "toggle",
             "enabled": true,
             "jog_valve": false,
@@ -276,7 +276,7 @@
         },
         {
             "index": 29,
-            "name": "필름그리퍼 SOL",
+            "name": "숏필름하강SOL",
             "mode": "toggle",
             "enabled": true,
             "jog_valve": false,
@@ -285,16 +285,16 @@
         },
         {
             "index": 30,
-            "name": "필름수취회전",
+            "name": "필름그리퍼SOL",
             "mode": "toggle",
             "enabled": true,
-            "jog_valve": false,
-            "jog_order": -1,
+            "jog_valve": true,
+            "jog_order": 1,
             "order": 30
         },
         {
             "index": 31,
-            "name": "필름수취흡착",
+            "name": "필름수취회전SOL",
             "mode": "toggle",
             "enabled": true,
             "jog_valve": false,
@@ -304,8 +304,8 @@
     ],
     "io_names": {
         "inputs": [
-            "제품감지파이버",
-            "전자동",
+            "비상정지",
+            "제품감지 파이버",
             "스택L후퇴",
             "스택R후퇴",
             "오프너상승완료",
@@ -316,13 +316,13 @@
             "프리오프너2R",
             "프리오프너1F",
             "프리오프너2F",
-            "프리오프너2R",
+            "프리오프너 흡착완료",
             "필름공급회전",
             "필름수취회전",
             "필름수취흡착",
             "숏오픈위치",
             "롱오픈위치",
-            "필름공급흡착",
+            "트랜스퍼흡착완료",
             "필름수취위치",
             "필름오픈위치",
             "메인로터CW",
@@ -340,7 +340,7 @@
         "outputs": [
             "Y00",
             "Y01",
-            "Y02",
+            "히터",
             "Y03",
             "Y04",
             "Y05",
@@ -349,41 +349,57 @@
             "Y08",
             "예비 Y09",
             "예비 Y0A",
-            "예비 Y0B",
-            "예비 Y0C",
-            "예비 Y0D",
-            "예비 Y0E",
-            "예비 Y0F",
+            "에어블로우1",
+            "에어블로우2",
+            "필름하단척 SOL",
+            "오프너 승강 SOL",
+            "프리오프너2 SOL",
             "메인 그리퍼SOL",
-            "메인회전CW SOL",
             "메인회전 CCW SOL",
+            "메인회전 CW SOL",
             "씰링회피 SOL",
             "씰링 SOL",
             "필름 트랜스퍼 SOL",
             "필름 오프너 SOL",
             "스택 포크 SOL",
-            "필름 프리오픈 SOL",
+            "프리오프너1 SOL",
             "트랜스퍼 흡착SOL",
             "프리오프너 흡착SOL",
-            "씰링오프너 SOL",
-            "필름하강공급SOL",
-            "필름그리퍼 SOL",
-            "필름수취회전",
-            "필름수취흡착"
+            "필름수취흡착SOL",
+            "필름씰링오프너SOL",
+            "숏필름하강SOL",
+            "필름그리퍼SOL",
+            "필름수취회전SOL"
         ]
     },
     "sequence_alarms": {
-        "1": "제품암 상승되지않음",
-        "2": "런너암 상승되지않음",
-        "3": "척1 감지 이상",
-        "4": "척2 감지 이상",
-        "5": "흡착1 감지이상",
-        "6": "흡착2 감지이상",
-        "7": "런너척 감지이상"
+        "1": "필름 공급 흡착 실패",
+        "2": "필름 수취 흡착 실패",
+        "3": "필름 공급 회전실린더 복귀실패",
+        "4": "필름 공급 회전실린더 회전실패",
+        "5": "트랜스퍼 전진실패",
+        "6": "트랜스퍼 복귀실패",
+        "7": "필름그리퍼 상승실패",
+        "8": "필름그리퍼 하강실패",
+        "9": "필름오프너 오픈실패",
+        "10": "필름오프너 클로즈실패",
+        "11": "필름 프리오프너TF 복귀실패",
+        "12": "필름 프리오프너 TR 복귀실패",
+        "13": "필름프리오프너 BF 복귀실패",
+        "14": "필름 프리오프너 BR 복귀실패",
+        "15": "스택포크 복귀실패",
+        "16": "메인그리퍼 회전실패",
+        "17": "메인그리퍼 복귀실패",
+        "18": "메인그리퍼 척 실패",
+        "19": "프리오프너 흡착실패",
+        "20": "필름오프너 상승실패",
+        "21": "필름오프너 하강실패",
+        "22": "씰링실린더 후퇴실패",
+        "23": "씰링 회피실린더 후퇴실패"
     },
     "io_input_names": [
-        "제품감지파이버",
-        "전자동",
+        "비상정지",
+        "제품감지 파이버",
         "스택L후퇴",
         "스택R후퇴",
         "오프너상승완료",
@@ -394,13 +410,13 @@
         "프리오프너2R",
         "프리오프너1F",
         "프리오프너2F",
-        "프리오프너2R",
+        "프리오프너 흡착완료",
         "필름공급회전",
         "필름수취회전",
         "필름수취흡착",
         "숏오픈위치",
         "롱오픈위치",
-        "필름공급흡착",
+        "트랜스퍼흡착완료",
         "필름수취위치",
         "필름오픈위치",
         "메인로터CW",
@@ -484,49 +500,41 @@
         false
     ],
     "point_visibility": {
-        "하강위치": [],
-        "취출위치": [],
-        "대기위치": [],
-        "인발위치": [],
-        "반전위치": [
-            6,
-            7
-        ],
-        "런너개방위치": [
-            1
-        ],
-        "제품개방위치": [
-            0
-        ],
-        "미사용 회피위치": [],
-        "도중개방위치": [
-            4,
-            5
-        ],
-        "2포인트 개방 상승위치": [
-            32
-        ],
-        "2포인트 개방위치": [
-            32
-        ],
-        "주행대기위치": [
-            2
-        ]
+        "필름공급위치": [],
+        "필름수취위치": [],
+        "스택상승위치": [],
+        "스택하강위치": [],
+        "필름고속수취위치": [],
+        "제품그립위치": [],
+        "씰링위치": [],
+        "초기위치": [],
+        "씰링 그립위치": [],
+        "포장저속삽입위치": [],
+        "포장고속삽입위치": []
     },
     "axis_strokes": [
         300.0,
-        425.0,
+        460.0,
         600.0,
-        77.0,
+        100.0,
         0.0,
         0.0,
         0.0,
         0.0
     ],
     "internal_bit_names": {
-        "M00": "감지비트",
-        "M01": "전자동 형개완",
-        "M02": "싸이클시작"
+        "M00": "필름준비완료",
+        "M01": "컨베어 기동",
+        "M31": "4축정지",
+        "M30": "3축정지",
+        "M29": "2축정지",
+        "M28": "1축정지",
+        "M04": "스택완료후 초기화",
+        "M05": "그립대기",
+        "M06": "스택하강완료",
+        "M07": "필름공급시작",
+        "M02": "초기스타트",
+        "M03": "필름공급위치"
     },
     "screen_brightness": 100
 }

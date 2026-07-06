@@ -4,10 +4,11 @@ from datetime import datetime
 from utils.paths import get_recipes_dir
 from utils.json_utils import save_json
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QListWidget, QListWidgetItem, QFrame, QDialog, QSizePolicy,
-    QAbstractItemView, QMessageBox
+    QAbstractItemView, QMessageBox, QLayout
 )
 
 from widgets.glass_card import GlassCard
@@ -40,8 +41,12 @@ class GlassConfirmDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.resize(450, 250)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog
+                            | Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._bg_pixmap = parent.window().grab() if parent else None
         
         lm = LanguageManager.instance() if LanguageManager else None
         
@@ -52,7 +57,8 @@ class GlassConfirmDialog(QDialog):
              txt_yes = lm.get_text("btn_confirm") if lm else "OK"
 
         self.setStyleSheet("""
-            QDialog { background: rgba(30, 35, 45, 250); border: 2px solid rgba(70, 140, 255, 120); border-radius: 14px; }
+            QDialog { background: transparent; }
+            QFrame#DialogFrame { background: rgba(30, 35, 45, 250); border: 2px solid rgba(70, 140, 255, 120); border-radius: 14px; }
             QLabel#Title { color: #468CFF; font-size: 20px; font-weight: 900; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); }
             QLabel#Message { color: white; font-size: 18px; font-weight: bold; line-height: 1.4; }
             QPushButton { border-radius: 8px; font-size: 16px; font-weight: bold; height: 50px; }
@@ -62,7 +68,17 @@ class GlassConfirmDialog(QDialog):
             QPushButton#No:pressed { background: rgba(255, 70, 70, 80); }
         """)
 
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setAlignment(Qt.AlignCenter)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        frame = QFrame()
+        frame.setObjectName("DialogFrame")
+        frame.setFixedSize(450, 250)
+        outer_layout.addWidget(frame)
+
+        layout = QVBoxLayout(frame)
+        layout.setSizeConstraint(QLayout.SetFixedSize)
         layout.setContentsMargins(25, 25, 25, 25)
         layout.setSpacing(20)
 
@@ -93,6 +109,12 @@ class GlassConfirmDialog(QDialog):
         btn_layout.addWidget(self.btn_no)
         btn_layout.addWidget(self.btn_yes)
         layout.addLayout(btn_layout)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        if self._bg_pixmap:
+            painter.drawPixmap(0, 0, self._bg_pixmap)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
 
 
 class PageData(GlassCard):

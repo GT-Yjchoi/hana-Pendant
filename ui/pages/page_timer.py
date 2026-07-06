@@ -438,7 +438,11 @@ class PageTimer(GlassCard):
             except Exception: pass
 
     def _sync_steps_time(self, timer_name, new_sec):
-        """타이머 값 변경 시 해당 타이머를 참조하는 모든 시퀀스 스텝의 time 동기화 + PLC 패치"""
+        """타이머 값 변경 시 참조 스텝 동기화 + PLC 즉시 패치.
+
+        운전 중 타이머 조정이 가능해야 하므로 영향 받은 스텝만 즉시 패치한다.
+        단일 필드 DINT 쓰기 대신 시퀀스 전송과 같은 10워드 인코더를 사용한다.
+        """
         # seq_map 빌드 (시퀀스편집기와 동일한 규칙)
         MONITOR_KEY = "Monitor"
         seq_map = {"Main": 0, MONITOR_KEY: 39}
@@ -449,6 +453,10 @@ class PageTimer(GlassCard):
 
         plc = self.plc_client
         patch_count = 0
+        try:
+            from ui.dialogs.sequence_editor_dialog import normalize_step
+        except Exception:
+            normalize_step = None
 
         for seq_name, steps in self.sequence_data.items():
             if not isinstance(steps, list):
@@ -462,18 +470,22 @@ class PageTimer(GlassCard):
                 if step.get("type") == "TMR" and step.get("timer_ref") == timer_name:
                     step["time"] = new_sec
                     if plc and getattr(plc, 'is_connected', False) and slot_id is not None:
-                        plc.patch_tmr_step_time(slot_id, plc_idx, new_sec)
+                        if normalize_step:
+                            normalize_step(step, self.timer_library)
+                        plc.patch_sequence_step(slot_id, plc_idx, step)
                     patch_count += 1
                 # OUT 스텝의 타이머 기동후출력 (delay_timer_ref)
                 elif step.get("type") == "OUT" and step.get("delay_timer_ref") == timer_name:
                     step["delay_time"] = new_sec
                     if plc and getattr(plc, 'is_connected', False) and slot_id is not None:
-                        plc.patch_out_delay_step_time(slot_id, plc_idx, new_sec)
+                        if normalize_step:
+                            normalize_step(step, self.timer_library)
+                        plc.patch_sequence_step(slot_id, plc_idx, step)
                     patch_count += 1
                 plc_idx += 1
 
         if patch_count:
-            print(f"[Timer Library] Synced+Patched {patch_count} step(s) referencing '{timer_name}'")
+            print(f"[Timer Library] Synced+StepPatched {patch_count} step(s) referencing '{timer_name}'")
 
         # 변경 사항이 있든 없든 타이머 라이브러리 자체는 변했으므로 저장 트리거
         self.sig_timer_changed.emit()

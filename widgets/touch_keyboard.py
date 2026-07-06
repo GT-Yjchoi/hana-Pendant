@@ -2,7 +2,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QLineEdit, QWidget, QGridLayout, QSizePolicy, QStackedWidget, QFrame
+    QLineEdit, QWidget, QGridLayout, QSizePolicy, QStackedWidget, QFrame,
+    QApplication
 )
 
 # =========================================================
@@ -155,7 +156,7 @@ class TouchKeyboard(QDialog):
         # 내용 프레임
         self.content_frame = QFrame()
         self.content_frame.setObjectName("KBFrame")
-        self.content_frame.setFixedSize(860, 540)
+        self.content_frame.setFixedSize(*self._content_size(parent))
         self.content_frame.setStyleSheet("""
             QFrame#KBFrame {
                 background: #1E232D;
@@ -244,6 +245,20 @@ class TouchKeyboard(QDialog):
         bottom_layout.addWidget(btn_ok)
 
         layout.addLayout(bottom_layout)
+
+    def _content_size(self, parent):
+        if parent and parent.window():
+            screen = parent.window().screen()
+        else:
+            screen = QApplication.primaryScreen()
+
+        if screen:
+            rect = screen.availableGeometry()
+            max_w = max(1, rect.width() - 40)
+            max_h = max(1, rect.height() - 40)
+        else:
+            max_w, max_h = 820, 500
+        return min(860, max_w), min(540, max_h)
 
     def paintEvent(self, event):
         painter = QPainter(self)

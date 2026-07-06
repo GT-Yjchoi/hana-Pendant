@@ -25,9 +25,9 @@ USER_ALARMS = {}
 STEP_ALARM_DESCRIPTIONS = {
     21: "POS 축 이동 확인 실패 — BUSY 상승을 감지하지 못함 (RTEX 트리거 거부 또는 전파 실패)",
     22: "패킹 베이스 인덱스 범위 오류 — pack_base 스텝의 point_index 가 0~59 범위를 벗어남",
-    50: "서브 시퀀스 에러 (예약)",
+    50: "병렬 CALL 실패 — 병렬 워커 2개 모두 실행중",
     93: "동기 CALL 스택 오버플로 — 4레벨 초과",
-    94: "CALL 사용 불가 — 이 인스턴스는 b_NoSubCall=TRUE (Monitor 등 최하위 FB)",
+    94: "CALL 사용 불가 — 이 인스턴스는 b_NoSubCall=TRUE (병렬 워커 등)",
     95: "JMP 타겟 스텝 번호 범위 초과 (0~99)",
     96: "CALL 슬롯 번호 범위 초과 (0~39)",
     97: "실행 슬롯 번호 범위 초과 (0~39)",

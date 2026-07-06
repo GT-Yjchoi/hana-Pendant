@@ -374,7 +374,7 @@ class SequenceEditorDialog(QDialog):
         left_box.addWidget(self.step_list)
         
         add_box = QHBoxLayout()
-        for cmd, col in [("POS","#468CFF"), ("OUT","#FFA500"), ("IN","#FF69B4"), ("TMR","#FFFF00"), ("JMP","#00E5FF"), ("CALL","#FF00FF"), ("END","#FF4646")]:
+        for cmd, col in [("POS","#468CFF"), ("OUT","#FFA500"), ("IN","#FF69B4"), ("TMR","#FFFF00"), ("JMP","#00E5FF"), ("CALL","#FF00FF"), ("DAT","#00FF9C"), ("END","#FF4646")]:
             btn = QPushButton(cmd)
             btn.setMinimumHeight(45)
             btn.setStyleSheet(f"border: 2px solid {col}; color: {col}; font-weight: bold;")
@@ -462,6 +462,13 @@ class SequenceEditorDialog(QDialog):
         comment_layout.addStretch()
         self.stack.addWidget(comment_widget)
 
+        # 데이터연산(DAT) 편집 패널 (index 7)
+        if StepUIGenerator:
+            self.stack.addWidget(StepUIGenerator.create_dat_editor(self))
+            if hasattr(self, 'dat_op_grp'):
+                for b in self.dat_op_grp.buttons():
+                    b.toggled.connect(self._on_dat_op_changed)
+
         right_box.addWidget(self.stack)
         content.addWidget(right_widget, 6)
         
@@ -503,7 +510,7 @@ class SequenceEditorDialog(QDialog):
             self.stack.setCurrentIndex(6)
             return
 
-        idx_map = {"POS": 1, "OUT": 2, "IN": 2, "TMR": 3, "JMP": 4, "CALL": 5}
+        idx_map = {"POS": 1, "OUT": 2, "IN": 2, "TMR": 3, "JMP": 4, "CALL": 5, "DAT": 7}
         self.stack.setCurrentIndex(idx_map.get(type_code, 0))
 
         if type_code == "POS":
@@ -738,7 +745,7 @@ class SequenceEditorDialog(QDialog):
                 _ob = self.jmp_dtcmp_op_grp.button(op)
                 if _ob:
                     _ob.setChecked(True)
-                addr = int(data.get("cmp_dt_addr", 100))
+                addr = int(data.get("cmp_dt_addr", 60000))
                 const = int(data.get("cmp_const", 0))
                 if hasattr(self, 'jmp_dt_addr_btn'):
                     self.jmp_dt_addr_btn.setText(f"DT{addr}")
@@ -813,6 +820,21 @@ class SequenceEditorDialog(QDialog):
                     self.rb_call_parallel.setChecked(True)
                 else:
                     self.rb_call_wait.setChecked(True)
+
+        elif type_code == "DAT":
+            # 데이터연산: DT주소(60000~60099) / 연산(0:대입 1:가산 2:감산) / 상수
+            addr = int(data.get("dat_dt_addr", 60000))
+            op = int(data.get("dat_op", 0))
+            const = int(data.get("dat_const", 0))
+            if hasattr(self, 'dat_addr_btn'):
+                self.dat_addr_btn.setText(f"DT{addr}")
+            if hasattr(self, 'dat_op_grp'):
+                _ob = self.dat_op_grp.button(op)
+                if _ob:
+                    _ob.setChecked(True)
+                self._refresh_dat_const_label(op)
+            if hasattr(self, 'dat_const_btn'):
+                self.dat_const_btn.setText(str(const))
 
     def _on_axis_checkbox_changed(self, idx, checked):
         if self._is_loading: return
@@ -1076,7 +1098,7 @@ class SequenceEditorDialog(QDialog):
             d["cond_type"] = "DTCMP"
             op = self.jmp_dtcmp_op_grp.checkedId() if hasattr(self, 'jmp_dtcmp_op_grp') else 3
             d["cmp_op"] = op if op >= 0 else 3
-            d.setdefault("cmp_dt_addr", 100)
+            d.setdefault("cmp_dt_addr", 60000)
             d.setdefault("cmp_const", 0)
             self.stack_cond_source.setCurrentIndex(5)
         else:  # INPUT (X00~X0F)
@@ -1203,7 +1225,7 @@ class SequenceEditorDialog(QDialog):
             target_name = self._get_jmp_target_name(target_idx)
             if step.get("condition") and step.get("cond_type") == "DTCMP":
                 _ops = {0: "=", 1: "≠", 2: ">", 3: "≥", 4: "<", 5: "≤"}
-                expr = (f"DT{int(step.get('cmp_dt_addr', 100))} "
+                expr = (f"DT{int(step.get('cmp_dt_addr', 60000))} "
                         f"{_ops.get(int(step.get('cmp_op', 3)), '?')} "
                         f"{int(step.get('cmp_const', 0))}")
                 label = f"{label}  ({expr} → {target_name})" if target_name else f"{label}  ({expr})"
@@ -1213,6 +1235,12 @@ class SequenceEditorDialog(QDialog):
             ref = step.get("timer_ref", "")
             if ref:
                 label = f"{label}  ({ref})"
+        elif t == "DAT":
+            _ops = {0: "=", 1: "+=", 2: "-="}
+            addr = int(step.get("dat_dt_addr", 60000))
+            op = _ops.get(int(step.get("dat_op", 0)), "=")
+            const = int(step.get("dat_const", 0))
+            label = f"{label}  (DT{addr} {op} {const})"
         return f"[{step_num:02d}] {label}"
 
     def _get_jmp_target_name(self, target_idx):
@@ -1260,7 +1288,7 @@ class SequenceEditorDialog(QDialog):
 
     def _next_step_name(self, type_code):
         """현재 시퀀스 내에서 비어 있는 가장 낮은 번호로 이름 생성"""
-        base_name = {"POS":"위치 이동","OUT":"출력 제어","IN":"입력 대기","TMR":"타이머","JMP":"점프","CALL":"호출","END":"END"}.get(type_code, "Step")
+        base_name = {"POS":"위치 이동","OUT":"출력 제어","IN":"입력 대기","TMR":"타이머","JMP":"점프","CALL":"호출","DAT":"데이터연산","END":"END"}.get(type_code, "Step")
         used = set()
         prefix = base_name + "_"
         for step in self.sequences.get(self.current_seq_key, []):
@@ -1331,14 +1359,15 @@ class SequenceEditorDialog(QDialog):
             p_names = sorted(list(self.points_library.keys()))
             data["point_name"] = p_names[0] if p_names else final_name
             if not p_names: self.points_library[final_name] = {"coords": [0.0]*8, "speeds": [100.0]*8}
-            # ★ active_axes로 통일 (기본값: 모든 축 체크 해제)
-            data["active_axes"] = [False] * 8
+            # 새 POS는 연결된 축을 기본 선택해 무축 POS가 그대로 전송되는 것을 방지한다.
+            data["active_axes"] = list(self.enabled_axes[:8])
         elif type_code == "OUT": data["port"]=0; data["on"]=True; data["out_type"]=0; data["delay_enable"]=False
         elif type_code == "IN": data["port"]=0; data["on"]=True; data["in_type"]=0
         elif type_code == "TMR": data["time"] = 1.0
         elif type_code == "JMP": data.update({"target_idx":0, "condition":False,
-                                               "cmp_dt_addr":100, "cmp_op":3, "cmp_const":0})
+                                               "cmp_dt_addr":60000, "cmp_op":3, "cmp_const":0})
         elif type_code == "CALL": data["target_seq"] = ""
+        elif type_code == "DAT": data.update({"dat_dt_addr":60000, "dat_op":0, "dat_const":0})
         elif type_code == "END": data["name"] = "END"
         
         # ★ 선택된 스텝 바로 아래에 삽입
@@ -1413,69 +1442,82 @@ class SequenceEditorDialog(QDialog):
             else:
                 QMessageBox.information(self, "전송 완료", "PLC 전송 완료")
         else:
+            msg = getattr(self, "_last_transfer_error", "통신 상태를 확인하세요.")
             if DarkMessageDialog:
-                DarkMessageDialog("전송 실패", "통신 상태를 확인하세요.", is_error=True, parent=self).exec()
+                DarkMessageDialog("전송 실패", msg, is_error=True, parent=self).exec()
             else:
-                QMessageBox.warning(self, "전송 실패", "통신 상태를 확인하세요")
+                QMessageBox.warning(self, "전송 실패", msg)
 
     def _on_save_clicked(self):
         if self.plc_client:
             if not self._send_all_sequences_to_plc():
+                msg = getattr(self, "_last_transfer_error", "전송 실패. 그래도 저장하고 닫을까요?")
                 if DarkConfirmDialog:
-                    if DarkConfirmDialog("전송 실패", "전송 실패. 그래도 저장하고 닫을까요?", self).exec() != QDialog.Accepted:
+                    if DarkConfirmDialog("전송 실패", f"{msg}\n그래도 저장하고 닫을까요?", self).exec() != QDialog.Accepted:
                         return
                 else:
-                    if QMessageBox.question(self, "전송 실패", "저장하고 닫을까요?") != QMessageBox.Yes:
+                    if QMessageBox.question(self, "전송 실패", f"{msg}\n저장하고 닫을까요?") != QMessageBox.Yes:
                         return
         self.accept()
 
     def _send_all_sequences_to_plc(self):
-        if not self.plc_client or not self.plc_client.is_connected: return False
+        self._last_transfer_error = ""
+        if not self.plc_client or not self.plc_client.is_connected:
+            self._last_transfer_error = "PLC가 연결되어 있지 않습니다."
+            return False
+        if not self.plc_client.begin_recipe_transfer():
+            mode = self.plc_client.current_op_status() if hasattr(self.plc_client, "current_op_status") else 0
+            mode_name = "자동운전" if mode == 1 else "확인운전" if mode == 2 else "운전"
+            self._last_transfer_error = f"{mode_name} 중에는 시퀀스를 전송할 수 없습니다.\n정지 후 다시 전송해주세요."
+            return False
 
-        # ★ 클릭 여부와 무관하게 전 스텝 정규화 (옛 필드/누락 필드 보정)
-        normalize_all_sequences(self.sequences, self.timer_library)
+        try:
+            # ★ 클릭 여부와 무관하게 전 스텝 정규화 (옛 필드/누락 필드 보정)
+            normalize_all_sequences(self.sequences, self.timer_library)
 
-        # ★ 디버그: 전송할 시퀀스 데이터 확인
-        print(f"\n[시퀀스 전송] 전송할 시퀀스 데이터:")
-        for seq_name, steps in self.sequences.items():
-            print(f"  시퀀스: {seq_name}")
-            for i, step in enumerate(steps):
-                if step.get("type") in ["OUT", "IN"]:
-                    print(f"    Step {i}: {step.get('type')} - port={step.get('port', 'NONE')}, on={step.get('on', 'NONE')}, name={step.get('name', 'NONE')}")
+            # ★ 디버그: 전송할 시퀀스 데이터 확인
+            print(f"\n[시퀀스 전송] 전송할 시퀀스 데이터:")
+            for seq_name, steps in self.sequences.items():
+                print(f"  시퀀스: {seq_name}")
+                for i, step in enumerate(steps):
+                    if step.get("type") in ["OUT", "IN"]:
+                        print(f"    Step {i}: {step.get('type')} - port={step.get('port', 'NONE')}, on={step.get('on', 'NONE')}, name={step.get('name', 'NONE')}")
 
-        sorted_p_names = sorted(list(self.points_library.keys()))
-        point_map = {name: i for i, name in enumerate(sorted_p_names)}
-        seq_map = {"Main": 0, MONITOR_SEQ_KEY: 39}
-        reserved = set(seq_map.keys())
-        sub = sorted([k for k in self.sequences.keys() if k not in reserved])
-        for i, k in enumerate(sub): seq_map[k] = i + 1
-        success = True
-        for seq_name, slot_id in seq_map.items():
-            raw_steps = self.sequences.get(seq_name, [])
+            sorted_p_names = sorted(list(self.points_library.keys()))
+            point_map = {name: i for i, name in enumerate(sorted_p_names)}
+            seq_map = {"Main": 0, MONITOR_SEQ_KEY: 39}
+            reserved = set(seq_map.keys())
+            sub = sorted([k for k in self.sequences.keys() if k not in reserved])
+            for i, k in enumerate(sub): seq_map[k] = i + 1
+            success = True
+            for seq_name, slot_id in seq_map.items():
+                raw_steps = self.sequences.get(seq_name, [])
 
-            # COMMENT 제외 인덱스 재매핑 (list_idx → plc_step_idx)
-            plc_idx_map = {}
-            plc_idx = 0
-            for orig_idx, step in enumerate(raw_steps):
-                if step.get("type") != "COMMENT":
-                    plc_idx_map[orig_idx] = plc_idx
-                    plc_idx += 1
+                # COMMENT 제외 인덱스 재매핑 (list_idx → plc_step_idx)
+                plc_idx_map = {}
+                plc_idx = 0
+                for orig_idx, step in enumerate(raw_steps):
+                    if step.get("type") != "COMMENT":
+                        plc_idx_map[orig_idx] = plc_idx
+                        plc_idx += 1
 
-            plc_steps = []
-            for orig_idx, step in enumerate(raw_steps):
-                if step.get("type") == "COMMENT":
-                    continue  # 전송 제외
-                s_data = copy.deepcopy(step)
-                if s_data.get("type") == "POS":
-                    s_data["point_index"] = point_map.get(s_data.get("point_name"), 0)
-                elif s_data.get("type") == "CALL":
-                    s_data["sequence_id"] = seq_map.get(s_data.get("target_seq"), 0)
-                elif s_data.get("type") == "JMP":
-                    s_data["target_step"] = plc_idx_map.get(s_data.get("target_idx", 0), 0)
-                plc_steps.append(s_data)
-            if not self.plc_client.send_sequence_to_slot(slot_id, plc_steps): success = False
-        if not self.plc_client.send_all_points(self.points_library, sorted_p_names): success = False
-        return success
+                plc_steps = []
+                for orig_idx, step in enumerate(raw_steps):
+                    if step.get("type") == "COMMENT":
+                        continue  # 전송 제외
+                    s_data = copy.deepcopy(step)
+                    if s_data.get("type") == "POS":
+                        s_data["point_index"] = point_map.get(s_data.get("point_name"), 0)
+                    elif s_data.get("type") == "CALL":
+                        s_data["sequence_id"] = seq_map.get(s_data.get("target_seq"), 0)
+                    elif s_data.get("type") == "JMP":
+                        s_data["target_step"] = plc_idx_map.get(s_data.get("target_idx", 0), 0)
+                    plc_steps.append(s_data)
+                if not self.plc_client.send_sequence_to_slot(slot_id, plc_steps): success = False
+            if not self.plc_client.send_all_points(self.points_library, sorted_p_names): success = False
+            return success
+        finally:
+            self.plc_client.end_recipe_transfer()
 
     def get_sequence_data(self):
         for seq in self.sequences.values():
@@ -2021,10 +2063,11 @@ class SequenceEditorDialog(QDialog):
         """JMP 데이터값 비교 - DT 주소 입력 (숫자 키패드)."""
         if self.active_step_data is None or NumericKeypad is None:
             return
-        cur = int(self.active_step_data.get("cmp_dt_addr", 100))
-        dlg = NumericKeypad("비교할 DT 주소 (0~9999)", cur, 0, self)
+        cur = int(self.active_step_data.get("cmp_dt_addr", 60000))
+        dlg = NumericKeypad("비교할 DT 주소 (60000~60099)", cur, 0, self)
         if dlg.exec() == QDialog.Accepted:
-            addr = max(0, min(9999, int(dlg.get_value())))
+            # PLC DTPool(g_DTPool AT DT60000, 100워드) 범위로 클램프
+            addr = max(60000, min(60099, int(dlg.get_value())))
             self.active_step_data["cmp_dt_addr"] = addr
             if hasattr(self, 'jmp_dt_addr_btn'):
                 self.jmp_dt_addr_btn.setText(f"DT{addr}")
@@ -2040,6 +2083,51 @@ class SequenceEditorDialog(QDialog):
             self.active_step_data["cmp_const"] = val
             if hasattr(self, 'jmp_dt_const_btn'):
                 self.jmp_dt_const_btn.setText(str(val))
+
+    # ── 데이터연산(DAT) ──────────────────────────────────────────
+    def _open_dat_addr(self):
+        """DAT - 대상 DT 주소 입력 (60000~60099 클램프)."""
+        if self.active_step_data is None or NumericKeypad is None:
+            return
+        cur = int(self.active_step_data.get("dat_dt_addr", 60000))
+        dlg = NumericKeypad("대상 DT 주소 (60000~60099)", cur, 0, self)
+        if dlg.exec() == QDialog.Accepted:
+            addr = max(60000, min(60099, int(dlg.get_value())))  # g_DTPool 범위
+            self.active_step_data["dat_dt_addr"] = addr
+            if hasattr(self, 'dat_addr_btn'):
+                self.dat_addr_btn.setText(f"DT{addr}")
+
+    def _open_dat_const(self):
+        """DAT - 상수 입력 (부호 허용)."""
+        if self.active_step_data is None or NumericKeypad is None:
+            return
+        cur = int(self.active_step_data.get("dat_const", 0))
+        op = int(self.active_step_data.get("dat_op", 0))
+        title = {0: "대입 값 입력", 1: "가산 값 입력", 2: "감산 값 입력"}.get(op, "상수 값 입력")
+        dlg = NumericKeypad(title, cur, 0, self)
+        if dlg.exec() == QDialog.Accepted:
+            val = int(dlg.get_value())
+            self.active_step_data["dat_const"] = val
+            if hasattr(self, 'dat_const_btn'):
+                self.dat_const_btn.setText(str(val))
+
+    def _refresh_dat_const_label(self, op=None):
+        if not hasattr(self, 'dat_const_label'):
+            return
+        if op is None:
+            op = self.dat_op_grp.checkedId() if hasattr(self, 'dat_op_grp') else 0
+        label = {0: "대입 값", 1: "가산 값", 2: "감산 값"}.get(op, "상수 값")
+        self.dat_const_label.setText(label)
+
+    def _on_dat_op_changed(self, checked=None):
+        """DAT - 연산자(대입/가산/감산) 변경 → active_step_data 기록."""
+        if self._is_loading: return
+        if self.active_step_data is None: return
+        if self.active_step_data.get("type") != "DAT": return
+        if hasattr(self, 'dat_op_grp'):
+            op = self.dat_op_grp.checkedId()
+            self.active_step_data["dat_op"] = op if op >= 0 else 0
+            self._refresh_dat_const_label(self.active_step_data["dat_op"])
 
     def _open_jmp_mode_selector(self):
         """JMP 조건 - 모드 선택 팝업"""
