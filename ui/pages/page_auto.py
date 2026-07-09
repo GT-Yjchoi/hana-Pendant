@@ -189,11 +189,11 @@ class InfoPanel(QWidget):
         self.info_labels = {}
         self.name_labels = {}
         
-        # 항목: 포장횟수, 예약알람, 포장시간
+        # 항목: 스택수량, 포장수량, 예약수량
         items = [
-            ("lbl_extract_cnt", "cnt", "0"),
-            ("lbl_reserve_cnt", "rsv", "0"), # 예약알람 추가
-            ("lbl_mold_time", "mold", "0.0"),
+            ("스택수량", "cnt", "0"),
+            ("포장수량", "rsv", "0"),
+            ("예약수량", "mold", "0"),
         ]
         
         for lang_key, data_key, def_val in items:
@@ -208,21 +208,17 @@ class InfoPanel(QWidget):
         box_layout.addStretch(1)
         self.update_language()
     
-    def update_data(self, count, rsv_count, mold_t):
-        self.info_labels["cnt"].setText(f"{count} 회")
-        self.info_labels["rsv"].setText(f"{rsv_count} 회")
-        self.info_labels["mold"].setText(f"{mold_t:.1f} 초")
+    def update_data(self, stack_count, pack_count, reserve_count):
+        self.info_labels["cnt"].setText(f"{stack_count} 회")
+        self.info_labels["rsv"].setText(f"{pack_count} 회")
+        self.info_labels["mold"].setText(f"{reserve_count} 회")
 
     def update_language(self):
         lm = LanguageManager.instance()
         self.lbl_title.setText(lm.get_text("info_title"))
         
         for k, lbl in self.name_labels.items():
-            text = lm.get_text(k)
-            # 언어팩에 키가 없을 경우 기본값 처리
-            if k == "lbl_reserve_cnt" and (text == k or text == ""):
-                text = "예약알람" 
-            lbl.setText(text)
+            lbl.setText(k)
 
 # [메인 페이지] PageAuto
 class PageAuto(GlassCard):
@@ -472,13 +468,11 @@ class PageAuto(GlassCard):
             self.btn_sub_start.setStyleSheet("background: #27AE60; color: white; border: 2px solid white;" if check_run_state == 1 else "background: #34495E; color: #BBB;")
             self.btn_sub_pause.setStyleSheet("background: #E67E22; color: white; border: 2px solid white;" if check_run_state == 0 else "background: #34495E; color: #BBB;")
         
-        # 4. 생산 정보 (예약알람 포함)
-        reserve_cnt = data.get('setting_count', 0) 
-        
+        # 4. 생산 정보
         self.info_panel.update_data(
-            data.get('total_count', 0),
-            reserve_cnt,
-            data.get('mold_time', 0.0),
+            data.get('stack_count', data.get('total_count', 0)),
+            data.get('pack_count', 0),
+            data.get('reserve_count', data.get('setting_count', 0)),
         )
 
     def update_language(self, lang_code=None):

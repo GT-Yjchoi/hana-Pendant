@@ -79,11 +79,11 @@ class AutoBackend(QObject):
                 return fb
             t = lm.get_text(k)
             return fb if (t == k or t == "") else t
-        c, r, mt = self._p._info
+        stack, pack, reserve = self._p._info
         return [
-            {"name": nm("lbl_extract_cnt", "추출수량"), "val": f"{c} 회"},
-            {"name": nm("lbl_reserve_cnt", "예약알람"), "val": f"{r} 회"},
-            {"name": nm("lbl_mold_time", "성형시간"), "val": f"{mt:.1f} 초"},
+            {"name": "스택수량", "val": f"{stack} 회"},
+            {"name": "포장수량", "val": f"{pack} 회"},
+            {"name": "예약수량", "val": f"{reserve} 회"},
         ]
 
     def _home_text(self):
@@ -320,9 +320,9 @@ class PageAutoQml(QWidget):
 
         self.current_mode = mode
         self._check_run_state = data.get('check_run_status', 0)
-        self._info = (data.get('total_count', 0),
-                      data.get('setting_count', 0),
-                      data.get('mold_time', 0.0))
+        self._info = (data.get('stack_count', data.get('total_count', 0)),
+                      data.get('pack_count', 0),
+                      data.get('reserve_count', data.get('setting_count', 0)))
         self._be.changed.emit()
 
     def _refresh_axis_visibility(self):

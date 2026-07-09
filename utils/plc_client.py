@@ -631,27 +631,31 @@ class PLCClient(QObject):
         res['monitor_slot'] = raw[34] if len(raw) > 34 else 0  # DT134
         res['monitor_step'] = raw[35] if len(raw) > 35 else 0  # DT135
 
-        # ===== 11. 총 취출 횟수 (DT136~137) =====
-        # DINT: 완료된 사이클 수
+        # ===== 11. 자동운전 생산 정보 (DINT) =====
+        # DT136~137: 스택수량, DT138~139: 포장수량, DT140~141: 예약수량
         if len(raw) > 37:
             res['total_count'] = raw[36] | (raw[37] << 16)  # DT136-137
+            res['stack_count'] = res['total_count']
         else:
             res['total_count'] = 0
+            res['stack_count'] = 0
 
-        # ===== 12. 현재 성형 시간 (DT138~139) =====
-        # DINT: 사이클 타임 (0.1초 단위)
         if len(raw) > 39:
             v = raw[38] | (raw[39] << 16)
+            res['pack_count'] = v
             res['mold_time'] = v / 10.0  # 0.1초 → 초 변환
         else:
+            res['pack_count'] = 0
             res['mold_time'] = 0.0
 
-        # ===== 13. 현재 취출 시간 (DT140~141) =====
-        # DINT: 로봇 동작 타임 (0.1초 단위)
         if len(raw) > 41:
             v = raw[40] | (raw[41] << 16)
+            res['reserve_count'] = v
+            res['setting_count'] = v
             res['takeout_time'] = v / 10.0  # 0.1초 → 초 변환
         else:
+            res['reserve_count'] = 0
+            res['setting_count'] = 0
             res['takeout_time'] = 0.0
 
         # ===== 14. 축 알람 상태 (DT142) + 축별 에러코드 (DT143~DT158) =====
